@@ -1,0 +1,36 @@
+{
+    "wecom": {
+        "cid": "${WECOM_CID}",
+        "secret": "${WECOM_SECRET}",
+        "aid": "${WECOM_AID}"
+    },
+    "ai": {
+        "api_url": "${AI_API_URL}",
+        "api_key": "${AI_API_KEY}",
+        "model": "${AI_MODEL}",
+        "system_prompt": "你是一个专业的营销情报分析师。你的任务是从给定的新闻列表中，筛选出真正有价值的营销行业动态，并以简洁专业的中文进行摘要。\n\n筛选标准：\n- 与营销、广告、品牌、社交媒体、消费者行为、AI营销工具相关\n- 有实质性的行业影响或数据支撑\n- 排除纯娱乐、政治、体育等无关内容\n\n输出格式要求：\n- 每条新闻用 ### [精简标题](原文链接) 作为标题\n- 标题下方用 2-3 句话概括核心事实和营销意义\n- 多条新闻之间用空行分隔"
+    },
+    "feeds": {
+        "📢 测试板块-营销行业": {
+            "rss": [
+                "https://rsshub.app/36kr/motif/327685836801",
+                "https://rsshub.app/socialbeta"
+            ],
+            "keywords": [],
+            "prompt": "只保留与数字营销、品牌营销、内容营销、社交媒体营销直接相关的内容。排除融资新闻、人事变动、纯技术开发类内容。"
+        },
+        "🤖 测试板块-AI工具": {
+            "rss": [
+                "https://rsshub.app/jike/topic/6360f06567220e3633215234"
+            ],
+            "keywords": [],
+            "prompt": "只保留AI工具的实际应用案例、新功能发布、对营销效率的影响。排除纯学术研究和底层技术讨论。"
+        }
+    },
+    "settings": {
+        "report_title": "🧪 [TEST] 营销情报简报 | {date}",
+        "empty_message": "📭 [TEST] 今日测试运行：全网无重要更新。",
+        "show_footer": true,
+        "footer_text": "👀 [本地测试环境 - 非生产推送]"
+    }
+}

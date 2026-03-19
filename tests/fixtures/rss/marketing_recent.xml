@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>营销行业测试源（近期文章）</title>
+    <link>https://example-marketing.com</link>
+    <description>用于本地测试的模拟营销行业 RSS 源，包含近期文章</description>
+    <item>
+      <title>微信视频号广告 ROI 提升 30%，品牌主加速布局</title>
+      <link>https://example-marketing.com/article/001</link>
+      <description>据最新数据，微信视频号信息流广告的平均 ROI 较去年同期提升 30%，多个快消品牌已将视频号广告预算占比提升至 20% 以上。</description>
+      <pubDate>TODAY_PLACEHOLDER</pubDate>
+    </item>
+    <item>
+      <title>小红书推出品牌号新功能：支持直链跳转电商平台</title>
+      <link>https://example-marketing.com/article/002</link>
+      <description>小红书宣布品牌号新增外链功能，允许认证品牌在笔记中直接添加跳转至淘宝、京东等电商平台的链接，打通种草到拔草的完整链路。</description>
+      <pubDate>TODAY_PLACEHOLDER</pubDate>
+    </item>
+    <item>
+      <title>AI 文案工具月活突破 500 万，营销人效率提升显著</title>
+      <link>https://example-marketing.com/article/003</link>
+      <description>国内某头部 AI 文案生成工具月活用户突破 500 万，调研显示使用该工具的营销团队平均内容产出效率提升 40%，单条文案创作时间从 2 小时压缩至 15 分钟。</description>
+      <pubDate>TODAY_PLACEHOLDER</pubDate>
+    </item>
+  </channel>
+</rss>

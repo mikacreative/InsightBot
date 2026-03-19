@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>营销行业测试源（过期文章）</title>
+    <link>https://example-marketing.com</link>
+    <description>用于本地测试的模拟营销行业 RSS 源，所有文章均已超过 24 小时</description>
+    <item>
+      <title>三天前的旧文章：某品牌发布年度营销报告</title>
+      <link>https://example-marketing.com/article/old001</link>
+      <description>这是一篇三天前发布的文章，应该被时效性过滤器拦截。</description>
+      <pubDate>Mon, 16 Mar 2026 10:00:00 +0800</pubDate>
+    </item>
+    <item>
+      <title>一周前的旧文章：双十一营销复盘</title>
+      <link>https://example-marketing.com/article/old002</link>
+      <description>这是一篇一周前发布的文章，应该被时效性过滤器拦截。</description>
+      <pubDate>Mon, 12 Mar 2026 09:00:00 +0800</pubDate>
+    </item>
+  </channel>
+</rss>

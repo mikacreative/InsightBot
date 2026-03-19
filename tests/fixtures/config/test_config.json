@@ -1,0 +1,31 @@
+{
+    "wecom": {
+        "cid": "test_corpid",
+        "secret": "test_secret",
+        "aid": "1000001"
+    },
+    "ai": {
+        "api_url": "https://api.test-llm.com/v1/chat/completions",
+        "api_key": "test-api-key-12345",
+        "model": "test-model",
+        "system_prompt": "你是一个营销情报分析师，负责筛选和摘要营销行业新闻。"
+    },
+    "feeds": {
+        "📢 营销行业": {
+            "rss": ["https://example-marketing.com/feed.xml"],
+            "keywords": [],
+            "prompt": "只保留与数字营销直接相关的内容。"
+        },
+        "🤖 AI工具": {
+            "rss": ["https://example-ai.com/feed.xml"],
+            "keywords": ["AI营销", "智能广告"],
+            "prompt": "只保留AI工具的实际应用案例。"
+        }
+    },
+    "settings": {
+        "report_title": "🧪 [TEST] 营销情报简报 | {date}",
+        "empty_message": "📭 [TEST] 今日无重要更新。",
+        "show_footer": true,
+        "footer_text": "👀 [测试环境]"
+    }
+}
