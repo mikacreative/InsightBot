@@ -1,0 +1,92 @@
+2026-03-07 10:00:01 [INFO] ========================================
+2026-03-07 10:00:01 [INFO] 🚀 === 营销情报抓取任务开始 ===
+2026-03-07 10:00:01 [INFO] ========================================
+2026-03-07 10:00:02 [INFO] 
+📁 正在处理板块: 【💡 营销行业】
+2026-03-07 10:00:02 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:02 [INFO]   📥 抓取命中 -> 文章频道 - 跟着瑞幸买联名的人，堪比四百块买黄金的那批人 (https://www.digitaling.com/articles/1466765.html)
+2026-03-07 10:00:02 [INFO] ✅ RSS源 [https://www.digitaling.com/rss] 抓取完成，共获得 1 条有效资讯
+2026-03-07 10:00:04 [INFO] ✅ RSS源 [http://111.229.166.6:1200/topys] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:05 [INFO]   📥 抓取命中 -> Netflix enriches ad-targeting prowess with Amazon, Yahoo audience data (https://www.marketingdive.com/news/netflix-enriches-ad-targeting-prowess-with-amazon-yahoo-audience-data/814030/)
+2026-03-07 10:00:05 [INFO]   📥 抓取命中 -> Retail and grocery brands dominate ChatGPT ads (https://www.marketingdive.com/news/retail-and-grocery-brands-dominate-chatgpt-ads/814024/)
+2026-03-07 10:00:05 [INFO]   📥 抓取命中 -> Why Unleashed Brands tapped VaynerX to pump up social media marketing (https://www.marketingdive.com/news/why-unleashed-brands-tapped-vaynerx-to-pump-up-social-media-marketing/813860/)
+2026-03-07 10:00:05 [INFO]   📥 抓取命中 -> Influencer pay lacks transparency: Here’s what the numbers say (https://www.marketingdive.com/news/influencer-pay-lacks-transparency-heres-what-the-numbers-say/813822/)
+2026-03-07 10:00:05 [INFO] ✅ RSS源 [https://www.marketingdive.com/feeds/news/] 抓取完成，共获得 4 条有效资讯
+2026-03-07 10:00:05 [INFO] ✅ RSS源 [http://localhost:1200/morketing/1] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:06 [INFO] ✅ RSS源 [https://walkthechat.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:06 [INFO]   📥 抓取命中 -> The Trade Desk CEO Jeff Green Dropped $148M on Company Stock (https://www.adweek.com/media/the-trade-desk-ceo-jeff-green-dropped-148m-on-company-stock/)
+2026-03-07 10:00:06 [INFO]   📥 抓取命中 -> The Role of Purpose in Marketing Strategy with Yoobi&#8217;s Sarah Leinberger (https://www.adweek.com/brand-marketing/the-role-of-purpose-in-marketing-strategy-with-yoobis-sarah-leinberger/)
+2026-03-07 10:00:06 [INFO]   📥 抓取命中 -> Why So Many Brands Are Throwing Shade at Their Competitors Right Now (https://www.adweek.com/brand-marketing/why-so-many-brands-are-throwing-shade-at-their-competitors-right-now/)
+2026-03-07 10:00:06 [INFO]   📥 抓取命中 -> Ticker: Gayle King to Remain at CBS Mornings, EP Departs (https://www.adweek.com/tvnewser/ticker-gayle-king-to-remain-at-cbs-mornings-ep-departs/)
+2026-03-07 10:00:06 [INFO]   📥 抓取命中 -> Streaming Ratings, Week of Feb. 2: Netflix’s The Lincoln Lawyer Makes Its Case (https://www.adweek.com/convergent-tv/streaming-ratings-week-of-february-2-2026/)
+2026-03-07 10:00:06 [INFO]   📥 抓取命中 -> DoorDash CMO Kofi Amoo-Gottfried Will Step Down After 7 Years (https://www.adweek.com/commerce/doordash-cmo-kofi-amoo-gottfried-will-step-down-after-7-years/)
+2026-03-07 10:00:06 [INFO] ✅ RSS源 [https://www.adweek.com/feed/] 抓取完成，共获得 6 条有效资讯
+2026-03-07 10:00:08 [INFO] ✅ RSS源 [https://blog.hubspot.com/marketing/rss.xml] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:11 [INFO] ✅ RSS源 [https://daoinsights.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:11 [INFO] ✅ RSS源 [https://www.meihua.info/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:17 [INFO] ✅ RSS源 [https://www.motive.com.tw/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:17 [INFO] ⏳ 板块 【💡 营销行业】 排重后剩余 11 条数据交由 AI 筛选...
+2026-03-07 10:00:17 [INFO] 🤖 开始呼叫 AI 分析 [💡 营销行业] (共 11 条信源喂给AI)
+2026-03-07 10:00:25 [INFO] 📤 推送板块 【💡 营销行业】 成功
+2026-03-07 10:00:28 [INFO] 
+📁 正在处理板块: 【 🤖 数智前沿】
+2026-03-07 10:00:29 [INFO]   📥 抓取命中 -> 9点1氪丨贾国龙卸任西贝CEO；字节跳动启动最大规模转正实习生招聘；OpenClaw爆火，程序员上门安装收费500元 (https://www.36kr.com/p/3712170172264838)
+2026-03-07 10:00:29 [INFO]   📥 抓取命中 -> 西贝命悬一线：贾国龙卸任CEO、大幅关店裁员｜独家 (https://www.36kr.com/p/3711330673242249)
+2026-03-07 10:00:29 [INFO] ✅ RSS源 [http://localhost:1200/36kr/hot-list] 抓取完成，共获得 2 条有效资讯
+2026-03-07 10:00:34 [INFO]   📥 抓取命中 -> 冰的表面长什么样？科学家用AI终于看清了 (https://www.mittrchina.com/news/detail/16032)
+2026-03-07 10:00:34 [INFO]   📥 抓取命中 -> 科学家造出“细胞胶囊”：把单个细胞装进去，看它们怎么长大、怎么变坏 (https://www.mittrchina.com/news/detail/16031)
+2026-03-07 10:00:34 [INFO] ✅ RSS源 [http://localhost:1200/mittrchina/index] 抓取完成，共获得 2 条有效资讯
+2026-03-07 10:00:36 [INFO]   📥 抓取命中 -> 林俊旸离职风波始末：AI 技术负责人与大公司的成长与分歧 (https://www.latepost.com/news/dj_detail?id=3448)
+2026-03-07 10:00:36 [INFO] ✅ RSS源 [http://localhost:1200/latepost] 抓取完成，共获得 1 条有效资讯
+2026-03-07 10:00:40 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:40 [INFO] ✅ RSS源 [https://localhost:1200/sspai/matrix] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:58 [INFO] ✅ RSS源 [http://localhost:1200/woshipm/popular/daily] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:00:59 [INFO] ✅ RSS源 [http://localhost:1200/36kr/motif/327685552129] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:01:01 [INFO] ✅ RSS源 [http://localhost:1200/huxiu/tag/103] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:01:01 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/79] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:01:34 [INFO] ✅ RSS源 [http://localhost:1200/scmp/tech] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:01:36 [ERROR] ⚠️ RSS抓取失败 [https://technode.com/feed/]: Remote end closed connection without response
+2026-03-07 10:01:36 [INFO]   📥 抓取命中 -> 任天堂：2025年Switch2美国销量440万台创销售速度纪录 (http://www.199it.com/archives/1814928.html)
+2026-03-07 10:01:36 [INFO]   📥 抓取命中 -> OpenAI：2026年GPT-5.4发布，电脑操控任务成功率75%超人类 (http://www.199it.com/archives/1814932.html)
+2026-03-07 10:01:36 [INFO]   📥 抓取命中 -> 京东集团：2025年全年收入13091亿元，同比增长加速 (http://www.199it.com/archives/1814934.html)
+2026-03-07 10:01:36 [INFO]   📥 抓取命中 -> 本田中国：2026年2月销量28780辆，同比下滑15.0% (http://www.199it.com/archives/1814936.html)
+2026-03-07 10:01:36 [INFO]   📥 抓取命中 -> CADPA：2025年中国游戏市场支出3507.89亿元 同比增长7.68% (http://www.199it.com/archives/1814940.html)
+2026-03-07 10:01:36 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 5 条有效资讯
+2026-03-07 10:01:36 [INFO] ⏳ 板块 【 🤖 数智前沿】 排重后剩余 10 条数据交由 AI 筛选...
+2026-03-07 10:01:36 [INFO] 🤖 开始呼叫 AI 分析 [ 🤖 数智前沿] (共 10 条信源喂给AI)
+2026-03-07 10:01:38 [INFO] 🈳 AI 判定 [ 🤖 数智前沿] 无合格内容，已拦截。
+2026-03-07 10:01:38 [INFO] 
+📁 正在处理板块: 【📢 政策导向】
+2026-03-07 10:01:42 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcjd] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:01:43 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcwj] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:02:13 [INFO]   📥 抓取命中 -> Weekend Long Read: In a Tumultuous Madagascar, Chinese Expats Find Opportunity in Vanilla (https://www.caixinglobal.com/2026-03-07/weekend-long-read-in-a-tumultuous-madagascar-chinese-expats-find-opportunity-in-vanilla-102420315.html)
+2026-03-07 10:02:13 [INFO]   📥 抓取命中 -> War Risk Insurance Returns to Strait of Hormuz — at a Price (https://www.caixinglobal.com/2026-03-07/war-risk-insurance-returns-to-strait-of-hormuz-at-a-price-102420420.html)
+2026-03-07 10:02:13 [INFO]   📥 抓取命中 -> Partial Flight Resumption Opens Evacuation Window in Tense Middle East (https://www.caixinglobal.com/2026-03-07/partial-flight-resumption-opens-evacuation-window-in-tense-middle-east-102420418.html)
+2026-03-07 10:02:13 [INFO]   📥 抓取命中 -> China Plans ChiNext Board Reform to Boost Funding for Innovative Firms (https://www.caixinglobal.com/2026-03-07/china-plans-chinext-reform-to-boost-funding-for-innovative-firms-102420416.html)
+2026-03-07 10:02:13 [INFO]   📥 抓取命中 -> The Week Ahead (Mar. 9-15): China’s ‘Two Sessions’ to Conclude (https://www.caixinglobal.com/2026-03-07/the-week-ahead-mar-9-15-chinas-two-sessions-to-conclude-102420412.html)
+2026-03-07 10:02:13 [INFO]   📥 抓取命中 -> Beijing Refines Property Crisis Playbook to Contain Systemic Risks (https://www.caixinglobal.com/2026-03-07/beijing-refines-property-crisis-playbook-to-contain-systemic-risks-102420410.html)
+2026-03-07 10:02:13 [INFO]   📥 抓取命中 -> China’s Central Bank Vows to Guard Against Global Shock Spillovers (https://www.caixinglobal.com/2026-03-06/chinas-central-bank-vows-to-guard-against-global-shock-spillovers-102420308.html)
+2026-03-07 10:02:13 [INFO]   📥 抓取命中 -> China Unveils $14 Billion Fiscal Package to Boost Consumption, Investment (https://www.caixinglobal.com/2026-03-06/china-unveils-14-billion-fiscal-package-to-boost-consumption-investment-102420290.html)
+2026-03-07 10:02:13 [INFO] ✅ RSS源 [http://localhost:1200/caixinglobal/latest] 抓取完成，共获得 8 条有效资讯
+2026-03-07 10:02:14 [INFO] ✅ RSS源 [https://www.caixin.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:02:14 [INFO] ✅ RSS源 [https://www.ftchinese.com/rss/news] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:03:20 [INFO] ✅ RSS源 [http://localhost:1200/reuters/world/china] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:03:54 [INFO] ✅ RSS源 [http://localhost:1200/wsj/zh-cn/china] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:03:54 [INFO] ✅ RSS源 [http://localhost:1200/people/xjpjh] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:03:57 [INFO] ✅ RSS源 [http://localhost:1200/mrdx/today] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:04:00 [INFO]   📥 抓取命中 -> 直播：十四届全国人大四次会议民生主题记者会 (https://www.guancha.cn/politics/2026_03_07_809109_s.shtml)
+2026-03-07 10:04:00 [INFO]   📥 抓取命中 -> 全球首次，伊朗炸了美企巨头数据中心 (https://www.guancha.cn/internation/2026_03_06_809085_s.shtml)
+2026-03-07 10:04:00 [INFO] ✅ RSS源 [http://localhost:1200/guancha/headline] 抓取完成，共获得 2 条有效资讯
+2026-03-07 10:04:00 [INFO] ✅ RSS源 [https://localhost:1200/piyao/jrpy] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:04:01 [INFO] ✅ RSS源 [http://localhost:1200/thepaper/channel/25950] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:04:01 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/46] 抓取完成，共获得 0 条有效资讯
+2026-03-07 10:04:01 [INFO]   📥 抓取命中 -> 任天堂：2025年Switch2美国销量440万台创销售速度纪录 (http://www.199it.com/archives/1814928.html)
+2026-03-07 10:04:01 [INFO]   📥 抓取命中 -> OpenAI：2026年GPT-5.4发布，电脑操控任务成功率75%超人类 (http://www.199it.com/archives/1814932.html)
+2026-03-07 10:04:01 [INFO]   📥 抓取命中 -> 京东集团：2025年全年收入13091亿元，同比增长加速 (http://www.199it.com/archives/1814934.html)
+2026-03-07 10:04:01 [INFO]   📥 抓取命中 -> 本田中国：2026年2月销量28780辆，同比下滑15.0% (http://www.199it.com/archives/1814936.html)
+2026-03-07 10:04:01 [INFO]   📥 抓取命中 -> CADPA：2025年中国游戏市场支出3507.89亿元 同比增长7.68% (http://www.199it.com/archives/1814940.html)
+2026-03-07 10:04:01 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 5 条有效资讯
+2026-03-07 10:04:01 [INFO] ⏳ 板块 【📢 政策导向】 排重后剩余 15 条数据交由 AI 筛选...
+2026-03-07 10:04:01 [INFO] 🤖 开始呼叫 AI 分析 [📢 政策导向] (共 15 条信源喂给AI)
+2026-03-07 10:04:02 [INFO] 🈳 AI 判定 [📢 政策导向] 无合格内容，已拦截。
+2026-03-07 10:04:02 [INFO] ✅ 任务圆满完成

@@ -1,0 +1,120 @@
+2026-03-17 10:00:01 [INFO] ========================================
+2026-03-17 10:00:01 [INFO] 🚀 === 营销情报抓取任务开始 ===
+2026-03-17 10:00:01 [INFO] ========================================
+2026-03-17 10:00:02 [INFO] 
+📁 正在处理板块: 【💡 营销行业】
+2026-03-17 10:00:02 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:00:02 [INFO] ✅ RSS源 [https://www.digitaling.com/rss] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:00:04 [INFO] ✅ RSS源 [http://111.229.166.6:1200/topys] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:02:21 [INFO]   📥 抓取命中 -> Why JCPenney’s spring campaign bowed with a Paris, Texas fashion show (https://www.marketingdive.com/news/why-jcpenneys-spring-campaign-bowed-with-a-paris-texas-fashion-show/814762/)
+2026-03-17 10:02:21 [INFO]   📥 抓取命中 -> PMG eyes expansion with AI-focused repositioning, Freewheel partnership (https://www.marketingdive.com/news/pmg-eyes-expansion-with-ai-focused-repositioning-freewheel-partnership/814740/)
+2026-03-17 10:02:21 [INFO]   📥 抓取命中 -> Ugg pays homage to B-movie classics and their handcrafted effects (https://www.marketingdive.com/news/ugg-pays-homage-to-b-movie-classics-as-brand-emphasizes-anti-ai-stance/814784/)
+2026-03-17 10:02:21 [INFO]   📥 抓取命中 -> Nielsen: Sports continues to prop up ad-supported TV (https://www.marketingdive.com/news/nielsen-sports-continues-to-prop-up-ad-supported-tv/814781/)
+2026-03-17 10:02:21 [INFO]   📥 抓取命中 -> Burger King’s CMO on firing its mascot as brand evolves in new campaign (https://www.marketingdive.com/news/burger-kings-cmo-on-firing-its-mascot-as-brand-evolves-in-new-campaign/814643/)
+2026-03-17 10:02:21 [INFO] ✅ RSS源 [https://www.marketingdive.com/feeds/news/] 抓取完成，共获得 5 条有效资讯
+2026-03-17 10:02:21 [INFO] ✅ RSS源 [http://localhost:1200/morketing/1] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:02:22 [INFO] ✅ RSS源 [https://walkthechat.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:02:22 [INFO]   📥 抓取命中 -> Facebook Co-Founder Chris Hughes Warns AI Could Harm Workers—Even If It Doesn&#8217;t Entirely Replace Them (https://www.adweek.com/media/facebook-co-founder-chris-hughes-ai-harm-workers/)
+2026-03-17 10:02:22 [INFO]   📥 抓取命中 -> CMOs Are Driving Growth, So Why Aren’t More Becoming CEOs? (https://www.adweek.com/brand-marketing/cmos-are-driving-growth-so-why-arent-more-becoming-ceos/)
+2026-03-17 10:02:22 [INFO]   📥 抓取命中 -> JCPenney Takes on Fashion Elitism With a Runway Show in Paris, Texas (https://www.adweek.com/creativity/jcpenney-takes-on-fashion-elitism-with-a-runway-show-in-paris-texas/)
+2026-03-17 10:02:22 [INFO] ✅ RSS源 [https://www.adweek.com/feed/] 抓取完成，共获得 3 条有效资讯
+2026-03-17 10:02:24 [INFO] ✅ RSS源 [https://blog.hubspot.com/marketing/rss.xml] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:02:27 [INFO] ✅ RSS源 [https://daoinsights.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:02:27 [INFO] ✅ RSS源 [https://www.meihua.info/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:02:33 [INFO] ✅ RSS源 [https://www.motive.com.tw/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:02:33 [INFO] ⏳ 板块 【💡 营销行业】 排重后剩余 8 条数据交由 AI 筛选...
+2026-03-17 10:02:33 [INFO] 🤖 开始呼叫 AI 分析 [💡 营销行业] (共 8 条信源喂给AI)
+2026-03-17 10:02:46 [INFO] 📤 推送板块 【💡 营销行业】 成功
+2026-03-17 10:02:49 [INFO] 
+📁 正在处理板块: 【 🤖 数智前沿】
+2026-03-17 10:02:51 [INFO]   📥 抓取命中 -> 刚刚，英伟达龙虾登场，黄仁勋暴论频出，「人车家天地芯」冲击万亿收入 (https://www.36kr.com/p/3726197613853060)
+2026-03-17 10:02:51 [INFO]   📥 抓取命中 -> 8点1氪丨西贝获95亿元身家富豪入股；机票买贵可免费退，三大航司发布公告；“刘文祥”麻辣烫发文致歉 (https://www.36kr.com/p/3726276875680388)
+2026-03-17 10:02:51 [INFO]   📥 抓取命中 -> 刚刚，Karpathy紧急删库，AI职业末日图爆火，6000万白领岗危了 (https://www.36kr.com/p/3725449683564937)
+2026-03-17 10:02:51 [INFO]   📥 抓取命中 -> 地平线芯片负责人将离职，公司走向软硬一体架构｜36氪独家 (https://www.36kr.com/p/3725426197150345)
+2026-03-17 10:02:51 [INFO] ✅ RSS源 [http://localhost:1200/36kr/hot-list] 抓取完成，共获得 4 条有效资讯
+2026-03-17 10:05:20 [INFO]   📥 抓取命中 -> 科学“养虾”指南：数字龙虾走出对话框，我们在南京看到从“野生”到“精养”的进化路径 (https://www.mittrchina.com/news/detail/16092)
+2026-03-17 10:05:20 [INFO]   📥 抓取命中 -> 60万个零件塞进一颗芯片，瑞士团队开发4D成像传感器，未来手机就能“看”速度 (https://www.mittrchina.com/news/detail/16091)
+2026-03-17 10:05:20 [INFO]   📥 抓取命中 -> 3个00后做出AI独角兽：1天复现半年市场报告，或重构传统调研模式 (https://www.mittrchina.com/news/detail/16090)
+2026-03-17 10:05:20 [INFO] ✅ RSS源 [http://localhost:1200/mittrchina/index] 抓取完成，共获得 3 条有效资讯
+2026-03-17 10:05:23 [INFO]   📥 抓取命中 -> 龙虾狂热，一个利益共同体的成形 (https://www.latepost.com/news/dj_detail?id=3463)
+2026-03-17 10:05:23 [INFO] ✅ RSS源 [http://localhost:1200/latepost] 抓取完成，共获得 1 条有效资讯
+2026-03-17 10:05:27 [INFO]   📥 抓取命中 -> 腾讯出手，第一个小龙虾安全管家它来了。 (https://www.sohu.com/a/997242727_121675819)
+2026-03-17 10:05:27 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3] 抓取完成，共获得 1 条有效资讯
+2026-03-17 10:05:27 [INFO] ✅ RSS源 [https://localhost:1200/sspai/matrix] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:05:44 [INFO]   📥 抓取命中 -> Claw 爆火的 80 天，衍生了无数个版本 (https://www.woshipm.com/ai/6353506.html)
+2026-03-17 10:05:44 [INFO]   📥 抓取命中 -> AI正在成为你的新同事 (https://www.woshipm.com/ai/6354990.html)
+2026-03-17 10:05:44 [INFO] ✅ RSS源 [http://localhost:1200/woshipm/popular/daily] 抓取完成，共获得 2 条有效资讯
+2026-03-17 10:05:45 [INFO] ✅ RSS源 [http://localhost:1200/36kr/motif/327685552129] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:05:47 [INFO] ✅ RSS源 [http://localhost:1200/huxiu/tag/103] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:05:47 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/79] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:06:20 [INFO] ✅ RSS源 [http://localhost:1200/scmp/tech] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:06:21 [ERROR] ⚠️ RSS抓取失败 [https://technode.com/feed/]: Remote end closed connection without response
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 从能力到产出：职场技能利用率的全球差距 (http://www.199it.com/archives/1812578.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> CNNIC：第57次中国互联网络发展状况统计报告 (http://www.199it.com/archives/1816827.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> olade&WEF：2025年拉丁美洲和加勒比地区能源转型准备度报告 (http://www.199it.com/archives/1788593.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 2025财年Q2-2026财年Q2微软每股收益及同比（附原数据表） ​​​ (http://www.199it.com/archives/1816882.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 2025年全球主要行业风险融资额（附原数据表） ​​​ (http://www.199it.com/archives/1816879.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 2025年Q4印度主要厂商平板电脑出货量市场份额（附原数据表） ​​​ (http://www.199it.com/archives/1816876.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 2025年Q4印度主要厂商平板电脑出货量同比（附原数据表） ​​​ (http://www.199it.com/archives/1816873.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 2025年Q4印度主要厂商平板电脑出货量（附原数据表） ​​​ (http://www.199it.com/archives/1816870.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 2025年-2030年中国商业广告收入预测（附原数据表） ​​​ (http://www.199it.com/archives/1816867.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 2024年Q3-2025年Q4北美早期风险投资交易量（附原数据表） ​​​ (http://www.199it.com/archives/1816864.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> ICON：生命科学行业的数字化颠覆图景 (http://www.199it.com/archives/1749316.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> Omdia：2025年全球平板电脑出货量同比增长9.8% (http://www.199it.com/archives/1811321.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 工信部：2025年1-11月汽车迭代纠纷投诉约3.93万件，同比增近82倍 (http://www.199it.com/archives/1816808.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 乘联会：2026年2月中国乘用车零售均价18万元，同比回升 (http://www.199it.com/archives/1816810.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> Counterpoint：2026年Q1全球内存价格环比涨80%-90% (http://www.199it.com/archives/1816812.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> 2026年全球智能手机出货量预计同比下降12.9%，创十年最大跌幅 (http://www.199it.com/archives/1816816.html)
+2026-03-17 10:06:21 [INFO]   📥 抓取命中 -> Omdia：2025年美国45-54岁群体电视伴刷手机视频比例达52% (http://www.199it.com/archives/1816819.html)
+2026-03-17 10:06:21 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 17 条有效资讯
+2026-03-17 10:06:21 [INFO] ⏳ 板块 【 🤖 数智前沿】 排重后剩余 28 条数据交由 AI 筛选...
+2026-03-17 10:06:21 [INFO] 🤖 开始呼叫 AI 分析 [ 🤖 数智前沿] (共 28 条信源喂给AI)
+2026-03-17 10:06:33 [INFO] 📤 推送板块 【 🤖 数智前沿】 成功
+2026-03-17 10:06:36 [INFO] 
+📁 正在处理板块: 【📢 政策导向】
+2026-03-17 10:06:39 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcjd] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:06:40 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcwj] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:06:50 [INFO]   📥 抓取命中 -> Exclusive: First Chinese Supertanker Loads Saudi Crude via Red Sea, Bypassing Strait of Hormuz (https://www.caixinglobal.com/2026-03-17/exclusive-first-chinese-supertanker-loads-saudi-crude-via-red-sea-bypassing-strait-of-hormuz-102423666.html)
+2026-03-17 10:06:50 [INFO]   📥 抓取命中 -> China–Middle East Air Cargo Recovers as Routes Shift North From Gulf Hubs (https://www.caixinglobal.com/2026-03-17/chinamiddle-east-air-cargo-recovers-as-routes-shift-north-from-gulf-hubs-102423672.html)
+2026-03-17 10:06:50 [INFO]   📥 抓取命中 -> China Home Price Declines Ease in February as Beijing, Shanghai Post Gains (https://www.caixinglobal.com/2026-03-16/china-home-price-declines-ease-in-february-as-beijing-shanghai-post-gains-102423663.html)
+2026-03-17 10:06:50 [INFO]   📥 抓取命中 -> Commentary: Why Traditional U.S. Allies Are Sitting Out the War With Iran (https://www.caixinglobal.com/2026-03-16/commentary-why-traditional-us-allies-are-sitting-out-the-war-with-iran-102423622.html)
+2026-03-17 10:06:50 [INFO]   📥 抓取命中 -> Three Top Defense Scientists Removed From China’s Elite Engineering Academy (https://www.caixinglobal.com/2026-03-16/three-top-defense-scientists-removed-from-chinas-elite-engineering-academy-102423544.html)
+2026-03-17 10:06:50 [INFO]   📥 抓取命中 -> Commentary: The Strait of Hormuz Closure Is Rewriting Global Risk Premiums (https://www.caixinglobal.com/2026-03-16/commentary-the-strait-of-hormuz-closure-is-rewriting-global-risk-premiums-102423534.html)
+2026-03-17 10:06:50 [INFO]   📥 抓取命中 -> China’s State Financial Managers Face Deep Pay Cuts as Reform Bites (https://www.caixinglobal.com/2026-03-16/chinas-state-financial-managers-face-deep-pay-cuts-as-reform-bites-102423469.html)
+2026-03-17 10:06:50 [INFO]   📥 抓取命中 -> Former Deputy Head of Chinese Forestry Agency Indicted in Bribery Scheme (https://www.caixinglobal.com/2026-03-16/former-deputy-head-of-chinese-forestry-agency-indicted-in-bribery-scheme-102423499.html)
+2026-03-17 10:06:50 [INFO] ✅ RSS源 [http://localhost:1200/caixinglobal/latest] 抓取完成，共获得 8 条有效资讯
+2026-03-17 10:06:50 [INFO] ✅ RSS源 [https://www.caixin.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:09:06 [INFO] ✅ RSS源 [https://www.ftchinese.com/rss/news] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:10:13 [INFO] ✅ RSS源 [http://localhost:1200/reuters/world/china] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:10:47 [INFO] ✅ RSS源 [http://localhost:1200/wsj/zh-cn/china] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:10:47 [INFO] ✅ RSS源 [http://localhost:1200/people/xjpjh] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:10:48 [INFO] ✅ RSS源 [http://localhost:1200/mrdx/today] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:10:50 [INFO]   📥 抓取命中 -> 特朗普破防：这么点忙，都不帮？ (https://www.guancha.cn/internation/2026_03_17_810324_s.shtml)
+2026-03-17 10:10:50 [INFO]   📥 抓取命中 -> 穆杰塔巴身处莫斯科？俄方回应 (https://www.guancha.cn/internation/2026_03_16_810300_s.shtml)
+2026-03-17 10:10:50 [INFO]   📥 抓取命中 -> 这个小岛为何重要？让特朗普不惜考虑派地面部队 (https://www.guancha.cn/internation/2026_03_16_810279_s.shtml)
+2026-03-17 10:10:50 [INFO] ✅ RSS源 [http://localhost:1200/guancha/headline] 抓取完成，共获得 3 条有效资讯
+2026-03-17 10:10:50 [INFO] ✅ RSS源 [https://localhost:1200/piyao/jrpy] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:10:51 [INFO] ✅ RSS源 [http://localhost:1200/thepaper/channel/25950] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:10:51 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/46] 抓取完成，共获得 0 条有效资讯
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 从能力到产出：职场技能利用率的全球差距 (http://www.199it.com/archives/1812578.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> CNNIC：第57次中国互联网络发展状况统计报告 (http://www.199it.com/archives/1816827.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> olade&WEF：2025年拉丁美洲和加勒比地区能源转型准备度报告 (http://www.199it.com/archives/1788593.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 2025财年Q2-2026财年Q2微软每股收益及同比（附原数据表） ​​​ (http://www.199it.com/archives/1816882.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 2025年全球主要行业风险融资额（附原数据表） ​​​ (http://www.199it.com/archives/1816879.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 2025年Q4印度主要厂商平板电脑出货量市场份额（附原数据表） ​​​ (http://www.199it.com/archives/1816876.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 2025年Q4印度主要厂商平板电脑出货量同比（附原数据表） ​​​ (http://www.199it.com/archives/1816873.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 2025年Q4印度主要厂商平板电脑出货量（附原数据表） ​​​ (http://www.199it.com/archives/1816870.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 2025年-2030年中国商业广告收入预测（附原数据表） ​​​ (http://www.199it.com/archives/1816867.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 2024年Q3-2025年Q4北美早期风险投资交易量（附原数据表） ​​​ (http://www.199it.com/archives/1816864.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> ICON：生命科学行业的数字化颠覆图景 (http://www.199it.com/archives/1749316.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> Omdia：2025年全球平板电脑出货量同比增长9.8% (http://www.199it.com/archives/1811321.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 工信部：2025年1-11月汽车迭代纠纷投诉约3.93万件，同比增近82倍 (http://www.199it.com/archives/1816808.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 乘联会：2026年2月中国乘用车零售均价18万元，同比回升 (http://www.199it.com/archives/1816810.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> Counterpoint：2026年Q1全球内存价格环比涨80%-90% (http://www.199it.com/archives/1816812.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> 2026年全球智能手机出货量预计同比下降12.9%，创十年最大跌幅 (http://www.199it.com/archives/1816816.html)
+2026-03-17 10:10:51 [INFO]   📥 抓取命中 -> Omdia：2025年美国45-54岁群体电视伴刷手机视频比例达52% (http://www.199it.com/archives/1816819.html)
+2026-03-17 10:10:51 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 17 条有效资讯
+2026-03-17 10:10:51 [INFO] ⏳ 板块 【📢 政策导向】 排重后剩余 28 条数据交由 AI 筛选...
+2026-03-17 10:10:51 [INFO] 🤖 开始呼叫 AI 分析 [📢 政策导向] (共 28 条信源喂给AI)
+2026-03-17 10:10:53 [INFO] 🈳 AI 判定 [📢 政策导向] 无合格内容，已拦截。
+2026-03-17 10:10:53 [INFO] ✅ 任务圆满完成

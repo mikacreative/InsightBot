@@ -1,0 +1,109 @@
+2026-03-09 10:00:01 [INFO] ========================================
+2026-03-09 10:00:01 [INFO] 🚀 === 营销情报抓取任务开始 ===
+2026-03-09 10:00:01 [INFO] ========================================
+2026-03-09 10:00:01 [INFO] 
+📁 正在处理板块: 【💡 营销行业】
+2026-03-09 10:00:05 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:05 [INFO]   📥 抓取命中 -> 文章频道 - 夯爆了！妇女节大屏文案真的懂女性 (https://www.digitaling.com/articles/1468564.html)
+2026-03-09 10:00:05 [INFO] ✅ RSS源 [https://www.digitaling.com/rss] 抓取完成，共获得 1 条有效资讯
+2026-03-09 10:00:07 [INFO] ✅ RSS源 [http://111.229.166.6:1200/topys] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:08 [INFO] ✅ RSS源 [https://www.marketingdive.com/feeds/news/] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:08 [INFO] ✅ RSS源 [http://localhost:1200/morketing/1] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:08 [INFO] ✅ RSS源 [https://walkthechat.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:09 [INFO] ✅ RSS源 [https://www.adweek.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:11 [INFO] ✅ RSS源 [https://blog.hubspot.com/marketing/rss.xml] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:12 [INFO] ✅ RSS源 [https://daoinsights.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:12 [INFO] ✅ RSS源 [https://www.meihua.info/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:17 [INFO] ✅ RSS源 [https://www.motive.com.tw/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:17 [INFO] ⏳ 板块 【💡 营销行业】 排重后剩余 1 条数据交由 AI 筛选...
+2026-03-09 10:00:17 [INFO] 🤖 开始呼叫 AI 分析 [💡 营销行业] (共 1 条信源喂给AI)
+2026-03-09 10:00:20 [INFO] 🈳 AI 判定 [💡 营销行业] 无合格内容，已拦截。
+2026-03-09 10:00:20 [INFO] 
+📁 正在处理板块: 【 🤖 数智前沿】
+2026-03-09 10:00:22 [INFO]   📥 抓取命中 -> 2026：卖工具的都得死，干活的请上座 (https://www.36kr.com/p/3714316859421184)
+2026-03-09 10:00:22 [INFO]   📥 抓取命中 -> 8点1氪丨最高补贴200万，深圳一区拟出台政策鼓励免费“养龙虾”；苹果核心管理层调整；寿司郎回应消费者吃出金枪鱼寄生虫卵 (https://www.36kr.com/p/3714938148941957)
+2026-03-09 10:00:22 [INFO] ✅ RSS源 [http://localhost:1200/36kr/hot-list] 抓取完成，共获得 2 条有效资讯
+2026-03-09 10:00:30 [INFO]   📥 抓取命中 -> 在掀翻地心说之前，伽利略可能曾是它最虔诚的信徒 (https://www.mittrchina.com/news/detail/16043)
+2026-03-09 10:00:30 [INFO]   📥 抓取命中 -> AI抢工作时代，硅谷AI大佬如何教育子女？ (https://www.mittrchina.com/news/detail/16042)
+2026-03-09 10:00:30 [INFO]   📥 抓取命中 -> 美国团队实现光刻创新，金属有机框架光刻胶有望打造5nm极限硅芯片 (https://www.mittrchina.com/news/detail/16041)
+2026-03-09 10:00:30 [INFO]   📥 抓取命中 -> Karpathy开源“AI研究员”，630行代码让智能体通宵炼模型，一晚可跑100次实验 (https://www.mittrchina.com/news/detail/16039)
+2026-03-09 10:00:30 [INFO] ✅ RSS源 [http://localhost:1200/mittrchina/index] 抓取完成，共获得 4 条有效资讯
+2026-03-09 10:00:33 [INFO] ✅ RSS源 [http://localhost:1200/latepost] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:36 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:36 [INFO] ✅ RSS源 [https://localhost:1200/sspai/matrix] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:54 [INFO]   📥 抓取命中 -> OpenClaw养龙虾火了，但你真正该学的是Skills (https://www.woshipm.com/ai/6349791.html)
+2026-03-09 10:00:54 [INFO]   📥 抓取命中 -> 库存管理：库存公式、渠道分配、预占释放、防超卖——从0到1搭库存系统的4道关 (https://www.woshipm.com/pd/6349789.html)
+2026-03-09 10:00:54 [INFO]   📥 抓取命中 -> 产品经理的Vibe Coding实战：从报错到交付，我和AI的47分钟 (https://www.woshipm.com/ai/6349783.html)
+2026-03-09 10:00:54 [INFO]   📥 抓取命中 -> LCAS V3.1：解决大模型长文本写崩、出现幻觉的提示词技术 (https://www.woshipm.com/ai/6349769.html)
+2026-03-09 10:00:54 [INFO]   📥 抓取命中 -> 小红书选品的本质，就这2件事儿！ (https://www.woshipm.com/operate/6349770.html)
+2026-03-09 10:00:54 [INFO] ✅ RSS源 [http://localhost:1200/woshipm/popular/daily] 抓取完成，共获得 5 条有效资讯
+2026-03-09 10:00:54 [INFO] ✅ RSS源 [http://localhost:1200/36kr/motif/327685552129] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:57 [INFO] ✅ RSS源 [http://localhost:1200/huxiu/tag/103] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:00:57 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/79] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:01:30 [INFO] ✅ RSS源 [http://localhost:1200/scmp/tech] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:01:31 [ERROR] ⚠️ RSS抓取失败 [https://technode.com/feed/]: Remote end closed connection without response
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> Amadeus：2026年旅行洞察之足球界的盛世 (http://www.199it.com/archives/1813668.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> Altrata：2025年全球超级财富报告 (http://www.199it.com/archives/1796273.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 新经济技能：解锁人类优势 (http://www.199it.com/archives/1804245.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 人工智能对劳动力市场的影响：一种新的测度方法与早期证据 (http://www.199it.com/archives/1814959.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> IDC：2025年全球边缘计算支出达2650亿美元 (http://www.199it.com/archives/1814687.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> IMF经济学家：难以预料的不确定性 (http://www.199it.com/archives/1815671.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> OpenMoney：日本游戏发行商薪资排行，索尼年薪944万日元夺冠 (http://www.199it.com/archives/1814986.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> Jon Peddie Research：2025年Q4 NVIDIA显卡市占率94% AMD跌至5% (http://www.199it.com/archives/1814990.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> Anthropic：2026年3月Claude日活1130万，同比增297.7% (http://www.199it.com/archives/1814995.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> Anthropic：AI对美国800个职业影响研究显示程序员等职业渗透率达70% (http://www.199it.com/archives/1814998.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 中兴通讯：2025年营收1339亿元，算力业务同比增约150% (http://www.199it.com/archives/1815002.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 中国汽车流通协会：2026年2月特斯拉Model X保值率61.7%居首 (http://www.199it.com/archives/1815005.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 崔东树：2026年中国超三成消费者购车预算超30万元 (http://www.199it.com/archives/1815007.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 2026年iPhone 17系列累计销量2383.97万台 (http://www.199it.com/archives/1815011.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> Jez Corden调查：2026年70%玩家希望Xbox回归独占策略 (http://www.199it.com/archives/1815019.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> JPR：2025年全球台式机独显出货量4428万张，NVIDIA份额94% (http://www.199it.com/archives/1815022.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 2026年2月英国乘用车市场中国品牌销量11364辆，同比增81.0% (http://www.199it.com/archives/1815024.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 2026年AI写作技术冲击网文行业，62%新书同质化 (http://www.199it.com/archives/1815026.html)
+2026-03-09 10:01:31 [INFO]   📥 抓取命中 -> 威刚：2025年全年营收530.87亿新台币，同比增长32.13% (http://www.199it.com/archives/1814981.html)
+2026-03-09 10:01:31 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 19 条有效资讯
+2026-03-09 10:01:31 [INFO] ⏳ 板块 【 🤖 数智前沿】 排重后剩余 30 条数据交由 AI 筛选...
+2026-03-09 10:01:31 [INFO] 🤖 开始呼叫 AI 分析 [ 🤖 数智前沿] (共 30 条信源喂给AI)
+2026-03-09 10:01:39 [INFO] 📤 推送板块 【 🤖 数智前沿】 成功
+2026-03-09 10:01:42 [INFO] 
+📁 正在处理板块: 【📢 政策导向】
+2026-03-09 10:01:45 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcjd] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:01:46 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcwj] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:01:51 [INFO] ✅ RSS源 [http://localhost:1200/caixinglobal/latest] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:01:52 [INFO] ✅ RSS源 [https://www.caixin.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:04:07 [INFO] ✅ RSS源 [https://www.ftchinese.com/rss/news] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:05:14 [INFO] ✅ RSS源 [http://localhost:1200/reuters/world/china] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:05:48 [INFO] ✅ RSS源 [http://localhost:1200/wsj/zh-cn/china] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:05:48 [INFO] ✅ RSS源 [http://localhost:1200/people/xjpjh] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:05:49 [INFO] ✅ RSS源 [http://localhost:1200/mrdx/today] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:05:51 [INFO]   📥 抓取命中 -> 伊朗团结了，美以跳脚了，穆杰塔巴·哈梅内伊是谁？ (https://www.guancha.cn/internation/2026_03_09_809299_s.shtml)
+2026-03-09 10:05:51 [INFO]   📥 抓取命中 -> 骇人！德黑兰降下“黑雨”，“美以蓄意为之” (https://www.guancha.cn/internation/2026_03_08_809280_s.shtml)
+2026-03-09 10:05:51 [INFO]   📥 抓取命中 -> 嘴炮不停，特朗普吹嘘：要我付出代价？完全不在乎 (https://www.guancha.cn/internation/2026_03_08_809266_s.shtml)
+2026-03-09 10:05:51 [INFO] ✅ RSS源 [http://localhost:1200/guancha/headline] 抓取完成，共获得 3 条有效资讯
+2026-03-09 10:05:51 [INFO] ✅ RSS源 [https://localhost:1200/piyao/jrpy] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:05:52 [INFO] ✅ RSS源 [http://localhost:1200/thepaper/channel/25950] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:05:52 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/46] 抓取完成，共获得 0 条有效资讯
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> Amadeus：2026年旅行洞察之足球界的盛世 (http://www.199it.com/archives/1813668.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> Altrata：2025年全球超级财富报告 (http://www.199it.com/archives/1796273.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 新经济技能：解锁人类优势 (http://www.199it.com/archives/1804245.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 人工智能对劳动力市场的影响：一种新的测度方法与早期证据 (http://www.199it.com/archives/1814959.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> IDC：2025年全球边缘计算支出达2650亿美元 (http://www.199it.com/archives/1814687.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> IMF经济学家：难以预料的不确定性 (http://www.199it.com/archives/1815671.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> OpenMoney：日本游戏发行商薪资排行，索尼年薪944万日元夺冠 (http://www.199it.com/archives/1814986.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> Jon Peddie Research：2025年Q4 NVIDIA显卡市占率94% AMD跌至5% (http://www.199it.com/archives/1814990.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> Anthropic：2026年3月Claude日活1130万，同比增297.7% (http://www.199it.com/archives/1814995.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> Anthropic：AI对美国800个职业影响研究显示程序员等职业渗透率达70% (http://www.199it.com/archives/1814998.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 中兴通讯：2025年营收1339亿元，算力业务同比增约150% (http://www.199it.com/archives/1815002.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 中国汽车流通协会：2026年2月特斯拉Model X保值率61.7%居首 (http://www.199it.com/archives/1815005.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 崔东树：2026年中国超三成消费者购车预算超30万元 (http://www.199it.com/archives/1815007.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 2026年iPhone 17系列累计销量2383.97万台 (http://www.199it.com/archives/1815011.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> Jez Corden调查：2026年70%玩家希望Xbox回归独占策略 (http://www.199it.com/archives/1815019.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> JPR：2025年全球台式机独显出货量4428万张，NVIDIA份额94% (http://www.199it.com/archives/1815022.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 2026年2月英国乘用车市场中国品牌销量11364辆，同比增81.0% (http://www.199it.com/archives/1815024.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 2026年AI写作技术冲击网文行业，62%新书同质化 (http://www.199it.com/archives/1815026.html)
+2026-03-09 10:05:52 [INFO]   📥 抓取命中 -> 威刚：2025年全年营收530.87亿新台币，同比增长32.13% (http://www.199it.com/archives/1814981.html)
+2026-03-09 10:05:52 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 19 条有效资讯
+2026-03-09 10:05:52 [INFO] ⏳ 板块 【📢 政策导向】 排重后剩余 22 条数据交由 AI 筛选...
+2026-03-09 10:05:52 [INFO] 🤖 开始呼叫 AI 分析 [📢 政策导向] (共 22 条信源喂给AI)
+2026-03-09 10:05:58 [INFO] 🈳 AI 判定 [📢 政策导向] 无合格内容，已拦截。
+2026-03-09 10:05:58 [INFO] ✅ 任务圆满完成

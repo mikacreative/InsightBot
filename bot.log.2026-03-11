@@ -1,0 +1,136 @@
+2026-03-11 10:00:02 [INFO] ========================================
+2026-03-11 10:00:02 [INFO] 🚀 === 营销情报抓取任务开始 ===
+2026-03-11 10:00:02 [INFO] ========================================
+2026-03-11 10:00:02 [INFO] 
+📁 正在处理板块: 【💡 营销行业】
+2026-03-11 10:00:06 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:06 [INFO]   📥 抓取命中 -> 项目频道 - 即梦Seedance2.0× 爱乐之城：十年一梦，再AI一次 (https://www.digitaling.com/projects/362977.html)
+2026-03-11 10:00:06 [INFO] ✅ RSS源 [https://www.digitaling.com/rss] 抓取完成，共获得 1 条有效资讯
+2026-03-11 10:00:08 [INFO] ✅ RSS源 [http://111.229.166.6:1200/topys] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:09 [INFO]   📥 抓取命中 -> How Procter & Gamble got ‘good buzz’ by briefly retiring Mr. Clean (https://www.marketingdive.com/news/how-procter-gamble-got-good-buzz-by-briefly-retiring-mr-clean/814312/)
+2026-03-11 10:00:09 [INFO]   📥 抓取命中 -> Old Spice reworks Boyz II Men song for sequel to clingy moms campaign (https://www.marketingdive.com/news/old-spice-reworks-boyz-ii-men-song-for-sequel-to-clingy-moms-campaign/814305/)
+2026-03-11 10:00:09 [INFO]   📥 抓取命中 -> Why Tecovas made a short film about Texas instead of a traditional ad (https://www.marketingdive.com/news/why-tecovas-made-a-short-film-about-texas-instead-of-a-traditional-ad/814183/)
+2026-03-11 10:00:09 [INFO] ✅ RSS源 [https://www.marketingdive.com/feeds/news/] 抓取完成，共获得 3 条有效资讯
+2026-03-11 10:00:09 [INFO] ✅ RSS源 [http://localhost:1200/morketing/1] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:10 [INFO] ✅ RSS源 [https://walkthechat.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:10 [INFO]   📥 抓取命中 -> 2026 NCAA Men&#8217;s Tournament Ad Sales Seeing &#8216;Tremendous Demand&#8217; (https://www.adweek.com/convergent-tv/2026-ncaa-mens-tournament-ad-sales-tremendous-demand/)
+2026-03-11 10:00:10 [INFO]   📥 抓取命中 -> Agency Creatives: Looking for Job Satisfaction? Consider Moving to the Brand Side (https://www.adweek.com/agencies/agency-creatives-job-satisfaction-brand-side-newtonx-survey/)
+2026-03-11 10:00:10 [INFO]   📥 抓取命中 -> Cannes Lions Names Agency Icon Susan Credle 2026 Lion of St. Mark Honoree (https://www.adweek.com/creativity/cannes-lions-names-agency-icon-susan-credle-as-2026-lion-of-st-mark-honoree/)
+2026-03-11 10:00:10 [INFO]   📥 抓取命中 -> The Growth Paradox: Jeff Greenspoon of Kantar on Brand Power (https://www.adweek.com/brand-marketing/the-growth-paradox-jeff-greenspoon-of-kantar-on-brand-power/)
+2026-03-11 10:00:10 [INFO]   📥 抓取命中 -> An Irish Comedian Turned the Big Arch Launch into a Global Burger War (https://www.adweek.com/brand-marketing/an-irish-comedian-turned-the-big-arch-launch-into-a-global-burger-war/)
+2026-03-11 10:00:10 [INFO]   📥 抓取命中 -> How Washington&#8217;s AI Power Struggle Became a Marketing Headache (https://www.adweek.com/media/ai-brand-safety-iran-war/)
+2026-03-11 10:00:10 [INFO]   📥 抓取命中 -> How Time Turned Events Into Its Biggest Revenue Driver (https://www.adweek.com/media/time-events-revenue-driver/)
+2026-03-11 10:00:10 [INFO] ✅ RSS源 [https://www.adweek.com/feed/] 抓取完成，共获得 7 条有效资讯
+2026-03-11 10:00:13 [INFO]   📥 抓取命中 -> Community marketing: How to use it to drive customer advocacy and reduce CAC (https://blog.hubspot.com/marketing/community-marketing)
+2026-03-11 10:00:13 [INFO]   📥 抓取命中 -> Competitor analysis tools marketing teams actually use in 2026 (https://blog.hubspot.com/marketing/competitor-analysis-tools)
+2026-03-11 10:00:13 [INFO] ✅ RSS源 [https://blog.hubspot.com/marketing/rss.xml] 抓取完成，共获得 2 条有效资讯
+2026-03-11 10:00:16 [INFO]   📥 抓取命中 -> MUJI is closing its Shanghai flagship store with a charmingly smooth exit (https://daoinsights.com/works/muji-closing-shanghai-flagship/)
+2026-03-11 10:00:16 [INFO] ✅ RSS源 [https://daoinsights.com/feed/] 抓取完成，共获得 1 条有效资讯
+2026-03-11 10:00:17 [INFO] ✅ RSS源 [https://www.meihua.info/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:22 [INFO] ✅ RSS源 [https://www.motive.com.tw/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:22 [INFO] ⏳ 板块 【💡 营销行业】 排重后剩余 14 条数据交由 AI 筛选...
+2026-03-11 10:00:22 [INFO] 🤖 开始呼叫 AI 分析 [💡 营销行业] (共 14 条信源喂给AI)
+2026-03-11 10:00:30 [INFO] 📤 推送板块 【💡 营销行业】 成功
+2026-03-11 10:00:32 [INFO] 
+📁 正在处理板块: 【 🤖 数智前沿】
+2026-03-11 10:00:34 [INFO]   📥 抓取命中 -> 8点1氪丨宁德时代日赚近2亿；二手平台出现OpenClaw上门卸载服务；小红书：坚定维护社区真实底色，严格打击AI托管账号 (https://www.36kr.com/p/3717775829776002)
+2026-03-11 10:00:34 [INFO]   📥 抓取命中 -> 刚刚，Anthropic深夜血洗500亿美金行业，代码审计末日来了 (https://www.36kr.com/p/3717053980177797)
+2026-03-11 10:00:34 [INFO]   📥 抓取命中 -> 挡住豆包的那堵墙，被 “龙虾” 推倒了 (https://www.36kr.com/p/3716908889076228)
+2026-03-11 10:00:34 [INFO] ✅ RSS源 [http://localhost:1200/36kr/hot-list] 抓取完成，共获得 3 条有效资讯
+2026-03-11 10:00:37 [INFO]   📥 抓取命中 -> 科学家造出“活体滴眼液”，滴一次就能让细菌在眼睛里持续治病 (https://www.mittrchina.com/news/detail/16056)
+2026-03-11 10:00:37 [INFO]   📥 抓取命中 -> 英国初创把芯片工厂搬到太空，半导体纯度或比地表提升4000倍 (https://www.mittrchina.com/news/detail/16055)
+2026-03-11 10:00:37 [INFO]   📥 抓取命中 -> 人类其实能靠肛门呼吸？日本学者证实另类呼吸通道，缺氧急救迎来新希望 (https://www.mittrchina.com/news/detail/16054)
+2026-03-11 10:00:37 [INFO] ✅ RSS源 [http://localhost:1200/mittrchina/index] 抓取完成，共获得 3 条有效资讯
+2026-03-11 10:00:40 [INFO] ✅ RSS源 [http://localhost:1200/latepost] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:43 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:43 [INFO] ✅ RSS源 [https://localhost:1200/sspai/matrix] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:00:59 [INFO]   📥 抓取命中 -> 全民“养龙虾”，一场AI焦虑催生的生意 (https://www.woshipm.com/ai/6351116.html)
+2026-03-11 10:00:59 [INFO] ✅ RSS源 [http://localhost:1200/woshipm/popular/daily] 抓取完成，共获得 1 条有效资讯
+2026-03-11 10:00:59 [INFO] ✅ RSS源 [http://localhost:1200/36kr/motif/327685552129] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:01:02 [INFO] ✅ RSS源 [http://localhost:1200/huxiu/tag/103] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:01:02 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/79] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:01:35 [INFO] ✅ RSS源 [http://localhost:1200/scmp/tech] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:01:36 [ERROR] ⚠️ RSS抓取失败 [https://technode.com/feed/]: Remote end closed connection without response
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> GSMA：2025年印度数字国家报告 (http://www.199it.com/archives/1789639.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> Magellan AI：2025年第四季度播客广告报告 (http://www.199it.com/archives/1815475.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 新经济中的就业四种未来：2030年的人工智能与人才 (http://www.199it.com/archives/1810898.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> AI信任报告：2025年新西兰公众对人工智能的态度 (http://www.199it.com/archives/1769911.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> Ampere：70%的英美网民每周至少观看一次网红制作的视频 (http://www.199it.com/archives/1799913.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2026年全球主要国家和地区主权云IaaS支出预测（附原数据表） ​​​ (http://www.199it.com/archives/1816044.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2025财年Q2-2026财年Q2微软总营收及同比（附原数据表） ​​​ (http://www.199it.com/archives/1816040.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2026年全球IT支出预测（附原数据表） ​​​ (http://www.199it.com/archives/1816037.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2026年全球IT支出同比预测（附原数据表） ​​​ (http://www.199it.com/archives/1816034.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2025年英国主要新车型按颜色分类注册量市场份额（附原数据表） ​​​ (http://www.199it.com/archives/1816031.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2025年英国主要新车型按颜色分类注册量（附原数据表） ​​​ (http://www.199it.com/archives/1816028.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2025年全球内容驱动广告收入市场份额（附原数据表） ​​​ (http://www.199it.com/archives/1816025.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2025年丹麦消费者对人工智能工具和系统认知度（附原数据表） ​​​ (http://www.199it.com/archives/1816022.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2020年-2025年风险资本对全球影响力初创企业投资额（附原数据表） ​​​ (http://www.199it.com/archives/1816019.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 2025年中国微短剧市场规模突破千亿元，用户近7亿 (http://www.199it.com/archives/1815950.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 洛图科技：2026年2月中国电视市场国产品牌合并市占率95.4% (http://www.199it.com/archives/1815952.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> SNE Research：2026年1月全球动力电池装机量71.9GWh 同比增长10.7% (http://www.199it.com/archives/1815958.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 脉脉：2026年1-2月AI岗位数量同比增长12倍，平均月薪60738元 (http://www.199it.com/archives/1815962.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> TrendForce：2025年全球智能手机产量12.54亿台，年增2.5% (http://www.199it.com/archives/1815965.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 心理学研究：名字刻板印象可潜移默化影响面部外貌 (http://www.199it.com/archives/1815968.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> TrendForce：2026年全球智能手机产量同比减少10%至11.35亿支 (http://www.199it.com/archives/1815974.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 宁德时代：2025年营收4237.02亿元，净利润722.01亿元 (http://www.199it.com/archives/1815979.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> IDC：2025年中国腕戴设备出货量7390万台，同比增长20.8% (http://www.199it.com/archives/1815983.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> QuestMobile：2025年12月中国移动互联网月活用户12.76亿 (http://www.199it.com/archives/1815988.html)
+2026-03-11 10:01:36 [INFO]   📥 抓取命中 -> 奥维云网：2026年智能门锁人脸识别零售额渗透率预计达67% (http://www.199it.com/archives/1815993.html)
+2026-03-11 10:01:36 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 25 条有效资讯
+2026-03-11 10:01:36 [INFO] ⏳ 板块 【 🤖 数智前沿】 排重后剩余 32 条数据交由 AI 筛选...
+2026-03-11 10:01:36 [INFO] 🤖 开始呼叫 AI 分析 [ 🤖 数智前沿] (共 32 条信源喂给AI)
+2026-03-11 10:01:44 [INFO] 📤 推送板块 【 🤖 数智前沿】 成功
+2026-03-11 10:01:46 [INFO] 
+📁 正在处理板块: 【📢 政策导向】
+2026-03-11 10:01:49 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcjd] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:01:50 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcwj] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:01:59 [INFO]   📥 抓取命中 -> In Depth: Chinese Nationals Flee Tehran as War Upends Lives in Iran (https://www.caixinglobal.com/2026-03-11/in-depth-chinese-nationals-flee-tehran-as-war-upends-lives-in-iran-102421670.html)
+2026-03-11 10:01:59 [INFO]   📥 抓取命中 -> U.S. Lawmakers Probe Underwriters Over Chinese IPO Manipulation Claims (https://www.caixinglobal.com/2026-03-11/us-lawmakers-probe-underwriters-over-chinese-ipo-manipulation-claims-102421674.html)
+2026-03-11 10:01:59 [INFO]   📥 抓取命中 -> Middle East Conflict Disrupts Global Fertilizer Trade, Raising Food Crisis Fears (https://www.caixinglobal.com/2026-03-11/middle-east-conflict-disrupts-global-fertilizer-trade-raising-food-crisis-fears-102421672.html)
+2026-03-11 10:01:59 [INFO]   📥 抓取命中 -> Firms in China Feel Record Tariff Pain but Stay Put, AmCham Survey Finds (https://www.caixinglobal.com/2026-03-10/firms-in-china-feel-record-tariff-pain-but-stay-put-amcham-survey-finds-102421668.html)
+2026-03-11 10:01:59 [INFO]   📥 抓取命中 -> Hutchmed Pulls Cancer Drug in China After U.S. Partner Flags Safety Risks (https://www.caixinglobal.com/2026-03-10/hutchmed-pulls-cancer-drug-in-china-after-us-partner-flags-safety-risks-102421666.html)
+2026-03-11 10:01:59 [INFO]   📥 抓取命中 -> China Trade-In Program Tops 4 Trillion Yuan in Sales (https://www.caixinglobal.com/2026-03-10/china-trade-in-program-tops-4-trillion-yuan-in-sales-102421586.html)
+2026-03-11 10:01:59 [INFO] ✅ RSS源 [http://localhost:1200/caixinglobal/latest] 抓取完成，共获得 6 条有效资讯
+2026-03-11 10:01:59 [INFO] ✅ RSS源 [https://www.caixin.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:04:13 [INFO] ✅ RSS源 [https://www.ftchinese.com/rss/news] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:05:20 [INFO] ✅ RSS源 [http://localhost:1200/reuters/world/china] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:05:54 [INFO] ✅ RSS源 [http://localhost:1200/wsj/zh-cn/china] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:05:54 [INFO] ✅ RSS源 [http://localhost:1200/people/xjpjh] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:05:55 [INFO] ✅ RSS源 [http://localhost:1200/mrdx/today] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:05:58 [INFO]   📥 抓取命中 -> 欧盟理事会主席标榜：中美俄搞破坏，我们守规矩 (https://www.guancha.cn/internation/2026_03_11_809578_s.shtml)
+2026-03-11 10:05:58 [INFO]   📥 抓取命中 -> 美学者直说了：结局好不了，面对中俄时会更糟 (https://www.guancha.cn/internation/2026_03_10_809547_s.shtml)
+2026-03-11 10:05:58 [INFO]   📥 抓取命中 -> 最新警告：美以再搞事，“一升油”也别想运出去 (https://www.guancha.cn/internation/2026_03_10_809526_s.shtml)
+2026-03-11 10:05:58 [INFO] ✅ RSS源 [http://localhost:1200/guancha/headline] 抓取完成，共获得 3 条有效资讯
+2026-03-11 10:05:58 [INFO] ✅ RSS源 [https://localhost:1200/piyao/jrpy] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:05:59 [INFO] ✅ RSS源 [http://localhost:1200/thepaper/channel/25950] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:05:59 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/46] 抓取完成，共获得 0 条有效资讯
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> GSMA：2025年印度数字国家报告 (http://www.199it.com/archives/1789639.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> Magellan AI：2025年第四季度播客广告报告 (http://www.199it.com/archives/1815475.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 新经济中的就业四种未来：2030年的人工智能与人才 (http://www.199it.com/archives/1810898.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> AI信任报告：2025年新西兰公众对人工智能的态度 (http://www.199it.com/archives/1769911.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> Ampere：70%的英美网民每周至少观看一次网红制作的视频 (http://www.199it.com/archives/1799913.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2026年全球主要国家和地区主权云IaaS支出预测（附原数据表） ​​​ (http://www.199it.com/archives/1816044.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2025财年Q2-2026财年Q2微软总营收及同比（附原数据表） ​​​ (http://www.199it.com/archives/1816040.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2026年全球IT支出预测（附原数据表） ​​​ (http://www.199it.com/archives/1816037.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2026年全球IT支出同比预测（附原数据表） ​​​ (http://www.199it.com/archives/1816034.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2025年英国主要新车型按颜色分类注册量市场份额（附原数据表） ​​​ (http://www.199it.com/archives/1816031.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2025年英国主要新车型按颜色分类注册量（附原数据表） ​​​ (http://www.199it.com/archives/1816028.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2025年全球内容驱动广告收入市场份额（附原数据表） ​​​ (http://www.199it.com/archives/1816025.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2025年丹麦消费者对人工智能工具和系统认知度（附原数据表） ​​​ (http://www.199it.com/archives/1816022.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2020年-2025年风险资本对全球影响力初创企业投资额（附原数据表） ​​​ (http://www.199it.com/archives/1816019.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 2025年中国微短剧市场规模突破千亿元，用户近7亿 (http://www.199it.com/archives/1815950.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 洛图科技：2026年2月中国电视市场国产品牌合并市占率95.4% (http://www.199it.com/archives/1815952.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> SNE Research：2026年1月全球动力电池装机量71.9GWh 同比增长10.7% (http://www.199it.com/archives/1815958.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 脉脉：2026年1-2月AI岗位数量同比增长12倍，平均月薪60738元 (http://www.199it.com/archives/1815962.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> TrendForce：2025年全球智能手机产量12.54亿台，年增2.5% (http://www.199it.com/archives/1815965.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 心理学研究：名字刻板印象可潜移默化影响面部外貌 (http://www.199it.com/archives/1815968.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> TrendForce：2026年全球智能手机产量同比减少10%至11.35亿支 (http://www.199it.com/archives/1815974.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 宁德时代：2025年营收4237.02亿元，净利润722.01亿元 (http://www.199it.com/archives/1815979.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> IDC：2025年中国腕戴设备出货量7390万台，同比增长20.8% (http://www.199it.com/archives/1815983.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> QuestMobile：2025年12月中国移动互联网月活用户12.76亿 (http://www.199it.com/archives/1815988.html)
+2026-03-11 10:05:59 [INFO]   📥 抓取命中 -> 奥维云网：2026年智能门锁人脸识别零售额渗透率预计达67% (http://www.199it.com/archives/1815993.html)
+2026-03-11 10:05:59 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 25 条有效资讯
+2026-03-11 10:05:59 [INFO] ⏳ 板块 【📢 政策导向】 排重后剩余 34 条数据交由 AI 筛选...
+2026-03-11 10:05:59 [INFO] 🤖 开始呼叫 AI 分析 [📢 政策导向] (共 34 条信源喂给AI)
+2026-03-11 10:06:01 [INFO] 🈳 AI 判定 [📢 政策导向] 无合格内容，已拦截。
+2026-03-11 10:06:01 [INFO] ✅ 任务圆满完成

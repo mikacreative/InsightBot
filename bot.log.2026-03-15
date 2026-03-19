@@ -1,0 +1,68 @@
+2026-03-15 10:00:02 [INFO] ========================================
+2026-03-15 10:00:02 [INFO] 🚀 === 营销情报抓取任务开始 ===
+2026-03-15 10:00:02 [INFO] ========================================
+2026-03-15 10:00:02 [INFO] 
+📁 正在处理板块: 【💡 营销行业】
+2026-03-15 10:00:02 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:03 [INFO]   📥 抓取命中 -> 文章频道 - 玩弄AI和龙虾，还得靠互联网黑话 (https://www.digitaling.com/articles/1472134.html)
+2026-03-15 10:00:03 [INFO]   📥 抓取命中 -> 文章频道 - WPP Media被前高管告了，媒体返点被推到台前 (https://www.digitaling.com/articles/1469250.html)
+2026-03-15 10:00:03 [INFO] ✅ RSS源 [https://www.digitaling.com/rss] 抓取完成，共获得 2 条有效资讯
+2026-03-15 10:00:04 [INFO] ✅ RSS源 [http://111.229.166.6:1200/topys] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:05 [INFO] ✅ RSS源 [https://www.marketingdive.com/feeds/news/] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:05 [INFO] ✅ RSS源 [http://localhost:1200/morketing/1] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:05 [INFO] ✅ RSS源 [https://walkthechat.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:07 [INFO] ✅ RSS源 [https://www.adweek.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:09 [INFO] ✅ RSS源 [https://blog.hubspot.com/marketing/rss.xml] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:10 [INFO] ✅ RSS源 [https://daoinsights.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:11 [INFO] ✅ RSS源 [https://www.meihua.info/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:16 [INFO] ✅ RSS源 [https://www.motive.com.tw/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:16 [INFO] ⏳ 板块 【💡 营销行业】 排重后剩余 2 条数据交由 AI 筛选...
+2026-03-15 10:00:16 [INFO] 🤖 开始呼叫 AI 分析 [💡 营销行业] (共 2 条信源喂给AI)
+2026-03-15 10:00:19 [INFO] 📤 推送板块 【💡 营销行业】 成功
+2026-03-15 10:00:21 [INFO] 
+📁 正在处理板块: 【 🤖 数智前沿】
+2026-03-15 10:00:23 [INFO]   📥 抓取命中 -> 中国最大家电展上，一批想帮你做家务的机器人来了！ (https://www.36kr.com/p/3722882943334789)
+2026-03-15 10:00:23 [INFO]   📥 抓取命中 -> 腾讯龙虾团队答疑：龙虾的热度确实高过能力，但它是普通人拥抱 AI 浪潮的第一步 (https://www.36kr.com/p/3721355722684804)
+2026-03-15 10:00:23 [INFO] ✅ RSS源 [http://localhost:1200/36kr/hot-list] 抓取完成，共获得 2 条有效资讯
+2026-03-15 10:00:27 [INFO]   📥 抓取命中 -> Meta开启史上最大规模裁员，AI巨额投入成主因 (https://www.mittrchina.com/news/detail/16080)
+2026-03-15 10:00:27 [INFO]   📥 抓取命中 -> 苹果成立50年，乔布斯的预言正在逐个应验 (https://www.mittrchina.com/news/detail/16079)
+2026-03-15 10:00:27 [INFO] ✅ RSS源 [http://localhost:1200/mittrchina/index] 抓取完成，共获得 2 条有效资讯
+2026-03-15 10:00:30 [INFO] ✅ RSS源 [http://localhost:1200/latepost] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:33 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:33 [INFO] ✅ RSS源 [https://localhost:1200/sspai/matrix] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:52 [INFO]   📥 抓取命中 -> (两会)扫码入企全国推行：329万用户的政务产品，如何用设计重构政企交互？ (https://www.woshipm.com/ucd/6353021.html)
+2026-03-15 10:00:52 [INFO]   📥 抓取命中 -> 当AI学会写作，人类开始互相怀疑 (https://www.woshipm.com/ai/6352961.html)
+2026-03-15 10:00:52 [INFO]   📥 抓取命中 -> AI医疗问答项目系列之知识库设计分支-医疗数据清洗 (https://www.woshipm.com/ai/3457773.html)
+2026-03-15 10:00:52 [INFO] ✅ RSS源 [http://localhost:1200/woshipm/popular/daily] 抓取完成，共获得 3 条有效资讯
+2026-03-15 10:00:52 [INFO] ✅ RSS源 [http://localhost:1200/36kr/motif/327685552129] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:54 [INFO] ✅ RSS源 [http://localhost:1200/huxiu/tag/103] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:00:54 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/79] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:01:28 [INFO] ✅ RSS源 [http://localhost:1200/scmp/tech] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:01:28 [ERROR] ⚠️ RSS抓取失败 [https://technode.com/feed/]: Remote end closed connection without response
+2026-03-15 10:01:28 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:01:28 [INFO] ⏳ 板块 【 🤖 数智前沿】 排重后剩余 7 条数据交由 AI 筛选...
+2026-03-15 10:01:28 [INFO] 🤖 开始呼叫 AI 分析 [ 🤖 数智前沿] (共 7 条信源喂给AI)
+2026-03-15 10:01:35 [INFO] 📤 推送板块 【 🤖 数智前沿】 成功
+2026-03-15 10:01:37 [INFO] 
+📁 正在处理板块: 【📢 政策导向】
+2026-03-15 10:01:41 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcjd] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:01:42 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcwj] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:01:56 [INFO] ✅ RSS源 [http://localhost:1200/caixinglobal/latest] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:01:56 [INFO] ✅ RSS源 [https://www.caixin.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:04:09 [INFO] ✅ RSS源 [https://www.ftchinese.com/rss/news] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:16 [INFO] ✅ RSS源 [http://localhost:1200/reuters/world/china] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:50 [INFO] ✅ RSS源 [http://localhost:1200/wsj/zh-cn/china] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:50 [INFO] ✅ RSS源 [http://localhost:1200/people/xjpjh] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:51 [INFO] ✅ RSS源 [http://localhost:1200/mrdx/today] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:54 [INFO]   📥 抓取命中 -> 特朗普呼吁各国派军舰，伊朗嘲讽：引火烧身 (https://www.guancha.cn/internation/2026_03_15_810108_s.shtml)
+2026-03-15 10:05:54 [INFO]   📥 抓取命中 -> “敢夺我们的岛，就杀进基地俘虏美军！” (https://www.guancha.cn/internation/2026_03_14_810086_s.shtml)
+2026-03-15 10:05:54 [INFO]   📥 抓取命中 -> 特朗普顾问坐不住了：赶紧宣布胜利，咱撤吧！ (https://www.guancha.cn/internation/2026_03_14_810069_s.shtml)
+2026-03-15 10:05:54 [INFO] ✅ RSS源 [http://localhost:1200/guancha/headline] 抓取完成，共获得 3 条有效资讯
+2026-03-15 10:05:54 [INFO] ✅ RSS源 [https://localhost:1200/piyao/jrpy] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:55 [INFO] ✅ RSS源 [http://localhost:1200/thepaper/channel/25950] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:55 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/46] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:56 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-15 10:05:56 [INFO] ⏳ 板块 【📢 政策导向】 排重后剩余 3 条数据交由 AI 筛选...
+2026-03-15 10:05:56 [INFO] 🤖 开始呼叫 AI 分析 [📢 政策导向] (共 3 条信源喂给AI)
+2026-03-15 10:05:57 [INFO] 🈳 AI 判定 [📢 政策导向] 无合格内容，已拦截。
+2026-03-15 10:05:57 [INFO] ✅ 任务圆满完成

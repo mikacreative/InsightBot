@@ -1,0 +1,110 @@
+2026-03-14 10:00:01 [INFO] ========================================
+2026-03-14 10:00:01 [INFO] 🚀 === 营销情报抓取任务开始 ===
+2026-03-14 10:00:01 [INFO] ========================================
+2026-03-14 10:00:01 [INFO] 
+📁 正在处理板块: 【💡 营销行业】
+2026-03-14 10:00:05 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:05 [INFO]   📥 抓取命中 -> 文章频道 - 麦当劳CEO试吃翻车，汉堡王们连夜拍视频补刀 (https://www.digitaling.com/articles/1470587.html)
+2026-03-14 10:00:05 [INFO]   📥 抓取命中 -> 招聘频道 - 广州天与空 (资深)品牌经理 / (Senior) Brand Manager (https://www.digitaling.com/jobs/272418.html)
+2026-03-14 10:00:05 [INFO]   📥 抓取命中 -> 招聘频道 - 广州天与空 文案/资深文案 (https://www.digitaling.com/jobs/272411.html)
+2026-03-14 10:00:05 [INFO]   📥 抓取命中 -> 文章频道 - 从今天起，嘻嘻弗斯开始上山推石头了 (https://www.digitaling.com/articles/1472449.html)
+2026-03-14 10:00:05 [INFO] ✅ RSS源 [https://www.digitaling.com/rss] 抓取完成，共获得 4 条有效资讯
+2026-03-14 10:00:07 [INFO] ✅ RSS源 [http://111.229.166.6:1200/topys] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:08 [INFO]   📥 抓取命中 -> Publicis acquires AdgeAI to sift quality creative from content glut (https://www.marketingdive.com/news/publicis-acquires-adgeai-to-sift-quality-creative-from-content-glut/814675/)
+2026-03-14 10:00:08 [INFO]   📥 抓取命中 -> Campaign Trail: Benjamin Moore paints a timeless picture of growing up (https://www.marketingdive.com/news/campaign-trail-benjamin-moore-paints-a-timeless-picture-of-growing-up/814411/)
+2026-03-14 10:00:08 [INFO] ✅ RSS源 [https://www.marketingdive.com/feeds/news/] 抓取完成，共获得 2 条有效资讯
+2026-03-14 10:00:08 [INFO] ✅ RSS源 [http://localhost:1200/morketing/1] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:09 [INFO] ✅ RSS源 [https://walkthechat.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:09 [INFO]   📥 抓取命中 -> EXCLUSIVE: Dow Jones Bolsters Brand Team By Hiring Former Droga5 Chief Andrew Essex (https://www.adweek.com/media/dow-jones-hires-andrex-essex-delwyn-gray/)
+2026-03-14 10:00:09 [INFO]   📥 抓取命中 -> OpenAI is Testing An Ads Manager, As Its New Ads Business Fights Growing Pains (https://www.adweek.com/media/openai-is-testing-an-ads-manager-as-its-new-ads-business-fights-growing-pains/)
+2026-03-14 10:00:09 [INFO]   📥 抓取命中 -> Week of March 2 Cable News Ratings: Middle East Conflict Fuels Viewership (https://www.adweek.com/tvnewser/week-of-march-2-2026-cable-news-ratings/)
+2026-03-14 10:00:09 [INFO]   📥 抓取命中 -> Streaming Ratings, Week of Feb. 9: Lincoln Lawyer Holds Onto No. 1 (https://www.adweek.com/convergent-tv/streaming-ratings-week-of-february-9-2026/)
+2026-03-14 10:00:09 [INFO]   📥 抓取命中 -> Ticker: Former MSNBC Head Rashida Jones to Lead Piers Morgan’s Uncensored (https://www.adweek.com/tvnewser/ticker-former-msnbc-head-rashida-jones-to-lead-piers-morgans-uncensored/)
+2026-03-14 10:00:09 [INFO]   📥 抓取命中 -> Pete Hegseth Comments Suggest Paramount Will Change Tone of CNN (https://www.adweek.com/tvnewser/pete-hegseth-comments-suggest-paramount-will-change-tone-of-cnn/)
+2026-03-14 10:00:09 [INFO]   📥 抓取命中 -> Rethink Recruits Anomaly Veteran as First Chief Production Officer (https://www.adweek.com/agencies/rethink-recruits-anomaly-veteran-as-first-chief-production-officer/)
+2026-03-14 10:00:09 [INFO] ✅ RSS源 [https://www.adweek.com/feed/] 抓取完成，共获得 7 条有效资讯
+2026-03-14 10:00:11 [INFO] ✅ RSS源 [https://blog.hubspot.com/marketing/rss.xml] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:13 [INFO] ✅ RSS源 [https://daoinsights.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:13 [INFO] ✅ RSS源 [https://www.meihua.info/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:19 [INFO] ✅ RSS源 [https://www.motive.com.tw/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:19 [INFO] ⏳ 板块 【💡 营销行业】 排重后剩余 13 条数据交由 AI 筛选...
+2026-03-14 10:00:19 [INFO] 🤖 开始呼叫 AI 分析 [💡 营销行业] (共 13 条信源喂给AI)
+2026-03-14 10:00:30 [INFO] 📤 推送板块 【💡 营销行业】 成功
+2026-03-14 10:00:32 [INFO] 
+📁 正在处理板块: 【 🤖 数智前沿】
+2026-03-14 10:00:34 [INFO]   📥 抓取命中 -> 1年智力成本暴跌128倍，2026万物皆可Agent，人类还能做什么？ (https://www.36kr.com/p/3721267958692483)
+2026-03-14 10:00:34 [INFO] ✅ RSS源 [http://localhost:1200/36kr/hot-list] 抓取完成，共获得 1 条有效资讯
+2026-03-14 10:00:39 [INFO]   📥 抓取命中 -> 自行车变跳跃机器人，能飞檐走壁，比体操运动员还灵活 (https://www.mittrchina.com/news/detail/16074)
+2026-03-14 10:00:39 [INFO]   📥 抓取命中 -> RISC之父向AI芯片泼冷水：AI推理不需要更强的GPU，需要另一种硬件 (https://www.mittrchina.com/news/detail/16073)
+2026-03-14 10:00:39 [INFO] ✅ RSS源 [http://localhost:1200/mittrchina/index] 抓取完成，共获得 2 条有效资讯
+2026-03-14 10:00:42 [INFO] ✅ RSS源 [http://localhost:1200/latepost] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:45 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:00:45 [INFO] ✅ RSS源 [https://localhost:1200/sspai/matrix] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:01:02 [INFO] ✅ RSS源 [http://localhost:1200/woshipm/popular/daily] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:01:02 [INFO] ✅ RSS源 [http://localhost:1200/36kr/motif/327685552129] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:01:05 [INFO] ✅ RSS源 [http://localhost:1200/huxiu/tag/103] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:01:05 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/79] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:01:38 [INFO] ✅ RSS源 [http://localhost:1200/scmp/tech] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:01:40 [ERROR] ⚠️ RSS抓取失败 [https://technode.com/feed/]: Remote end closed connection without response
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> 大众汽车：2025年全球销量900万辆，营业利润88.7亿欧元同比下降53% (http://www.199it.com/archives/1816583.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> TrendForce：2026年全球智能手机产量将降至约11.35亿部，同比减少约10% (http://www.199it.com/archives/1816588.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> 迅雷：2025年全年营收31.7亿元，同比增长42.5% (http://www.199it.com/archives/1816593.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> QuestMobile：2025年12月智能电视小米月活5970万台居首 (http://www.199it.com/archives/1816595.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> Omdia：2026年全球PC出货量预计2.45亿台，同比下降12% (http://www.199it.com/archives/1816597.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> 寒武纪：2025年营收64.97亿元，同比增长453% (http://www.199it.com/archives/1816613.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> IDC：2026年全球个人电脑出货量下降11.3% (http://www.199it.com/archives/1816616.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> 高盛：2026年三星运营利润达239万亿韩元，同比大涨5倍 (http://www.199it.com/archives/1816618.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> Benchmark Mineral Intelligence：2026年2月全球电动车注册量下降11% (http://www.199it.com/archives/1816620.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> TrendForce：2025年全球晶圆代工产值1695亿美元，同比增长26.3% (http://www.199it.com/archives/1816623.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> 腾讯：GDC2026贡献全球游戏AI议题42%份额 (http://www.199it.com/archives/1816625.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> IDC：2026年全球PC出货量同比跌11.3%，内存短缺持续至2027年 (http://www.199it.com/archives/1816627.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> Counterpoint Research：2025年3月后中国新机均价将上涨15%-25% (http://www.199it.com/archives/1816631.html)
+2026-03-14 10:01:40 [INFO]   📥 抓取命中 -> 研究发现睡眠不足引发全身炎症反应，加速认知退化 (http://www.199it.com/archives/1816634.html)
+2026-03-14 10:01:40 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 14 条有效资讯
+2026-03-14 10:01:40 [INFO] ⏳ 板块 【 🤖 数智前沿】 排重后剩余 17 条数据交由 AI 筛选...
+2026-03-14 10:01:40 [INFO] 🤖 开始呼叫 AI 分析 [ 🤖 数智前沿] (共 17 条信源喂给AI)
+2026-03-14 10:01:42 [INFO] 🈳 AI 判定 [ 🤖 数智前沿] 无合格内容，已拦截。
+2026-03-14 10:01:42 [INFO] 
+📁 正在处理板块: 【📢 政策导向】
+2026-03-14 10:01:44 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcjd] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:01:45 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcwj] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:01:59 [INFO]   📥 抓取命中 -> Weekend Long Read: Pershing’s Chinese ― a Covenant of Life and Death (https://www.caixinglobal.com/2026-03-14/weekend-long-read-pershings-chinese-a-covenant-of-life-and-death-102422652.html)
+2026-03-14 10:01:59 [INFO]   📥 抓取命中 -> Meituan CEO Urges Focused Global Expansion, Warns Against ‘Blind’ Push (https://www.caixinglobal.com/2026-03-14/meituan-ceo-urges-focused-global-expansion-warns-against-blind-push-102422797.html)
+2026-03-14 10:01:59 [INFO]   📥 抓取命中 -> Li Auto Turns to AI After Sales Slump Pushes It Back Into the Red (https://www.caixinglobal.com/2026-03-14/li-auto-turns-to-ai-after-sales-slump-pushes-it-back-into-the-red-102422795.html)
+2026-03-14 10:01:59 [INFO]   📥 抓取命中 -> China Restricts New Land Supply for Commercial Property to Tackle Glut (https://www.caixinglobal.com/2026-03-14/china-restricts-new-land-supply-for-commercial-property-to-tackle-glut-102422793.html)
+2026-03-14 10:01:59 [INFO]   📥 抓取命中 -> HKEX Moves to Ease IPO Rules to Attract More Listings (https://www.caixinglobal.com/2026-03-14/hkex-moves-to-ease-ipo-rules-to-attract-more-listings-102422791.html)
+2026-03-14 10:01:59 [INFO]   📥 抓取命中 -> The Week Ahead (March 16-22): China and U.S. Hold Trade Talks in France (https://www.caixinglobal.com/2026-03-13/the-week-ahead-march-16-22-china-and-us-hold-trade-talks-in-france-102422789.html)
+2026-03-14 10:01:59 [INFO]   📥 抓取命中 -> Network Gear Maker FS Innovation Seeks $212 Million in Hong Kong IPO (https://www.caixinglobal.com/2026-03-13/network-gear-maker-fs-innovation-seeks-212-million-in-hong-kong-ipo-102422778.html)
+2026-03-14 10:01:59 [INFO] ✅ RSS源 [http://localhost:1200/caixinglobal/latest] 抓取完成，共获得 7 条有效资讯
+2026-03-14 10:01:59 [INFO] ✅ RSS源 [https://www.caixin.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:04:12 [INFO] ✅ RSS源 [https://www.ftchinese.com/rss/news] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:05:19 [INFO] ✅ RSS源 [http://localhost:1200/reuters/world/china] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:05:53 [INFO] ✅ RSS源 [http://localhost:1200/wsj/zh-cn/china] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:05:53 [INFO] ✅ RSS源 [http://localhost:1200/people/xjpjh] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:05:54 [INFO] ✅ RSS源 [http://localhost:1200/mrdx/today] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:05:57 [INFO]   📥 抓取命中 -> “伊朗想放部分油轮过海峡，前提是石油以人民币结算” (https://www.guancha.cn/internation/2026_03_14_810001_s.shtml)
+2026-03-14 10:05:57 [INFO]   📥 抓取命中 -> 领先美日！中国再突破高端材料“卡脖子” (https://www.guancha.cn/politics/2026_03_13_809986_s.shtml)
+2026-03-14 10:05:57 [INFO]   📥 抓取命中 -> 日方后知后觉：中国管制，关联日企有近万家！ (https://www.guancha.cn/internation/2026_03_13_809956_s.shtml)
+2026-03-14 10:05:57 [INFO] ✅ RSS源 [http://localhost:1200/guancha/headline] 抓取完成，共获得 3 条有效资讯
+2026-03-14 10:05:57 [INFO] ✅ RSS源 [https://localhost:1200/piyao/jrpy] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:05:58 [INFO] ✅ RSS源 [http://localhost:1200/thepaper/channel/25950] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:05:58 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/46] 抓取完成，共获得 0 条有效资讯
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> 大众汽车：2025年全球销量900万辆，营业利润88.7亿欧元同比下降53% (http://www.199it.com/archives/1816583.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> TrendForce：2026年全球智能手机产量将降至约11.35亿部，同比减少约10% (http://www.199it.com/archives/1816588.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> 迅雷：2025年全年营收31.7亿元，同比增长42.5% (http://www.199it.com/archives/1816593.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> QuestMobile：2025年12月智能电视小米月活5970万台居首 (http://www.199it.com/archives/1816595.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> Omdia：2026年全球PC出货量预计2.45亿台，同比下降12% (http://www.199it.com/archives/1816597.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> 寒武纪：2025年营收64.97亿元，同比增长453% (http://www.199it.com/archives/1816613.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> IDC：2026年全球个人电脑出货量下降11.3% (http://www.199it.com/archives/1816616.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> 高盛：2026年三星运营利润达239万亿韩元，同比大涨5倍 (http://www.199it.com/archives/1816618.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> Benchmark Mineral Intelligence：2026年2月全球电动车注册量下降11% (http://www.199it.com/archives/1816620.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> TrendForce：2025年全球晶圆代工产值1695亿美元，同比增长26.3% (http://www.199it.com/archives/1816623.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> 腾讯：GDC2026贡献全球游戏AI议题42%份额 (http://www.199it.com/archives/1816625.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> IDC：2026年全球PC出货量同比跌11.3%，内存短缺持续至2027年 (http://www.199it.com/archives/1816627.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> Counterpoint Research：2025年3月后中国新机均价将上涨15%-25% (http://www.199it.com/archives/1816631.html)
+2026-03-14 10:05:58 [INFO]   📥 抓取命中 -> 研究发现睡眠不足引发全身炎症反应，加速认知退化 (http://www.199it.com/archives/1816634.html)
+2026-03-14 10:05:58 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 14 条有效资讯
+2026-03-14 10:05:58 [INFO] ⏳ 板块 【📢 政策导向】 排重后剩余 24 条数据交由 AI 筛选...
+2026-03-14 10:05:58 [INFO] 🤖 开始呼叫 AI 分析 [📢 政策导向] (共 24 条信源喂给AI)
+2026-03-14 10:05:59 [INFO] 🈳 AI 判定 [📢 政策导向] 无合格内容，已拦截。
+2026-03-14 10:05:59 [INFO] ✅ 任务圆满完成

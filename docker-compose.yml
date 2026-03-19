@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  # 服务1: WeWe RSS - 专门搞定微信公众号
+  wewe-rss:
+    image: cooderl/wewe-rss-sqlite:latest
+    container_name: wewe-rss
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - AUTH_CODE=123456  # 【重要】这是你进入后台的密码，建议修改
+    restart: always
+
+  # 服务2: RSSHub - 搞定微博/政府网/36Kr等
+  rsshub:
+    image: diygod/rsshub:latest
+    container_name: rsshub
+    ports:
+      - "1200:1200"
+    environment:
+      - NODE_ENV=production
+      - CACHE_TYPE=redis
+      - REDIS_URL=redis://redis:6379/
+    depends_on:
+      - redis
+    restart: always
+
+  # 辅助服务: Redis (为 RSSHub 提供缓存，防止被反爬)
+  redis:
+    image: redis:alpine
+    restart: always

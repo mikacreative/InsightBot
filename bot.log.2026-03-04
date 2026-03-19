@@ -1,0 +1,234 @@
+2026-03-04 10:00:01 [INFO] ========================================
+2026-03-04 10:00:01 [INFO] 🚀 === 营销情报抓取任务开始 ===
+2026-03-04 10:00:01 [INFO] ========================================
+2026-03-04 10:00:01 [INFO] 
+📁 正在处理板块: 【📢 政策导向】
+2026-03-04 10:00:05 [INFO]   📥 抓取命中 -> 一图读懂《关于促进光伏组件综合利用的指导意见》 (https://www.miit.gov.cn/zwgk/zcjd/art/2026/art_45ea9636118f475b91d00ab389be3505.html)
+2026-03-04 10:00:05 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcjd] 抓取完成，共获得 1 条有效资讯
+2026-03-04 10:00:06 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcwj] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> Beijing Tightens Grip on Consumer Loans With Tougher Rate Caps (https://www.caixinglobal.com/2026-03-04/beijing-tightens-grip-on-consumer-loans-with-tougher-rate-caps-102419141.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> Pop Mart Sues 3D-Printer Firm in Labubu Copyright Fight (https://www.caixinglobal.com/2026-03-04/pop-mart-sues-3d-printer-firm-in-labubu-copyright-fight-102419139.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> China Intensifies Crackdown on Illicit Local Tax Incentives (https://www.caixinglobal.com/2026-03-04/china-intensifies-crackdown-on-illicit-local-tax-incentives-102419137.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> China Moves to Overhaul Corporate Credit Reporting With Clearer Exit Path (https://www.caixinglobal.com/2026-03-04/china-moves-to-overhaul-corporate-credit-reporting-with-clearer-exit-path-102419135.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> First Tanker Crosses Strait of Hormuz Since Iran’s Closure Threat (https://www.caixinglobal.com/2026-03-04/first-tanker-crosses-strait-of-hormuz-since-irans-closure-threat-102419133.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> Middle Eastern Airlines Resume Limited Flights After Conflict Grounds Region (https://www.caixinglobal.com/2026-03-04/middle-eastern-airlines-resume-limited-flights-after-conflict-grounds-region-102419131.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> China Intensifies Crackdown on Excessive ‘Bride Prices’ (https://www.caixinglobal.com/2026-03-03/china-intensifies-crackdown-on-excessive-bride-prices-102419078.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> Iran Conflict Disrupts China’s Auto Exports (https://www.caixinglobal.com/2026-03-03/iran-conflict-disrupts-chinas-auto-exports-102419067.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> Cultural, Legal Differences Test Chinese Firms in Malaysia, ADP Executive Says (https://www.caixinglobal.com/2026-03-03/cultural-legal-differences-test-chinese-firms-in-malaysia-adp-executive-says-102419065.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> Online Sellers Brace as Gulf Logistics Grinds to Near Halt After U.S.-Israel Strikes (https://www.caixinglobal.com/2026-03-03/online-sellers-brace-as-gulf-logistics-grinds-to-near-halt-after-us-israel-strikes-102419042.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> Interview: After Khamenei, Iran’s Future Rests With the Revolutionary Guard (https://www.caixinglobal.com/2026-03-03/interview-after-khamenei-irans-future-rests-with-the-revolutionary-guard-102419045.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> China’s Baby Bust Hits Primary Schools as Enrollment Plunges (https://www.caixinglobal.com/2026-03-03/chinas-baby-bust-hits-primary-schools-as-enrollment-plunges-102419024.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> Business Brief (March 3): China Opposes U.K. Sanctions on Local Firms (https://www.caixinglobal.com/2026-03-03/business-brief-march-3-china-opposes-uk-sanctions-on-local-firms-102419019.html)
+2026-03-04 10:00:18 [INFO]   📥 抓取命中 -> XPeng Wins Permit for Robotaxi Tests as CEO Sees Full Autonomy Within Three Years (https://www.caixinglobal.com/2026-03-03/xpeng-wins-permit-for-robotaxi-tests-as-ceo-sees-full-autonomy-within-three-years-102419016.html)
+2026-03-04 10:00:18 [INFO] ✅ RSS源 [http://localhost:1200/caixinglobal/latest] 抓取完成，共获得 14 条有效资讯
+2026-03-04 10:00:18 [INFO] ✅ RSS源 [http://localhost:1200/ft/chinese/hotstoryby7day] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:01:25 [INFO] ✅ RSS源 [http://localhost:1200/reuters/world/china] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:01:59 [INFO] ✅ RSS源 [http://localhost:1200/wsj/zh-cn/china] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:01:59 [INFO] ✅ RSS源 [http://localhost:1200/people/xjpjh] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:02:02 [INFO] ✅ RSS源 [http://localhost:1200/mrdx/today] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:02:05 [INFO]   📥 抓取命中 -> “日本发愁：特朗普光顾着打伊朗，那对付中国呢？” (https://www.guancha.cn/internation/2026_03_04_808689_s.shtml)
+2026-03-04 10:02:05 [INFO]   📥 抓取命中 -> “德黑兰几乎所有道路摄像头都被以色列黑了” (https://www.guancha.cn/internation/2026_03_03_808663_s.shtml)
+2026-03-04 10:02:05 [INFO]   📥 抓取命中 -> 拆东墙补西墙？韩媒先担心美国要把萨德撤走了 (https://www.guancha.cn/internation/2026_03_03_808640_s.shtml)
+2026-03-04 10:02:05 [INFO] ✅ RSS源 [http://localhost:1200/guancha/headline] 抓取完成，共获得 3 条有效资讯
+2026-03-04 10:02:05 [INFO] ✅ RSS源 [https://localhost:1200/piyao/jrpy] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:02:06 [INFO] ✅ RSS源 [http://localhost:1200/thepaper/channel/25950] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:02:06 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/46] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:02:06 [INFO] ⏳ 板块 【📢 政策导向】 排重后剩余 18 条数据交由 AI 筛选...
+2026-03-04 10:02:06 [INFO] 🤖 开始呼叫 AI 分析 [📢 政策导向] (共 18 条信源喂给AI)
+2026-03-04 10:03:16 [INFO] 🈳 AI 判定 [📢 政策导向] 无合格内容，已拦截。
+2026-03-04 10:03:16 [INFO] 
+📁 正在处理板块: 【💡 营销行业】
+2026-03-04 10:03:16 [INFO] ✅ RSS源 [http://localhost:1200/socialbeta/hunt] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:03:16 [INFO] ✅ RSS源 [http://localhost:1200/socialbeta/home] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:03:20 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:03:20 [INFO]   📥 抓取命中 -> 项目频道 - 荷兰麦当劳：别再用我们当密码了！ (https://www.digitaling.com/projects/362522.html)
+2026-03-04 10:03:20 [INFO] ✅ RSS源 [https://www.digitaling.com/rss] 抓取完成，共获得 1 条有效资讯
+2026-03-04 10:03:21 [INFO]   📥 抓取命中 -> Chili’s CMO promoted to translate winning playbook to Brinker’s other brand (https://www.marketingdive.com/news/chilis-cmo-promoted-to-translate-winning-playbook-to-brinkers-other-brand/813606/)
+2026-03-04 10:03:21 [INFO]   📥 抓取命中 -> Why Papa Johns is going back to basics in latest marketing shakeup (https://www.marketingdive.com/news/why-papa-johns-is-going-back-to-basics-in-latest-marketing-shakeup/813542/)
+2026-03-04 10:03:21 [INFO]   📥 抓取命中 -> Heineken looks to preserve Irish pub culture with documentary (https://www.marketingdive.com/news/heineken-looks-to-preserve-irish-pub-culture-with-documentary/813558/)
+2026-03-04 10:03:21 [INFO] ✅ RSS源 [https://www.marketingdive.com/feeds/news/] 抓取完成，共获得 3 条有效资讯
+2026-03-04 10:05:36 [INFO] ✅ RSS源 [https://feeds.feedburner.com/adweek/news] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:05:36 [INFO] ✅ RSS源 [http://localhost:1200/morketing/1] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:05:36 [INFO] ⏳ 板块 【💡 营销行业】 排重后剩余 4 条数据交由 AI 筛选...
+2026-03-04 10:05:36 [INFO] 🤖 开始呼叫 AI 分析 [💡 营销行业] (共 4 条信源喂给AI)
+2026-03-04 10:06:46 [INFO] 📤 推送板块 【💡 营销行业】 成功
+2026-03-04 10:06:49 [INFO] 
+📁 正在处理板块: 【📱 社交动态】
+2026-03-04 10:07:06 [INFO]   📥 抓取命中 -> 保险行业AI应用深度拆解：7家竞品的产品逻辑与3个市场空白 (https://www.woshipm.com/ai/6347447.html)
+2026-03-04 10:07:06 [INFO]   📥 抓取命中 -> 从 0 到生产，用这个方法让 AI Agent 少走了 3 个月弯路！ (https://www.woshipm.com/ai/6348135.html)
+2026-03-04 10:07:06 [INFO] ✅ RSS源 [http://localhost:1200/woshipm/popular/daily] 抓取完成，共获得 2 条有效资讯
+2026-03-04 10:07:07 [INFO] ✅ RSS源 [http://localhost:1200/36kr/motif/327685552129] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:07:09 [INFO] ✅ RSS源 [http://localhost:1200/huxiu/tag/103] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:07:09 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/79] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:07:42 [INFO] ✅ RSS源 [http://localhost:1200/scmp/tech] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:07:42 [INFO] ⏳ 板块 【📱 社交动态】 排重后剩余 2 条数据交由 AI 筛选...
+2026-03-04 10:07:42 [INFO] 🤖 开始呼叫 AI 分析 [📱 社交动态] (共 2 条信源喂给AI)
+2026-03-04 10:08:00 [INFO] 🈳 AI 判定 [📱 社交动态] 无合格内容，已拦截。
+2026-03-04 10:08:00 [INFO] 
+📁 正在处理板块: 【 🤖 数智前沿】
+2026-03-04 10:08:02 [INFO]   📥 抓取命中 -> 突发：阿里千问大模型掌舵人林俊旸卸任 (https://www.36kr.com/p/3707896631029890)
+2026-03-04 10:08:02 [INFO]   📥 抓取命中 -> 刚刚，苹果祭出地表最强AI PC，顶配6万5，M5 Max芯核弹AI性能暴涨4倍 (https://www.36kr.com/p/3707756341801349)
+2026-03-04 10:08:02 [INFO]   📥 抓取命中 -> 8点1氪丨油价或涨超70%；黄金白银出现断崖式下跌；iPhone 17使用一个月后橙色变粉色，苹果官方拒绝保修申请 (https://www.36kr.com/p/3707876236931461)
+2026-03-04 10:08:02 [INFO] ✅ RSS源 [http://localhost:1200/36kr/hot-list] 抓取完成，共获得 3 条有效资讯
+2026-03-04 10:08:03 [INFO]   📥 抓取命中 -> OpenClaw上身机器人，AI不仅能帮订外卖，还能替你跑腿了 (https://www.mittrchina.com/news/detail/16012)
+2026-03-04 10:08:03 [INFO]   📥 抓取命中 -> 熬夜刷题不如睡一觉！科学家证实：梦境真的能帮你找答案 (https://www.mittrchina.com/news/detail/16011)
+2026-03-04 10:08:03 [INFO]   📥 抓取命中 -> 中科院叫停高价OA期刊版面费，专家：没有过多影响，举双手赞成 (https://www.mittrchina.com/news/detail/16010)
+2026-03-04 10:08:03 [INFO]   📥 抓取命中 -> 英伟达40亿美元押注光子技术，AI算力卡在电上，黄仁勋决定花钱解决光的问题 (https://www.mittrchina.com/news/detail/16009)
+2026-03-04 10:08:03 [INFO]   📥 抓取命中 -> Meta眼镜录下的私密影像，最终出现在肯尼亚工人的屏幕上 (https://www.mittrchina.com/news/detail/16008)
+2026-03-04 10:08:03 [INFO] ✅ RSS源 [http://localhost:1200/mittrchina/index] 抓取完成，共获得 5 条有效资讯
+2026-03-04 10:08:07 [INFO]   📥 抓取命中 -> 晚点独家丨林俊旸提出离职，Qwen 多位负责人离开，团队或将分拆 (https://www.latepost.com/news/dj_detail?id=3443)
+2026-03-04 10:08:07 [INFO]   📥 抓取命中 -> 一年百亿利润的大疆无人机生意，护城河能挖多深 (https://www.latepost.com/news/dj_detail?id=3442)
+2026-03-04 10:08:07 [INFO] ✅ RSS源 [http://localhost:1200/latepost] 抓取完成，共获得 2 条有效资讯
+2026-03-04 10:08:09 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:08:09 [INFO] ✅ RSS源 [https://localhost:1200/sspai/matrix] 抓取完成，共获得 0 条有效资讯
+2026-03-04 10:08:09 [INFO] ⏳ 板块 【 🤖 数智前沿】 排重后剩余 10 条数据交由 AI 筛选...
+2026-03-04 10:08:09 [INFO] 🤖 开始呼叫 AI 分析 [ 🤖 数智前沿] (共 10 条信源喂给AI)
+2026-03-04 10:09:50 [INFO] 📤 推送板块 【 🤖 数智前沿】 成功
+2026-03-04 10:09:53 [INFO] ✅ 任务圆满完成
+2026-03-04 19:11:32 [INFO] ========================================
+2026-03-04 19:11:32 [INFO] 🚀 === 营销情报抓取任务开始 ===
+2026-03-04 19:11:32 [INFO] ========================================
+2026-03-04 19:11:32 [INFO] 
+📁 正在处理板块: 【💡 营销行业】
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 积极搞钱的副业党，捧出了下一个拓竹 (https://www.sohu.com/a/992536957_121987571)
+2026-03-04 19:11:36 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy] 抓取完成，共获得 1 条有效资讯
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 文章频道 - 10大“必逛理由”，带你抢占2026行业商机 (https://www.digitaling.com/articles/1467969.html)
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 文章频道 - 章泽天第二期播客，明显听劝 (https://www.digitaling.com/articles/1467556.html)
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 项目频道 - 吉谷电器：给李乃文加了点油 (https://www.digitaling.com/projects/361598.html)
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 文章频道 - 开工看点好的，推荐5个创意 (https://www.digitaling.com/articles/1467850.html)
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 项目频道 - 可颂在全家开展览，一些很新的「全家福」 (https://www.digitaling.com/projects/362200.html)
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 文章频道 - 官方发布《2025年微博热点趋势报告》，附PDF下载 (https://www.digitaling.com/articles/1467220.html)
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 项目频道 - 京东健康：用看得见的贴贴，言说未张口的爱 (https://www.digitaling.com/projects/362319.html)
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 文章频道 - 品牌开工仪式大盘点 (https://www.digitaling.com/articles/1467108.html)
+2026-03-04 19:11:36 [INFO]   📥 抓取命中 -> 项目频道 - 荷兰麦当劳：别再用我们当密码了！ (https://www.digitaling.com/projects/362522.html)
+2026-03-04 19:11:36 [INFO] ✅ RSS源 [https://www.digitaling.com/rss] 抓取完成，共获得 9 条有效资讯
+2026-03-04 19:11:39 [INFO] ✅ RSS源 [http://111.229.166.6:1200/topys] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:11:40 [INFO] ✅ RSS源 [https://www.marketingdive.com/feeds/news/] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:11:40 [INFO] ✅ RSS源 [http://localhost:1200/morketing/1] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:11:41 [INFO] ✅ RSS源 [https://walkthechat.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:11:42 [INFO]   📥 抓取命中 -> McCann&#8217;s Tyler Turnbull Enjoys Skiing for the Challenge—and Family Time (https://www.adweek.com/agencies/mccann-tyler-turnbull-skiing-challenge-family-time/)
+2026-03-04 19:11:42 [INFO] ✅ RSS源 [https://www.adweek.com/feed/] 抓取完成，共获得 1 条有效资讯
+2026-03-04 19:11:44 [INFO] ✅ RSS源 [https://blog.hubspot.com/marketing/rss.xml] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> How SK-II turned social pressure into one of China’s most effective beauty marketing strategies (https://daoinsights.com/works/sk-ii-china-marketing/)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> Chinese New Year data: tourism and holiday spending surge (https://daoinsights.com/news/chinese-new-year-data/)
+2026-03-04 19:11:47 [INFO] ✅ RSS源 [https://daoinsights.com/feed/] 抓取完成，共获得 2 条有效资讯
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 2026央视3·15晚会风控指南｜梅花数据全周期舆情护航 (https://www.meihua.info/article/6731581939663872)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 2026央视3·15晚会风控指南｜梅花数据全周期舆情护航 (https://www.meihua.info/article/6731571404489728)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 麦当劳随心配1+1泰国爆款风味上新 (https://www.meihua.info/shots/6731393589134336)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 爱慕 x 文淇：穿到外面，穿成封面 (https://www.meihua.info/shots/6724402113709056)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 七度空间：让世界的「默认值」，多一度「她」的空间 (https://www.meihua.info/shots/6731190359901184)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 梦龙黑白质感短片：在冬日，将阳光预约进你的日程 (https://www.meihua.info/shots/6730458398376960)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> Burberry 170 周年倾情呈献《传奇风衣：经典映像》 (https://www.meihua.info/shots/6730441098200064)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 警告! 这只清洁怪咖，正在承包所有铲屎官的快乐 (https://www.meihua.info/shots/6730215567131648)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 钉钉把废话文学做成了广告？ (https://www.meihua.info/shots/6728548488528896)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 老外集体“精中”：文化回流背后的出海新逻辑 (https://www.meihua.info/article/6729763295134720)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 天猫女性公益企划「Women for Women」：当一个女性走到台前...... (https://www.meihua.info/shots/6721301555889152)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 日本“消失的30年”购物中心业态变迁启示录 (https://www.meihua.info/article/6729742345372672)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 出海人亲历中东战火：“先别打了，我还有活要干！” (https://www.meihua.info/article/6730071029875712)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> 海南警方的抽象广告，谐音梗来得猝不及防 (https://www.meihua.info/shots/6724123591853056)
+2026-03-04 19:11:47 [INFO]   📥 抓取命中 -> otimebrand 橙时品牌原创案例 | ODB手作面包坊品牌形象VI设计 (https://www.meihua.info/shots/6731279616541696)
+2026-03-04 19:11:47 [INFO] ✅ RSS源 [https://www.meihua.info/feed] 抓取完成，共获得 15 条有效资讯
+2026-03-04 19:11:54 [INFO] ✅ RSS源 [https://www.motive.com.tw/feed] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:11:54 [INFO] ⏳ 板块 【💡 营销行业】 排重后剩余 28 条数据交由 AI 筛选...
+2026-03-04 19:11:54 [INFO] 🤖 开始呼叫 AI 分析 [💡 营销行业] (共 28 条信源喂给AI)
+2026-03-04 19:12:01 [INFO] 📤 推送板块 【💡 营销行业】 成功
+2026-03-04 19:12:03 [INFO] 
+📁 正在处理板块: 【 🤖 数智前沿】
+2026-03-04 19:12:05 [INFO]   📥 抓取命中 -> 千问模型负责人林俊旸提出离职，阿里高管紧急答疑 | 智能涌现独家 (https://www.36kr.com/p/3708425301749891)
+2026-03-04 19:12:05 [INFO]   📥 抓取命中 -> 万人大厂裁员40%，其实是一场表演 (https://www.36kr.com/p/3708083119419526)
+2026-03-04 19:12:05 [INFO]   📥 抓取命中 -> 突发：英特尔董事长换人 (https://www.36kr.com/p/3708061892718985)
+2026-03-04 19:12:05 [INFO]   📥 抓取命中 -> 刚刚，GPT-5.3 新模型撞车 Gemini，OpenClaw：谢谢你们 (https://www.36kr.com/p/3707769914487174)
+2026-03-04 19:12:05 [INFO]   📥 抓取命中 -> 一年净赚超3亿，广州Agent公司港股递表，俞永福是股东 (https://www.36kr.com/p/3707404321698185)
+2026-03-04 19:12:05 [INFO]   📥 抓取命中 -> 突发：阿里千问大模型掌舵人林俊旸卸任 (https://www.36kr.com/p/3707896631029890)
+2026-03-04 19:12:05 [INFO]   📥 抓取命中 -> 刚刚，苹果祭出地表最强AI PC，顶配6万5，M5 Max芯核弹AI性能暴涨4倍 (https://www.36kr.com/p/3707756341801349)
+2026-03-04 19:12:05 [INFO]   📥 抓取命中 -> 8点1氪丨油价或涨超70%；黄金白银出现断崖式下跌；iPhone 17使用一个月后橙色变粉色，苹果官方拒绝保修申请 (https://www.36kr.com/p/3707876236931461)
+2026-03-04 19:12:05 [INFO] ✅ RSS源 [http://localhost:1200/36kr/hot-list] 抓取完成，共获得 8 条有效资讯
+2026-03-04 19:12:10 [INFO]   📥 抓取命中 -> 苹果芯片大改！Pro/Max系列首次采用双拼架构，AI算力最高翻4倍 (https://www.mittrchina.com/news/detail/16016)
+2026-03-04 19:12:10 [INFO]   📥 抓取命中 -> AI吃电吃到电网崩溃，英伟达用反常识方案救场：“让服务器慢点跑” (https://www.mittrchina.com/news/detail/16015)
+2026-03-04 19:12:10 [INFO]   📥 抓取命中 -> OpenClaw安全审计翻车：安全通过率仅58.9%，六个安全维度一个直接挂零 (https://www.mittrchina.com/news/detail/16014)
+2026-03-04 19:12:10 [INFO] ✅ RSS源 [http://localhost:1200/mittrchina/index] 抓取完成，共获得 3 条有效资讯
+2026-03-04 19:12:12 [INFO]   📥 抓取命中 -> 晚点独家丨大钲资本已与雀巢签约，将收购 Blue Bottle (https://www.latepost.com/news/dj_detail?id=3444)
+2026-03-04 19:12:12 [INFO]   📥 抓取命中 -> 晚点独家丨林俊旸提出离职，Qwen 多位负责人离开，团队或将调整 (https://www.latepost.com/news/dj_detail?id=3443)
+2026-03-04 19:12:12 [INFO] ✅ RSS源 [http://localhost:1200/latepost] 抓取完成，共获得 2 条有效资讯
+2026-03-04 19:12:16 [INFO]   📥 抓取命中 -> 我花499找人上门安装OpenClaw，看到了AI时代最魔幻的一幕。 (https://www.sohu.com/a/992316903_121675819)
+2026-03-04 19:12:16 [INFO] ✅ RSS源 [http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3] 抓取完成，共获得 1 条有效资讯
+2026-03-04 19:12:16 [INFO] ✅ RSS源 [https://localhost:1200/sspai/matrix] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 产品经理拆解供应链金融保理：中小企融资破局，全流程数字化才是关键 (https://www.woshipm.com/pd/6348370.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 我的设计AI变丑了！——不稳定的AI的信任危机 (https://www.woshipm.com/ai/6348045.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 财务产品经理的AI时代生存指南 (https://www.woshipm.com/ai/6347605.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 我用openclaw和自己的技能杂交了5个副业方向，找到了月入过万的机会 (https://www.woshipm.com/ai/6348192.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 商品中心深水区：库存超卖、搜索推荐、O2O、多渠道同步——都在这里翻车 (https://www.woshipm.com/operate/6348040.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> AI产品经理核心能力是什么？ (https://www.woshipm.com/ai/6348466.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> SaaS 末日还是 AI 涅槃？硅谷正在疯传的真相 (https://www.woshipm.com/ai/6348465.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 去Polymarket上与人类赌博的OpenClaw，已经月入数万美元了 (https://www.woshipm.com/ai/6348461.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 邪修营销指南：微信群定向投流，算是被一小部分商家玩透了！ (https://www.woshipm.com/operate/6348433.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 单部播放破2亿！AI漫剧“狂飙”，大厂厮杀正酣 (https://www.woshipm.com/ai/6348387.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 100个关键词前瞻2026 零售篇61-70：悦己经济、生活方式忠诚度、经典重启、瞬时零售 (https://www.woshipm.com/marketing/6348382.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 一人天 + MiniMax M2.5，三种语言，三个产品 (https://www.woshipm.com/ai/6348369.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 2026 AI 时代：真正厉害的人，都在主动拥抱人工智能 (https://www.woshipm.com/ai/6348347.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 保险AI进入下半场：能做Demo不等于能上线，关键在“可解释、可追溯、可交付” (https://www.woshipm.com/ai/6348245.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 寿司郎的 SKU 战术：如何用 8 元爆品，撑起一家店的流量与毛利 (https://www.woshipm.com/marketing/6348204.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 这套AI短片制作流程，30分钟就能上手 (https://www.woshipm.com/ai/6348309.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> AI产品经理的招聘要求：这些技能最抢手 (https://www.woshipm.com/ai/6348259.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> GitHub星标奇迹—OpenClaw为何能超越Linux与React？ (https://www.woshipm.com/ai/6348082.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> AI时代的原生券商 (https://www.woshipm.com/ai/6348104.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 豆包，正在成为「新字节」 (https://www.woshipm.com/ai/6314022.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> AI Coding大有可为，但Vibe Coding还是先洗洗睡吧 (https://www.woshipm.com/ai/6348191.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 为什么Manus没有留在中国？ (https://www.woshipm.com/ai/6316838.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> OpenClaw大龙虾从新手到中级基础教程 (https://www.woshipm.com/ai/6347348.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 商品中心：一双鞋在系统里要建4层数据，90%的产品经理只画了SKU那一层 (https://www.woshipm.com/pd/6348037.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 别再被垃圾信息喂饱了！AI时代真正稀缺的，是判断力！ (https://www.woshipm.com/ai/6347999.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> OpenClaw 刷屏背后，产品经理必须守住 AI Agent 的安全边界 (https://www.woshipm.com/ai/6347964.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 深度解构《2028全球智能危机》：AI将如何粉碎打工人的“智力溢价”？ (https://www.woshipm.com/ai/6347912.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 保险行业AI应用深度拆解：7家竞品的产品逻辑与3个市场空白 (https://www.woshipm.com/ai/6347447.html)
+2026-03-04 19:12:35 [INFO]   📥 抓取命中 -> 从 0 到生产，用这个方法让 AI Agent 少走了 3 个月弯路！ (https://www.woshipm.com/ai/6348135.html)
+2026-03-04 19:12:35 [INFO] ✅ RSS源 [http://localhost:1200/woshipm/popular/daily] 抓取完成，共获得 29 条有效资讯
+2026-03-04 19:12:35 [INFO] ✅ RSS源 [http://localhost:1200/36kr/motif/327685552129] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:12:37 [INFO] ✅ RSS源 [http://localhost:1200/huxiu/tag/103] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:12:37 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/79] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:13:11 [INFO] ✅ RSS源 [http://localhost:1200/scmp/tech] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:13:12 [ERROR] ⚠️ RSS抓取失败 [https://technode.com/feed/]: Remote end closed connection without response
+2026-03-04 19:13:12 [INFO]   📥 抓取命中 -> 工业5.0指数：国家如何重塑2025年的经济进步 (http://www.199it.com/archives/1814481.html)
+2026-03-04 19:13:12 [INFO]   📥 抓取命中 -> 从矿产到兆瓦：重塑电动汽车、数据中心与电网的供应链韧性 (http://www.199it.com/archives/1802945.html)
+2026-03-04 19:13:12 [INFO]   📥 抓取命中 -> 体育流量重估：从收视高峰到价值重构 (http://www.199it.com/archives/1809639.html)
+2026-03-04 19:13:12 [INFO]   📥 抓取命中 -> 增长、疫情与气候：全球不平等的未来路径 (http://www.199it.com/archives/1751002.html)
+2026-03-04 19:13:12 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 4 条有效资讯
+2026-03-04 19:13:12 [INFO] ⏳ 板块 【 🤖 数智前沿】 排重后剩余 47 条数据交由 AI 筛选...
+2026-03-04 19:13:12 [INFO] 🤖 开始呼叫 AI 分析 [ 🤖 数智前沿] (共 47 条信源喂给AI)
+2026-03-04 19:13:25 [INFO] 📤 推送板块 【 🤖 数智前沿】 成功
+2026-03-04 19:13:28 [INFO] 
+📁 正在处理板块: 【📢 政策导向】
+2026-03-04 19:13:31 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcjd] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:13:32 [INFO] ✅ RSS源 [http://localhost:1200/gov/miit/zcwj] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> Tech Brief (March 4): Alibaba Launches Small AI Models Focused on Efficiency (https://www.caixinglobal.com/2026-03-04/tech-brief-march-4-alibaba-launches-small-ai-models-focused-on-efficiency-102419438.html)
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> Analysis: Qian Zhimin Bitcoin Case ― Victims and State Diverge on Applicable Law (https://www.caixinglobal.com/2026-03-04/analysis-qian-zhimin-bitcoin-case-victims-and-state-diverge-on-applicable-law-102419384.html)
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> China Says U.S., Israeli Strikes Derail Iran Nuclear Talks (https://www.caixinglobal.com/2026-03-04/china-says-us-israeli-strikes-derail-iran-nuclear-talks-102419378.html)
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> Business Brief (March 4): China Vows to Safeguard Energy Security Amid Middle East Tensions (https://www.caixinglobal.com/2026-03-04/business-brief-march-4-china-vows-to-safeguard-energy-security-amid-middle-east-tensions-102419331.html)
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> Gold Rebounds After Cash Crunch Selloff (https://www.caixinglobal.com/2026-03-04/gold-rebounds-after-cash-crunch-selloff-102419319.html)
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> China Venture Capital Pioneer Wang Shouren Dies at 84 (https://www.caixinglobal.com/2026-03-04/china-venture-capital-pioneer-wang-shouren-dies-at-84-102419312.html)
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> Beijing Tightens Grip on Consumer Loans With Tougher Rate Caps (https://www.caixinglobal.com/2026-03-04/beijing-tightens-grip-on-consumer-loans-with-tougher-rate-caps-102419141.html)
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> Pop Mart Sues 3D-Printer Firm in Labubu Copyright Fight (https://www.caixinglobal.com/2026-03-04/pop-mart-sues-3d-printer-firm-in-labubu-copyright-fight-102419139.html)
+2026-03-04 19:14:34 [INFO]   📥 抓取命中 -> China Intensifies Crackdown on Illicit Local Tax Incentives (https://www.caixinglobal.com/2026-03-04/china-intensifies-crackdown-on-illicit-local-tax-incentives-102419137.html)
+2026-03-04 19:14:34 [INFO] ✅ RSS源 [http://localhost:1200/caixinglobal/latest] 抓取完成，共获得 9 条有效资讯
+2026-03-04 19:14:35 [INFO] ✅ RSS源 [https://www.caixin.com/feed/] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:16:47 [INFO] ✅ RSS源 [https://www.ftchinese.com/rss/news] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:17:54 [INFO] ✅ RSS源 [http://localhost:1200/reuters/world/china] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:18:28 [INFO] ✅ RSS源 [http://localhost:1200/wsj/zh-cn/china] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:18:28 [INFO] ✅ RSS源 [http://localhost:1200/people/xjpjh] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:18:29 [INFO] ✅ RSS源 [http://localhost:1200/mrdx/today] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:18:32 [INFO]   📥 抓取命中 -> 急着向美国表忠心，立陶宛也想对伊朗出兵？ (https://www.guancha.cn/internation/2026_03_04_808740_s.shtml)
+2026-03-04 19:18:32 [INFO]   📥 抓取命中 -> 全国政协十四届四次会议开幕会 (https://www.guancha.cn/politics/2026_03_04_808734_s.shtml)
+2026-03-04 19:18:32 [INFO]   📥 抓取命中 -> 毫不掩饰！特朗普竟抱怨“美国中意的接班人大都死了” (https://www.guancha.cn/internation/2026_03_04_808708_s.shtml)
+2026-03-04 19:18:32 [INFO]   📥 抓取命中 -> “日本发愁：特朗普光顾着打伊朗，那对付中国呢？” (https://www.guancha.cn/internation/2026_03_04_808689_s.shtml)
+2026-03-04 19:18:32 [INFO] ✅ RSS源 [http://localhost:1200/guancha/headline] 抓取完成，共获得 4 条有效资讯
+2026-03-04 19:18:32 [INFO] ✅ RSS源 [https://localhost:1200/piyao/jrpy] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:18:33 [INFO] ✅ RSS源 [http://localhost:1200/thepaper/channel/25950] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:18:33 [INFO] ✅ RSS源 [http://localhost:1200/jiemian/list/46] 抓取完成，共获得 0 条有效资讯
+2026-03-04 19:18:33 [INFO]   📥 抓取命中 -> 工业5.0指数：国家如何重塑2025年的经济进步 (http://www.199it.com/archives/1814481.html)
+2026-03-04 19:18:33 [INFO]   📥 抓取命中 -> 从矿产到兆瓦：重塑电动汽车、数据中心与电网的供应链韧性 (http://www.199it.com/archives/1802945.html)
+2026-03-04 19:18:33 [INFO]   📥 抓取命中 -> 体育流量重估：从收视高峰到价值重构 (http://www.199it.com/archives/1809639.html)
+2026-03-04 19:18:33 [INFO] ✅ RSS源 [https://www.199it.com/feed] 抓取完成，共获得 3 条有效资讯
+2026-03-04 19:18:33 [INFO] ⏳ 板块 【📢 政策导向】 排重后剩余 16 条数据交由 AI 筛选...
+2026-03-04 19:18:33 [INFO] 🤖 开始呼叫 AI 分析 [📢 政策导向] (共 16 条信源喂给AI)
+2026-03-04 19:18:38 [INFO] 🈳 AI 判定 [📢 政策导向] 无合格内容，已拦截。
+2026-03-04 19:18:38 [INFO] ✅ 任务圆满完成
