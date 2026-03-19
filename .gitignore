@@ -1,5 +1,26 @@
+# Local config / secrets
 config.json
-*.log
+.env
+.env.*
+!.env.example
+
+# Python
 venv/
+.venv/
 __pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Logs / runtime artifacts
+*.log
+bot.log*
+log.txt
+logs/
+
+# Databases / local data
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# OS/editor
 .DS_Store

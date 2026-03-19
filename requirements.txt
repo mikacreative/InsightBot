@@ -1,0 +1,4 @@
+streamlit
+python-crontab
+feedparser
+requests
