@@ -1,0 +1,61 @@
+{
+    "wecom": {
+        "cid": "${WECOM_CID}",
+        "secret": "${WECOM_SECRET}",
+        "aid": "${WECOM_AID}"
+    },
+    "ai": {
+        "api_url": "${AI_API_URL}",
+        "api_key": "${AI_API_KEY}",
+        "model": "${AI_MODEL}",
+        "system_prompt": "你是一个拥有 10 年经验的资深营销情报官。你擅长从宏观政策、媒体动向及全球行业技术变化中，提炼出对于中国市场极具落地性的策略参考。你的目标是为专业营销咨询师筛选情报，辅助其为生活方式、运动、时尚、地产、酒店等领域的企业提供前瞻性的传播策略。\n\n【任务】\n从输入的新闻列表中，剔除低价值通稿，挑选出与中国市场营销、公关传播最具参考价值的 Top 5 资讯。\n\n【输出标准 - 必须严格遵守】\n1. 格式：\n### [重构后的标题](原文链接)\n> 💡 *摘要内容*\n\n2. 标题重写（中英双语逻辑）：\n   - 必须去除“震惊”、“重磅”、“突发”等虚假修饰词。\n   - 结构固定为：[主体/品牌] + [核心动作/事件]。\n   - 语言规则：若来源是中文，标题必须使用简体中文；若来源是英文，标题必须保留为英文（但需按结构重构）。\n\n3. 摘要重写：\n   - 字数：严格控制在 30 字以内！\n   - 语言：必须使用简体中文输出。\n   - 语气：平实、老练、一针见血，禁止翻译腔。\n   - 内容：仅包含“[发生了什么] + [对营销人的具体启示/影响]”。\n\n【系统最高强制指令】\n1. 宁缺毋滥：若列表内无符合标准的新闻，必须且只能回复：NONE。严禁解释原因。\n2. 格式红线：只要输出内容，标题必须带超链接，严禁丢失原文 Link。\n3. 行业聚焦：优先筛选与生活方式、运动、时尚、地产、酒店行业相关的品牌动作或消费趋势。\n\n不要输出任何开场白，直接列出内容。"
+    },
+    "feeds": {
+        "💡 营销行业": {
+            "rss": [
+                "https://www.digitaling.com/rss # 数英网",
+                "https://www.marketingdive.com/feeds/news/ # MarketingDive(原生RSS)-全球营销短讯(更新极快)",
+                "https://walkthechat.com/feed/ #WalktheChat Blog",
+                "https://www.adweek.com/feed/ #AdWeek",
+                "https://blog.hubspot.com/marketing/rss.xml #HubSpot",
+                "https://daoinsights.com/feed/ #DaoInsights",
+                "https://www.meihua.info/feed #梅花网",
+                "https://www.motive.com.tw/feed #Motive 台湾营销行业网站"
+            ],
+            "keywords": [
+                "广告公司",
+                "公关公司",
+                "营销",
+                "案例"
+            ],
+            "prompt": "严格筛选对于中国大陆的营销传播、公关传播具有参考意义的案例、行业变化、趋势解读等。在摘要中，必须一针见血地指出该案例的“核心锚点”与“背后的商业/传播策略”"
+        },
+        "🤖 数智前沿": {
+            "rss": [
+                "https://technode.com/feed/ #TechNode",
+                "https://www.199it.com/feed #199IT互联网数据咨询"
+            ],
+            "keywords": [
+                "AI",
+                "数字营销"
+            ],
+            "prompt": "聚焦于 社交平台机制变化、重要媒介产品更新、AI等前沿技术在创意内容或营销行业的发展和应用。坚决剔除坚决剔除毫无商业价值的自媒体八卦、人事变动、娱乐新闻、算法学术论文、自动驾驶硬件、生物医疗 AI 等与营销公关无关的纯技术内容。"
+        },
+        "📢 政策导向": {
+            "rss": [
+                "https://www.caixin.com/feed/ #财新网",
+                "https://www.ftchinese.com/rss/news # FT中文网",
+                "https://www.199it.com/feed #199IT互联网数据咨询"
+            ],
+            "keywords": [],
+            "prompt": "必须且只能保留中国大陆官方机构或者党央媒体发布，对企业经营、广告营销、数据安全有直接影响的政策、说明或指导性意见。重点提取对公关传播导向、危机防范、品牌声誉管理有重大指导意义的内容。坚决剔除一般的宏观经济指标、国际政治摩擦及社会治安案件。"
+        }
+    },
+    "settings": {
+        "report_title": "📅 营销早报 | {date}",
+        "empty_message": "📭 今日全网无重要更新。",
+        "show_footer": false,
+        "footer_text": "👀 [前往控制台调整策略]",
+        "news_api_key": "fcf70cb77cde46a494381729817abdf1"
+    }
+}
