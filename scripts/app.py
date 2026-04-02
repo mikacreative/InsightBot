@@ -8,6 +8,7 @@ import streamlit as st
 from crontab import CronTab
 
 from insightbot.paths import bot_log_file_path, config_file_path, cron_log_file_path, default_bot_dir
+from insightbot.discovery_service import DiscoveryService
 
 
 def main() -> None:
@@ -80,7 +81,7 @@ def main() -> None:
             except Exception:
                 st.error("保存失败，请检查权限。")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "📝 运行日志"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "📝 运行日志", "🔍 信源发现"])
 
     with tab1:
         st.subheader("内容板块控制")
@@ -210,6 +211,171 @@ def main() -> None:
                 st.error(f"读取日志出错: {e}")
         else:
             st.info("暂无深度日志。请点击侧边栏【立即手动运行】生成第一份报告。")
+
+    with tab5:
+        st.subheader("🔍 智能信源发现")
+        st.caption("AI 自动发现与你的板块相关的优质 RSS 源，由你决定是否采纳。")
+
+        try:
+            service = DiscoveryService(config_path=config_path)
+        except Exception as e:
+            st.error(f"初始化发现服务失败: {e}")
+            service = None
+
+        if service:
+            status = service.get_pool_status()
+
+            # ---- 状态栏 ----
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                enabled = st.toggle(
+                    "🟢 发现启用",
+                    value=status["enabled"],
+                    key="discovery_enabled_toggle",
+                )
+                if enabled != status["enabled"]:
+                    service.set_enabled(enabled)
+                    st.rerun()
+
+            with col2:
+                st.metric("📋 待处理", status["pending"])
+
+            with col3:
+                st.metric("✅ 已采纳", status["approved"])
+
+            with col4:
+                pool_pct = status["pool_current"] / max(status["pool_max"], 1) * 100
+                st.metric("🗄️ 池容量", f"{status['pool_current']}/{status['pool_max']} ({pool_pct:.0f}%)")
+
+            st.divider()
+
+            # ---- 手动发现按钮 ----
+            row1_col1, row1_col2 = st.columns(2)
+            with row1_col1:
+                if st.button("🚀 运行发现", type="primary", use_container_width=True):
+                    with st.spinner("正在运行发现策略..."):
+                        try:
+                            added = service.run_discovery()
+                            st.success(f"发现完成，新增 {added} 个推荐源")
+                        except Exception as e:
+                            st.error(f"发现失败: {e}")
+                    st.rerun()
+
+            # ---- 推荐池列表 ----
+            st.markdown("### 📋 推荐池")
+            pending_feeds = service.get_pending_feeds()
+
+            if not pending_feeds:
+                st.info("推荐池为空，点击「运行发现」开始发现新信源")
+            else:
+                display_feeds = service.refresh_pool(count=min(10, len(pending_feeds)))
+
+                # 获取所有板块
+                config_data = load_config()
+                all_categories = list(config_data.get("feeds", {}).keys())
+
+                # ---- 批量操作 ----
+                st.markdown("#### 批量操作")
+                selected = st.multiselect(
+                    "选择要操作的源（可多选）",
+                    options=[f["feed_url"] for f in display_feeds],
+                    format_func=lambda url: f"{url[:50]}..." if len(url) > 50 else url,
+                    key="batch_selected_feeds",
+                )
+
+                if selected:
+                    batch_col1, batch_col2 = st.columns(2)
+                    with batch_col1:
+                        batch_category = st.selectbox(
+                            "批量添加到板块",
+                            options=all_categories,
+                            key="batch_category_select",
+                        )
+                    with batch_col2:
+                        st.write(f"已选 {len(selected)} 个")
+
+                    batch_col3, batch_col4 = st.columns(2)
+                    with batch_col3:
+                        if st.button("✅ 批量采纳", use_container_width=True):
+                            for url in selected:
+                                service.approve(url, batch_category)
+                            st.success(f"已采纳 {len(selected)} 个到「{batch_category}」")
+                            st.rerun()
+
+                    with batch_col4:
+                        if st.button("❌ 批量忽略", use_container_width=True):
+                            for url in selected:
+                                service.reject(url)
+                            st.info(f"已忽略 {len(selected)} 个")
+                            st.rerun()
+
+                    st.divider()
+
+                # ---- 单个卡片列表 ----
+                st.markdown("#### 推荐详情")
+                for feed in display_feeds:
+                    url = feed.get("feed_url", "")
+                    strategy = feed.get("source_strategy", "unknown")
+                    query = feed.get("discovery_query", "")
+                    reason = feed.get("reason", "")
+                    quality = feed.get("estimated_quality", "medium")
+                    discovered_at = feed.get("discovered_at", "")
+
+                    quality_colors = {"high": "🟢", "medium": "🟡", "low": "🔴"}
+                    quality_label = quality_colors.get(quality, "⚪")
+
+                    strategy_labels = {"directory": "📁 目录", "search": "🔍 搜索", "ai": "🤖 AI"}
+                    strategy_label = strategy_labels.get(strategy, strategy)
+
+                    with st.container():
+                        col_card1, col_card2 = st.columns([4, 1])
+
+                        with col_card1:
+                            st.markdown(f"**{quality_label} {url}**")
+                            time_str = discovered_at[:10] if discovered_at else "N/A"
+                            st.caption(f"{strategy_label} | 查询: {query} | 发现: {time_str}")
+                            if reason:
+                                st.markdown(f"*{reason}*")
+
+                        with col_card2:
+                            selected_cat = st.selectbox(
+                                "添加到板块",
+                                options=["（忽略）"] + all_categories,
+                                key=f"cat_{hash(url)}",
+                                label_visibility="collapsed",
+                            )
+                            if selected_cat and selected_cat != "（忽略）":
+                                if st.button("✅ 采纳", key=f"approve_{hash(url)}", use_container_width=True):
+                                    ok = service.approve(url, selected_cat)
+                                    if ok:
+                                        st.success("已采纳!")
+                                        st.rerun()
+
+                            if st.button("❌ 忽略", key=f"reject_{hash(url)}", use_container_width=True):
+                                ok = service.reject(url)
+                                if ok:
+                                    st.info("已忽略")
+                                    st.rerun()
+
+                        st.divider()
+
+            # ---- 池管理 ----
+            with st.expander("⚙️ 池管理"):
+                keep_count = st.number_input(
+                    "保留最近处理记录数",
+                    min_value=0,
+                    max_value=500,
+                    value=50,
+                    step=10,
+                    key="keep_count_input",
+                )
+                if st.button("🧹 清理已处理记录"):
+                    service.cleanup_processed(keep_recent=keep_count)
+                    st.success("清理完成")
+                    st.rerun()
+
+                if st.button("📊 详细状态"):
+                    st.json(status)
 
 
 if __name__ == "__main__":
