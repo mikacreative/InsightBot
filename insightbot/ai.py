@@ -10,6 +10,8 @@ def chat_completion(
     user_text: str,
     temperature: float = 0.1,
     timeout_s: int = 120,
+    json_mode: bool = False,
+    json_schema: dict | None = None,
 ) -> str:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
@@ -20,7 +22,11 @@ def chat_completion(
         ],
         "temperature": temperature,
     }
+    if json_mode:
+        if json_schema:
+            payload["response_format"] = {"type": "json_schema", "json_schema": json_schema}
+        else:
+            payload["response_format"] = {"type": "json_object"}
     resp = requests.post(api_url, json=payload, headers=headers, timeout=timeout_s)
     data = resp.json()
     return data["choices"][0]["message"]["content"].strip()
-
