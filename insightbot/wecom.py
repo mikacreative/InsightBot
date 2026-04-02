@@ -1,7 +1,8 @@
 import requests
+from typing import Optional
 
 
-def get_access_token(cid: str, secret: str, timeout_s: int = 10) -> str | None:
+def get_access_token(cid: str, secret: str, timeout_s: int = 10) -> Optional[str]:
     url = (
         "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
         f"?corpid={cid}&corpsecret={secret}"

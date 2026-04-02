@@ -2,6 +2,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta
+from typing import List, Dict, Optional
 
 import feedparser
 
@@ -41,7 +42,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是一个拥有 10 年经验的资深营销情报
 # --------------------------------
 
 
-def _render_markdown(category: str, items: list[dict]) -> str:
+def _render_markdown(category: str, items: List[dict]) -> str:
     """将结构化 items 渲染为 Markdown 格式"""
     blocks = [f"## {category}\n"]
     for item in items:
@@ -56,7 +57,7 @@ def _render_markdown(category: str, items: list[dict]) -> str:
     return "".join(blocks).strip()
 
 
-def _validate_and_repair(raw: str) -> list[dict]:
+def _validate_and_repair(raw: str) -> List[dict]:
     """
     尝试解析 AI 返回的 JSON。
     解析成功：返回 items 列表（可能为空）
@@ -92,7 +93,7 @@ def _validate_and_repair(raw: str) -> list[dict]:
         return []
 
 
-def _ai_process_category(*, config: dict, category_name: str, news_list: list[dict], category_prompt: str, logger) -> str | None:
+def _ai_process_category(*, config: dict, category_name: str, news_list: List[dict], category_prompt: str, logger) -> Optional[str]:
     if not news_list:
         return None
 
@@ -108,7 +109,7 @@ def _ai_process_category(*, config: dict, category_name: str, news_list: list[di
 
     # 分批处理
     batch_size = MAX_ITEMS_PER_BATCH
-    all_selected: list[dict] = []
+    all_selected: List[dict] = []
 
     for batch_idx in range(0, len(all_items_md), batch_size):
         batch_lines = all_items_md[batch_idx:batch_idx + batch_size]
@@ -147,7 +148,7 @@ def _ai_process_category(*, config: dict, category_name: str, news_list: list[di
 
     # 去重（按 url）
     seen_urls: set[str] = set()
-    unique: list[dict] = []
+    unique: List[dict] = []
     for item in all_selected:
         if item["url"] not in seen_urls:
             seen_urls.add(item["url"])
@@ -178,7 +179,7 @@ def run_task(*, config: dict, logger) -> None:
 
     for category, feed_data in config.get("feeds", {}).items():
         logger.info(f"\n📁 正在处理板块: 【{category}】")
-        category_candidates: list[dict] = []
+        category_candidates: List[dict] = []
 
         rss_urls = feed_data.get("rss", [])
         for raw_url in rss_urls:
@@ -209,7 +210,7 @@ def run_task(*, config: dict, logger) -> None:
 
         if category_candidates:
             seen_links: set[str] = set()
-            unique_candidates: list[dict] = []
+            unique_candidates: List[dict] = []
             for item in category_candidates:
                 link = str(item.get("link", ""))
                 if link and link not in seen_links:

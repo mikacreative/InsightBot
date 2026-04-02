@@ -1,4 +1,5 @@
 import requests
+from typing import Optional
 
 
 def chat_completion(
@@ -11,7 +12,7 @@ def chat_completion(
     temperature: float = 0.1,
     timeout_s: int = 120,
     json_mode: bool = False,
-    json_schema: dict | None = None,
+    json_schema: Optional[dict] = None,
 ) -> str:
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
