@@ -256,6 +256,8 @@ def main() -> None:
             st.write("")  # 对齐
             if st.button("🔍 检测", type="primary", use_container_width=True):
                 resolve_triggered = True
+                st.session_state["resolved_feed_url"] = None  # 重置
+                st.session_state["resolved_domain"] = ""
 
         # ---- 检测结果展示 ----
         if resolve_triggered and url_input:
@@ -269,8 +271,11 @@ def main() -> None:
 
                 if result.status == "success":
                     feed_url = result.feed_url
+                    domain = url_clean.split("://")[-1].split("/")[0]
+                    st.session_state["resolved_feed_url"] = feed_url
+                    st.session_state["resolved_domain"] = domain
                     st.success(f"✅ 找到 RSS: {feed_url}")
-                    
+
                     # 选择板块
                     all_cats = list(load_config().get("feeds", {}).keys())
                     if all_cats:
@@ -280,17 +285,43 @@ def main() -> None:
                         with btn_col:
                             st.write("")
                             if st.button("📥 订阅", type="primary"):
-                                domain = url_clean.split("://")[-1].split("/")[0]
-                                ok = add_rss_feed_to_config(feed_url, sel_cat, domain)
-                                if ok:
-                                    st.success(f"已添加到「{sel_cat}」")
-                                else:
-                                    st.info("该源已在列表中")
+                                stored_feed_url = st.session_state.get("resolved_feed_url")
+                                stored_domain = st.session_state.get("resolved_domain", "")
+                                if stored_feed_url:
+                                    ok = add_rss_feed_to_config(stored_feed_url, sel_cat, stored_domain)
+                                    if ok:
+                                        st.success(f"已添加到「{sel_cat}」")
+                                        st.session_state["resolved_feed_url"] = None  # 成功后清除
+                                    else:
+                                        st.info("该源已在列表中")
                     else:
                         st.warning("请先创建板块")
                 else:
                     st.error(f"❌ 检测失败: {result.reason}")
                     st.info("提示：部分网站 RSSHub 确实无法转换，建议寻找该站的 RSS 源直接添加")
+
+        # ---- 已有待订阅结果时显示（rerun 后保留）----
+        elif st.session_state.get("resolved_feed_url"):
+            st.success(f"✅ 找到 RSS: {st.session_state['resolved_feed_url']}")
+            all_cats = list(load_config().get("feeds", {}).keys())
+            if all_cats:
+                cat_col, btn_col = st.columns([2, 1])
+                with cat_col:
+                    sel_cat = st.selectbox("添加到板块", options=all_cats, key="url_sel_cat_2")
+                with btn_col:
+                    st.write("")
+                    if st.button("📥 订阅", key="subscribe_btn_2", type="primary"):
+                        stored_feed_url = st.session_state.get("resolved_feed_url")
+                        stored_domain = st.session_state.get("resolved_domain", "")
+                        if stored_feed_url:
+                            ok = add_rss_feed_to_config(stored_feed_url, sel_cat, stored_domain)
+                            if ok:
+                                st.success(f"已添加到「{sel_cat}」")
+                                st.session_state["resolved_feed_url"] = None
+                            else:
+                                st.info("该源已在列表中")
+            else:
+                st.warning("请先创建板块")
 
         st.divider()
 
