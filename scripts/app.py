@@ -80,7 +80,7 @@ def main() -> None:
             except Exception:
                 st.error("保存失败，请检查权限。")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "📝 运行日志"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "📝 运行日志", "🔍 信源发现"])
 
     with tab1:
         st.subheader("内容板块控制")
