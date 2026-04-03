@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "insightbot"
+version = "0.1.0"
+description = "AI-powered marketing insight bot"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "feedparser",
+    "requests",
+    "httpx[socks]>=0.25.0",
+    "ddgs>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["insightbot*"]
