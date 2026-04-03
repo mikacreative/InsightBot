@@ -300,57 +300,6 @@ def main() -> None:
 
         st.divider()
 
-        # ---- 原有推荐池管理（保留）----
-        st.subheader("🔍 智能推荐池")
-        st.caption("系统自动发现的候选 RSS 源")
-
-        try:
-            service = DiscoveryService(config_path=config_path)
-        except Exception as e:
-            st.error(f"初始化失败: {e}")
-            service = None
-
-        if service:
-            status = service.get_pool_status()
-
-            # 状态栏
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                en = st.toggle("🟢 自动发现", value=status["enabled"], key="disc_toggle")
-                if en != status["enabled"]:
-                    service.set_enabled(en)
-                    st.rerun()
-            with c2:
-                st.metric("待处理", status["pending"])
-            with c3:
-                st.metric("已采纳", status["approved"])
-            with c4:
-                st.metric("池容量", f"{status['pool_current']}/{status['pool_max']}")
-
-            if st.button("🚀 运行发现"):
-                with st.spinner("运行中..."):
-                    added = service.run_discovery()
-                st.success(f"新增 {added} 个")
-                st.rerun()
-
-            # 推荐池列表
-            pending = service.get_pending_feeds()
-            if pending:
-                st.markdown("#### 待处理推荐")
-                for feed in pending[:5]:
-                    url = feed.get("feed_url", "")
-                    col_url, col_cat, col_btn = st.columns([3, 2, 1])
-                    with col_url:
-                        st.text(url[:50] + "..." if len(url) > 50 else url)
-                    with col_cat:
-                        cats = list(load_config().get("feeds", {}).keys())
-                        sel = st.selectbox("板块", [""] + cats, key=f"pend_{hash(url)}", label_visibility="collapsed")
-                    with col_btn:
-                        if sel and st.button("✅", key=f"app_{hash(url)}"):
-                            service.approve(url, sel)
-                            st.rerun()
-            else:
-                st.info("推荐池为空")
 
 if __name__ == "__main__":
     main()
