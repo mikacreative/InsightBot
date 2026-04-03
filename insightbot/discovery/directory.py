@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 DIRECTORY_SOURCES = [
     {
         "name": "rsshub",
-        "url": "https://rsshub.dev",
+        "url": "https://rsshub.app",
     },
     {
-        "name": "dinmen",
-        "url": "https://dinmen.github.io",
+        "name": "feed43",
+        "url": "https://feed43.com",
     },
 ]
 

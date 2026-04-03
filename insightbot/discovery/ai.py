@@ -148,6 +148,8 @@ class AIStrategy(DiscoveryStrategy):
         recommendations = self._parse_json_response(response)
         feeds = []
         for rec in recommendations[: self.max_recommendations]:
+            if not isinstance(rec, dict):
+                continue
             feed_url = rec.get("feed_url", "")
             if not feed_url or not feed_url.startswith("http"):
                 continue
