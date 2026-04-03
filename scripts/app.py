@@ -8,6 +8,7 @@ import streamlit as st
 from crontab import CronTab
 
 from insightbot.paths import bot_log_file_path, config_file_path, cron_log_file_path, default_bot_dir
+from insightbot.discovery.url_resolver import UrlResolver
 
 def main() -> None:
     bot_dir = default_bot_dir()
