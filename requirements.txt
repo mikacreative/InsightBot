@@ -3,8 +3,8 @@ streamlit
 python-crontab
 feedparser
 requests
-httpx>=0.25.0
-duckduckgo-search>=4.0.0
+httpx[socks]>=0.25.0
+ddgs>=3.0.0
 
 ## ── 测试依赖（本地开发用，生产环境可不安装）────────────────────────────────────
 pytest>=7.0

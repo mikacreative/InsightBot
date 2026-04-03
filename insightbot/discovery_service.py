@@ -64,8 +64,21 @@ class DiscoveryService:
         existing_feeds = self.config.get("feeds", {})
         if isinstance(existing_feeds, dict):
             all_feeds = []
-            for feeds_list in existing_feeds.values():
-                all_feeds.extend(feeds_list)
+            for cat_value in existing_feeds.values():
+                if isinstance(cat_value, dict) and "rss" in cat_value:
+                    # config 结构: { category: { "rss": ["url # name", ...], ... } }
+                    for item in cat_value["rss"]:
+                        if isinstance(item, str):
+                            # 格式: "url # name" 或纯 "url"
+                            parts = item.split(" # ", 1)
+                            url = parts[0].strip()
+                            name = parts[1].strip() if len(parts) > 1 else ""
+                            all_feeds.append({"feed_url": url, "name": name})
+                        elif isinstance(item, dict):
+                            all_feeds.append(item)
+                elif isinstance(cat_value, list):
+                    # 兼容: { category: [{"feed_url": ...}, ...] }
+                    all_feeds.extend(cat_value)
             self.existing_feeds = all_feeds
         elif isinstance(existing_feeds, list):
             self.existing_feeds = existing_feeds

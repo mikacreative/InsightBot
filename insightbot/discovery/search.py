@@ -32,7 +32,7 @@ class SearchStrategy(DiscoveryStrategy):
     def _search_duckduckgo(self, query: str) -> List[str]:
         """使用 duckduckgo-search 执行搜索"""
         try:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
         except ImportError:
             logger.warning(
                 "[SearchStrategy] duckduckgo-search not installed. "
