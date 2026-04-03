@@ -8,7 +8,7 @@ import streamlit as st
 from crontab import CronTab
 
 from insightbot.paths import bot_log_file_path, config_file_path, cron_log_file_path, default_bot_dir
-
+from insightbot.discovery.url_resolver import UrlResolver
 
 def main() -> None:
     bot_dir = default_bot_dir()
@@ -26,6 +26,30 @@ def main() -> None:
     def save_config(config: dict) -> None:
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
+
+    def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
+        """添加单个 RSS 源到 config.json"""
+        try:
+            cfg = load_config()
+            if "feeds" not in cfg:
+                cfg["feeds"] = {}
+            if category not in cfg["feeds"]:
+                cfg["feeds"][category] = {"rss": [], "keywords": [], "prompt": ""}
+            
+            # 去重检查
+            existing_urls = [item.split(" # ")[0].strip() if isinstance(item, str) else item.get("feed_url", "") 
+                           for item in cfg["feeds"][category].get("rss", [])]
+            if feed_url in existing_urls:
+                return False  # 已存在
+            
+            # 格式化: "url # name" 或纯 url
+            entry = f"{feed_url} # {feed_name}" if feed_name else feed_url
+            cfg["feeds"][category]["rss"].append(entry)
+            save_config(cfg)
+            return True
+        except Exception as e:
+            st.error(f"保存失败: {e}")
+            return False
 
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
     st.title("🚀 营销情报站 | 智控中心")
@@ -213,90 +237,155 @@ def main() -> None:
 
     with tab5:
         st.subheader("➕ 添加源")
-        st.caption("输入任意网站 URL，RSSHub 会自动尝试 RSS 化")
+        st.caption("支持单条或批量添加，自动通过 RSSHub 检测并 RSS 化")
 
-        # ---- 添加源输入区 ----
-        col_input, col_btn = st.columns([4, 1])
-        with col_input:
-            url_input = st.text_input(
-                "网站 URL",
-                placeholder="https://example.com",
-                label_visibility="collapsed",
-                key="url_add_input"
-            )
+        # ---- 批量输入区 ----
+        url_text = st.text_area(
+            "网站 URL（支持批量，每行一个或用逗号分隔）",
+            placeholder="https://example.com\nhttps://another.com\nhttps://third.com",
+            height=120,
+            key="batch_url_input"
+        )
 
-        resolve_triggered = False
+        col_mode, col_btn = st.columns([1, 4])
+        with col_mode:
+            st.write("")
         with col_btn:
-            st.write("")  # 对齐
-            if st.button("🔍 检测", type="primary", use_container_width=True):
-                resolve_triggered = True
-                st.session_state["resolved_feed_url"] = None  # 重置
-                st.session_state["resolved_domain"] = ""
-
-        # ---- 检测结果展示 ----
-        if resolve_triggered and url_input:
-            url_clean = url_input.strip()
-            if not url_clean.startswith("http"):
-                st.error("请输入以 http:// 或 https:// 开头的完整 URL")
-            else:
-                with st.spinner("正在通过 RSSHub 检测..."):
-                    resolver = UrlResolver()
-                    result = resolver.resolve(url_clean)
-
-
-                if result.status == "success":
-                    feed_url = result.feed_url
-                    domain = url_clean.split("://")[-1].split("/")[0]
-                    st.session_state["resolved_feed_url"] = feed_url
-                    st.session_state["resolved_domain"] = domain
-                    st.success(f"✅ 找到 RSS: {feed_url}")
-
-                    # 选择板块
-                    all_cats = list(load_config().get("feeds", {}).keys())
-                    if all_cats:
-                        cat_col, btn_col = st.columns([2, 1])
-                        with cat_col:
-                            sel_cat = st.selectbox("添加到板块", options=all_cats, key="url_sel_cat")
-                        with btn_col:
-                            st.write("")
-                            if st.button("📥 订阅", type="primary"):
-                                stored_feed_url = st.session_state.get("resolved_feed_url")
-                                stored_domain = st.session_state.get("resolved_domain", "")
-                                if stored_feed_url:
-                                    ok = add_rss_feed_to_config(stored_feed_url, sel_cat, stored_domain)
-                                    if ok:
-                                        st.success(f"已添加到「{sel_cat}」")
-                                        st.session_state["resolved_feed_url"] = None  # 成功后清除
-                                    else:
-                                        st.info("该源已在列表中")
-                    else:
-                        st.warning("请先创建板块")
+            if st.button("🔍 批量检测", type="primary", use_container_width=True):
+                if not url_text.strip():
+                    st.warning("请输入至少一个 URL")
                 else:
-                    st.error(f"❌ 检测失败: {result.reason}")
-                    st.info("提示：部分网站 RSSHub 确实无法转换，建议寻找该站的 RSS 源直接添加")
+                    # 解析URL列表
+                    raw_urls = url_text.strip().replace(",", "\n").split("\n")
+                    urls = [u.strip() for u in raw_urls if u.strip()]
 
-        # ---- 已有待订阅结果时显示（rerun 后保留）----
-        elif st.session_state.get("resolved_feed_url"):
-            st.success(f"✅ 找到 RSS: {st.session_state['resolved_feed_url']}")
+                    # 过滤有效URL
+                    valid_urls, invalid_msgs = [], []
+                    for u in urls:
+                        if u.startswith("http://") or u.startswith("https://"):
+                            valid_urls.append(u)
+                        else:
+                            invalid_msgs.append(f"⚠️ 无效格式已跳过: {u}")
+
+                    for msg in invalid_msgs:
+                        st.info(msg)
+
+                    if not valid_urls:
+                        st.error("没有找到有效的 URL（需以 http:// 或 https:// 开头）")
+                    else:
+                        resolver = UrlResolver()
+                        results = []
+
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+
+                        for i, url in enumerate(valid_urls):
+                            status_text.text(f"检测中 {i+1}/{len(valid_urls)}: {url[:50]}...")
+                            result = resolver.resolve(url)
+                            domain = url.split("://")[-1].split("/")[0]
+                            results.append({
+                                "original": url,
+                                "domain": domain,
+                                "status": result.status,
+                                "feed_url": result.feed_url if result.status == "success" else None,
+                                "reason": result.reason if result.status != "success" else None,
+                            })
+                            progress_bar.progress((i + 1) / len(valid_urls))
+
+                        status_text.text("检测完成！")
+                        st.session_state["batch_results"] = results
+
+        # ---- 批量检测结果展示 ----
+        if "batch_results" in st.session_state and st.session_state["batch_results"]:
+            results = st.session_state["batch_results"]
             all_cats = list(load_config().get("feeds", {}).keys())
-            if all_cats:
-                cat_col, btn_col = st.columns([2, 1])
-                with cat_col:
-                    sel_cat = st.selectbox("添加到板块", options=all_cats, key="url_sel_cat_2")
-                with btn_col:
-                    st.write("")
-                    if st.button("📥 订阅", key="subscribe_btn_2", type="primary"):
-                        stored_feed_url = st.session_state.get("resolved_feed_url")
-                        stored_domain = st.session_state.get("resolved_domain", "")
-                        if stored_feed_url:
-                            ok = add_rss_feed_to_config(stored_feed_url, sel_cat, stored_domain)
-                            if ok:
-                                st.success(f"已添加到「{sel_cat}」")
-                                st.session_state["resolved_feed_url"] = None
+
+            st.markdown(f"#### 📋 检测结果（{len(results)} 个）")
+
+            # 表头
+            hdr_col1, hdr_col2, hdr_col3, hdr_col4 = st.columns([3, 1, 3, 1])
+            with hdr_col1:
+                st.markdown("**原始 URL**")
+            with hdr_col2:
+                st.markdown("**状态**")
+            with hdr_col3:
+                st.markdown("**RSS / 原因**")
+            with hdr_col4:
+                st.markdown("**板块**")
+
+            st.markdown("---*")
+
+            # 每行结果 + 分类选择
+            if "batch_cats" not in st.session_state:
+                st.session_state["batch_cats"] = {}
+
+            any_success = False
+            for idx, r in enumerate(results):
+                col1, col2, col3, col4 = st.columns([3, 1, 3, 1])
+                with col1:
+                    display_url = r["original"][:60] + ("..." if len(r["original"]) > 60 else "")
+                    st.text(display_url)
+                with col2:
+                    if r["status"] == "success":
+                        st.markdown("✅ 成功")
+                        any_success = True
+                    else:
+                        st.markdown(f"❌ 失败")
+                with col3:
+                    if r["status"] == "success":
+                        st.text(r["feed_url"][:70] + ("..." if r["feed_url"] and len(r["feed_url"]) > 70 else ""))
+                    else:
+                        st.caption(r["reason"][:70] if r["reason"] else "未知原因")
+                with col4:
+                    if r["status"] == "success" and all_cats:
+                        default_cat = st.session_state["batch_cats"].get(r["original"], all_cats[0])
+                        sel = st.selectbox(
+                            "板块",
+                            options=all_cats,
+                            index=all_cats.index(default_cat) if default_cat in all_cats else 0,
+                            key=f"batch_cat_{idx}",
+                            label_visibility="collapsed"
+                        )
+                        st.session_state["batch_cats"][r["original"]] = sel
+                    elif r["status"] == "success":
+                        st.warning("无板块")
+
+            st.markdown("---*")
+
+            # 批量订阅按钮
+            if any_success and all_cats:
+                col_sub, col_clr = st.columns([1, 4])
+                with col_sub:
+                    if st.button("📥 批量订阅", type="primary", use_container_width=True):
+                        added, skipped, failed = 0, 0, 0
+                        for r in results:
+                            if r["status"] == "success":
+                                cat = st.session_state["batch_cats"].get(r["original"], all_cats[0])
+                                ok = add_rss_feed_to_config(r["feed_url"], cat, r["domain"])
+                                if ok:
+                                    added += 1
+                                else:
+                                    skipped += 1
                             else:
-                                st.info("该源已在列表中")
-            else:
-                st.warning("请先创建板块")
+                                failed += 1
+
+                        msg = f"添加 {added} 个源"
+                        if skipped:
+                            msg += f"，{skipped} 个已存在"
+                        if failed:
+                            msg += f"，{failed} 个失败"
+                        st.success(msg)
+                        st.session_state["batch_results"] = None
+                        st.session_state["batch_cats"] = {}
+                        st.rerun()
+
+                with col_clr:
+                    if st.button("🗑️ 清除结果", use_container_width=True):
+                        st.session_state["batch_results"] = None
+                        st.session_state["batch_cats"] = {}
+                        st.rerun()
+            elif not all_cats:
+                st.warning("请先创建板块后再订阅")
 
         st.divider()
 

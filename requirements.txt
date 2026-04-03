@@ -3,6 +3,11 @@ streamlit
 python-crontab
 feedparser
 requests
+httpx[socks]>=0.25.0
+ddgs>=3.0.0
+
+## ── 本地包（editable install）─────────────────────────────────────────────
+-e insightbot/
 
 ## ── 本地包（editable install）─────────────────────────────────────────────
 -e insightbot/
