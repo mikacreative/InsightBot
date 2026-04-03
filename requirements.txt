@@ -4,6 +4,9 @@ python-crontab
 feedparser
 requests
 
+## ── 本地包（editable install）─────────────────────────────────────────────
+-e insightbot/
+
 ## ── 测试依赖（本地开发用，生产环境可不安装）────────────────────────────────────
 pytest>=7.0
 pytest-mock
