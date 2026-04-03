@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 DIRECTORY_SOURCES = [
     {
         "name": "rsshub",
-        "url": "https://rsshub.app",
+        "url": "http://localhost:1200",
     },
     {
         "name": "feed43",

@@ -12,7 +12,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_RSSHUB_BASE = "https://rsshub.app"
+DEFAULT_RSSHUB_BASE = "http://localhost:1200"
 
 
 @dataclass
