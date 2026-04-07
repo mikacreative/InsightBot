@@ -15,6 +15,11 @@ def logs_dir(bot_dir: str | None = None) -> str:
     return os.getenv("LOGS_DIR", os.path.join(bot_dir, "logs"))
 
 
+def data_dir(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("DATA_DIR", os.path.join(bot_dir, "data"))
+
+
 def config_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("CONFIG_FILE", os.path.join(bot_dir, "config.json"))
@@ -38,3 +43,8 @@ def bot_log_file_path(bot_dir: str | None = None) -> str:
 def cron_log_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("LOG_FILE", os.path.join(logs_dir(bot_dir), "cron.log"))
+
+
+def feed_health_cache_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("FEED_HEALTH_CACHE_FILE", os.path.join(data_dir(bot_dir), "feed_health_cache.json"))

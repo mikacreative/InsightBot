@@ -13,59 +13,15 @@ debug_rss_check.py — RSS 信源健康度检查工具
 """
 import os
 import sys
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-
-import feedparser
 
 REPO_ROOT = Path(__file__).parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from insightbot.config import load_runtime_config
+from insightbot.feed_health import get_feed_health_snapshot
 from insightbot.paths import config_content_file_path, config_file_path, default_bot_dir
-
-
-def check_feed(url: str) -> dict:
-    """检查单个 RSS 源的状态，返回检查结果字典。"""
-    result = {
-        "url": url,
-        "status": "unknown",
-        "total_entries": 0,
-        "recent_entries": 0,  # 24h 内
-        "latest_pub": None,
-        "error": None,
-    }
-    try:
-        start = time.time()
-        feed = feedparser.parse(url)
-        elapsed = time.time() - start
-
-        if feed.bozo and not feed.entries:
-            result["status"] = "error"
-            result["error"] = str(feed.bozo_exception) if feed.bozo_exception else "解析失败"
-            return result
-
-        result["total_entries"] = len(feed.entries)
-        result["status"] = "ok"
-        result["elapsed_s"] = round(elapsed, 2)
-
-        latest_dt = None
-        for entry in feed.entries:
-            if hasattr(entry, "published_parsed") and entry.published_parsed:
-                dt = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-                if latest_dt is None or dt > latest_dt:
-                    latest_dt = dt
-                if datetime.now() - dt <= timedelta(hours=24):
-                    result["recent_entries"] += 1
-
-        result["latest_pub"] = latest_dt
-
-    except Exception as e:
-        result["status"] = "error"
-        result["error"] = str(e)
-
-    return result
 
 
 def main():
@@ -85,43 +41,35 @@ def main():
     print(f"  检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
 
-    total_ok = 0
-    total_warn = 0
-    total_error = 0
+    snapshot = get_feed_health_snapshot(feeds, bot_dir=bot_dir, use_cache=False, force_refresh=True)
 
-    for category, feed_data in feeds.items():
-        rss_urls = feed_data.get("rss", [])
-        print(f"\n📂 板块: {category}（共 {len(rss_urls)} 个信源）")
+    for category_result in snapshot["categories"]:
+        print(f"\n📂 板块: {category_result['category']}（共 {category_result['feed_count']} 个信源）")
 
-        for raw_url in rss_urls:
-            url = raw_url.split("#")[0].strip()
-            if not url:
-                continue
-
-            print(f"  🔍 检查: {url[:70]}...")
-            result = check_feed(url)
+        for result in category_result["feeds"]:
+            print(f"  🔍 检查: {result['url'][:70]}...")
 
             if result["status"] == "error":
-                print(f"  ❌ 状态: 错误 — {result['error']}")
-                total_error += 1
-            elif result["recent_entries"] == 0:
+                print(f"  ❌ 状态: 错误 [{result.get('error_type')}] — {result.get('error_message')}")
+            elif result["status"] == "stale":
                 print(f"  ⚠️  状态: 可达，但近 24h 无更新（共 {result['total_entries']} 篇文章）")
                 if result["latest_pub"]:
-                    print(f"       最新文章时间: {result['latest_pub'].strftime('%Y-%m-%d %H:%M')}")
-                total_warn += 1
+                    latest_dt = datetime.fromisoformat(result["latest_pub"])
+                    print(f"       最新文章时间: {latest_dt.strftime('%Y-%m-%d %H:%M')}")
             else:
-                elapsed_str = f"，响应 {result.get('elapsed_s', '?')}s" if "elapsed_s" in result else ""
+                elapsed_str = f"，响应 {result.get('elapsed_s', '?')}s" if result.get("elapsed_s") is not None else ""
                 print(f"  ✅ 状态: 正常{elapsed_str}")
                 print(f"       近 24h: {result['recent_entries']} 篇 / 共 {result['total_entries']} 篇")
                 if result["latest_pub"]:
-                    print(f"       最新文章: {result['latest_pub'].strftime('%Y-%m-%d %H:%M')}")
-                total_ok += 1
+                    latest_dt = datetime.fromisoformat(result["latest_pub"])
+                    print(f"       最新文章: {latest_dt.strftime('%Y-%m-%d %H:%M')}")
 
     print("\n" + "─" * 70)
-    print(f"  检查结果汇总: ✅ 正常 {total_ok}  ⚠️ 无更新 {total_warn}  ❌ 错误 {total_error}")
-    if total_error > 0:
+    counts = snapshot["counts"]
+    print(f"  检查结果汇总: ✅ 正常 {counts['ok']}  ⚠️ 无更新 {counts['stale']}  ❌ 错误 {counts['error']}")
+    if counts["error"] > 0:
         print("  建议：检查错误信源的 URL 是否正确，或本地 Docker 服务是否运行。")
-    if total_warn > 0:
+    if counts["stale"] > 0:
         print("  建议：无更新的信源可能是今日确实无新内容，或 RSS 源更新频率较低。")
     print("─" * 70 + "\n")
 

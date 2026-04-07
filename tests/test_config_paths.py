@@ -15,10 +15,12 @@ import pytest
 
 from insightbot.paths import (
     default_bot_dir,
+    data_dir,
     config_content_file_path,
     config_file_path,
     config_secrets_file_path,
     bot_log_file_path,
+    feed_health_cache_file_path,
     logs_dir,
 )
 from insightbot.config import load_json_config, load_runtime_config
@@ -83,6 +85,24 @@ class TestSplitConfigPaths:
         with patch.dict(os.environ, env_without, clear=True):
             result = config_secrets_file_path(str(tmp_path))
         assert result == str(tmp_path / "config.secrets.json")
+
+    def test_data_dir_defaults_to_data_subdir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = data_dir(str(tmp_path))
+        assert result == str(tmp_path / "data")
+
+    def test_feed_health_cache_path_defaults_to_data_dir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("FEED_HEALTH_CACHE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = feed_health_cache_file_path(str(tmp_path))
+        assert result == str(tmp_path / "data" / "feed_health_cache.json")
 
 
 # ── bot_log_file_path 测试 ────────────────────────────────────────────────────

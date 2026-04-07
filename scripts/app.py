@@ -9,12 +9,14 @@ import streamlit as st
 from crontab import CronTab
 
 from insightbot.config import load_runtime_config
+from insightbot.feed_health import CACHE_TTL_SECONDS, get_feed_health_snapshot, load_health_cache
 from insightbot.paths import (
     bot_log_file_path,
     config_content_file_path,
     config_file_path,
     cron_log_file_path,
     default_bot_dir,
+    feed_health_cache_file_path,
 )
 from insightbot.discovery.url_resolver import UrlResolver
 from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, run_prompt_debug
@@ -186,6 +188,15 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
+    def render_health_chip(status: str) -> str:
+        chip_map = {
+            "ok": ("正常", "ib-chip-success"),
+            "stale": ("无更新", "ib-chip-warning"),
+            "error": ("错误", "ib-chip-error"),
+        }
+        label, css_class = chip_map.get(status, ("未知", "ib-chip-neutral"))
+        return f'<span class="ib-chip {css_class}">{label}</span>'
+
     def render_kpi_strip(*, candidate_count: int, selected_count: int, using_fallback: bool, prompt_changed: bool) -> None:
         fallback_label = "内置样例" if using_fallback else "真实 RSS"
         draft_state = "已修改" if prompt_changed else "与当前一致"
@@ -252,6 +263,25 @@ def main() -> None:
                 },
                 expanded=False,
             )
+
+    def format_timestamp(value: str | None) -> str:
+        if not value:
+            return "—"
+        try:
+            return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return value
+
+    def summarize_cache_age(seconds: int | None) -> str:
+        if seconds is None:
+            return "未知"
+        if seconds < 60:
+            return f"{seconds}s"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes} 分钟"
+        hours = minutes // 60
+        return f"{hours} 小时"
 
     def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
         """添加单个 RSS 源到 config.json"""
@@ -336,7 +366,7 @@ def main() -> None:
             except Exception:
                 st.error("保存失败，请检查权限。")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "📝 运行日志", "🔍 信源发现"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志", "🔍 信源发现"])
 
     with tab1:
         st.subheader("内容板块控制")
@@ -696,6 +726,123 @@ def main() -> None:
                 st.markdown("</div>", unsafe_allow_html=True)
 
     with tab4:
+        st.subheader("RSS 源健康度")
+        st.caption("缓存优先、手动刷新。优先帮助管理员判断：源是坏了、没更新，还是只是今天没有候选。")
+
+        health_snapshot = load_health_cache(bot_dir)
+
+        header_col1, header_col2, header_col3 = st.columns([1.3, 1.0, 1.2])
+        with header_col1:
+            if st.button("🔄 立即刷新健康度", type="primary", use_container_width=True):
+                with st.spinner("正在全量检查 RSS 源，请稍候..."):
+                    health_snapshot = get_feed_health_snapshot(
+                        config.get("feeds", {}),
+                        bot_dir=bot_dir,
+                        use_cache=False,
+                        force_refresh=True,
+                    )
+                st.success("RSS 健康度已刷新。")
+        with header_col2:
+            only_problem_feeds = st.toggle("仅看异常/无更新", value=False)
+        with header_col3:
+            stale_7d_only = st.toggle("仅看 7 天未更新", value=False)
+
+        if health_snapshot is None:
+            st.info("当前还没有健康度缓存。点击“立即刷新健康度”后，控制台会生成第一份检查结果。")
+        else:
+            checked_at = health_snapshot.get("checked_at")
+            age_text = summarize_cache_age(health_snapshot.get("cache_age_seconds"))
+            source_label = "缓存结果" if health_snapshot.get("source") == "cache" else "刚刚刷新"
+            if health_snapshot.get("is_stale"):
+                st.warning(
+                    f"当前展示的是缓存结果，检查时间 {format_timestamp(checked_at)}，缓存年龄约 {age_text}，已超过 {CACHE_TTL_SECONDS // 60} 分钟。"
+                )
+            else:
+                st.caption(
+                    f"检查时间：{format_timestamp(checked_at)} | 数据来源：{source_label} | 缓存年龄：{age_text} | 缓存文件：{feed_health_cache_file_path(bot_dir)}"
+                )
+
+            counts = health_snapshot.get("counts", {})
+            error_types = health_snapshot.get("error_types", {})
+            st.markdown(
+                f"""
+                <div class="ib-kpi-grid">
+                  <div class="ib-kpi-card">
+                    <div class="ib-kpi-label">正常源</div>
+                    <div class="ib-kpi-value">{counts.get('ok', 0)}</div>
+                  </div>
+                  <div class="ib-kpi-card">
+                    <div class="ib-kpi-label">无更新</div>
+                    <div class="ib-kpi-value">{counts.get('stale', 0)}</div>
+                  </div>
+                  <div class="ib-kpi-card">
+                    <div class="ib-kpi-label">错误源</div>
+                    <div class="ib-kpi-value">{counts.get('error', 0)}</div>
+                  </div>
+                  <div class="ib-kpi-card">
+                    <div class="ib-kpi-label">错误类型分布</div>
+                    <div class="ib-kpi-value" style="font-size:1.0rem;">{", ".join(f"{k}:{v}" for k, v in error_types.items()) or "无"}</div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            for category_result in health_snapshot.get("categories", []):
+                visible_feeds = []
+                for feed in category_result.get("feeds", []):
+                    latest_pub = feed.get("latest_pub")
+                    older_than_7d = False
+                    if latest_pub:
+                        try:
+                            older_than_7d = (datetime.now() - datetime.fromisoformat(latest_pub)).days >= 7
+                        except ValueError:
+                            older_than_7d = False
+
+                    if only_problem_feeds and feed.get("status") == "ok":
+                        continue
+                    if stale_7d_only and not (feed.get("status") == "stale" and older_than_7d):
+                        continue
+                    visible_feeds.append(feed)
+
+                if not visible_feeds:
+                    continue
+
+                category_counts = category_result.get("counts", {})
+                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div class="ib-section-title">{category_result['category']}</div>
+                    <div class="ib-chip-row">
+                      <span class="ib-chip ib-chip-success">正常 {category_counts.get('ok', 0)}</span>
+                      <span class="ib-chip ib-chip-warning">无更新 {category_counts.get('stale', 0)}</span>
+                      <span class="ib-chip ib-chip-error">错误 {category_counts.get('error', 0)}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                for feed in visible_feeds:
+                    st.markdown(
+                        f"""
+                        <div class="ib-panel" style="margin-top:12px; margin-bottom:0;">
+                          <div class="ib-chip-row">{render_health_chip(feed.get('status', 'unknown'))}</div>
+                          <div style="font-weight:700; margin:8px 0 6px;">{feed.get('url', '')}</div>
+                          <div class="ib-section-copy" style="margin-bottom:6px;">
+                            近 24h: {feed.get('recent_entries', 0)} 条 | 总条数: {feed.get('total_entries', 0)} | 最近发布时间: {format_timestamp(feed.get('latest_pub'))}
+                          </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    if feed.get("status") == "error":
+                        st.error(f"{feed.get('error_type', 'unknown_error')}: {feed.get('error_message', '未知错误')}")
+                    else:
+                        elapsed = feed.get("elapsed_s")
+                        if elapsed is not None:
+                            st.caption(f"响应耗时：{elapsed}s")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+    with tab5:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
         st.caption("日志已开启企业级轮转模式（自动保留 30 天，每日切割）。在这里，你能看到AI到底看了哪些原文链接。")
 
@@ -725,7 +872,7 @@ def main() -> None:
         else:
             st.info("暂无深度日志。请点击侧边栏【立即手动运行】生成第一份报告。")
 
-    with tab5:
+    with tab6:
         st.subheader("➕ 添加源")
         st.caption("支持单条或批量添加，自动通过 RSSHub 检测并 RSS 化")
 
