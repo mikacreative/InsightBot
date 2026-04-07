@@ -50,6 +50,169 @@ def main() -> None:
         logger.propagate = False
         return logger
 
+    def render_prompt_debug_styles() -> None:
+        st.markdown(
+            """
+            <style>
+            .ib-panel {
+                border: 1px solid rgba(33, 37, 41, 0.10);
+                border-radius: 18px;
+                padding: 18px 20px;
+                background: linear-gradient(180deg, #ffffff 0%, #f7f3ea 100%);
+                box-shadow: 0 8px 24px rgba(55, 41, 18, 0.06);
+                margin-bottom: 14px;
+            }
+            .ib-hero {
+                border: 1px solid rgba(26, 54, 93, 0.08);
+                border-radius: 22px;
+                padding: 20px 22px;
+                background: linear-gradient(135deg, #fbf4e8 0%, #eef6f7 100%);
+                margin-bottom: 18px;
+            }
+            .ib-eyebrow {
+                font-size: 0.80rem;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                color: #7a5c2e;
+                font-weight: 700;
+                margin-bottom: 6px;
+            }
+            .ib-title {
+                font-size: 1.45rem;
+                font-weight: 800;
+                color: #1f2d3d;
+                margin-bottom: 8px;
+            }
+            .ib-subtitle {
+                color: #4f5d6b;
+                font-size: 0.98rem;
+                line-height: 1.55;
+            }
+            .ib-chip-row {
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+                margin-top: 14px;
+            }
+            .ib-chip {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 7px 12px;
+                border-radius: 999px;
+                font-size: 0.88rem;
+                font-weight: 700;
+                background: #ffffff;
+                color: #2f3e46;
+                border: 1px solid rgba(47, 62, 70, 0.10);
+            }
+            .ib-chip-success {
+                background: #eaf8ef;
+                color: #1e6b3b;
+                border-color: rgba(30, 107, 59, 0.18);
+            }
+            .ib-chip-warning {
+                background: #fff4dd;
+                color: #925f00;
+                border-color: rgba(146, 95, 0, 0.18);
+            }
+            .ib-chip-error {
+                background: #fdeaea;
+                color: #a23030;
+                border-color: rgba(162, 48, 48, 0.18);
+            }
+            .ib-chip-neutral {
+                background: #eef3f6;
+                color: #415361;
+                border-color: rgba(65, 83, 97, 0.16);
+            }
+            .ib-section-title {
+                font-size: 1rem;
+                font-weight: 800;
+                color: #243746;
+                margin-bottom: 4px;
+            }
+            .ib-section-copy {
+                color: #5b6875;
+                font-size: 0.92rem;
+                line-height: 1.45;
+                margin-bottom: 12px;
+            }
+            .ib-kpi-grid {
+                display: grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 12px;
+                margin: 14px 0 18px;
+            }
+            .ib-kpi-card {
+                border-radius: 16px;
+                padding: 14px 16px;
+                background: #fff;
+                border: 1px solid rgba(27, 38, 49, 0.08);
+            }
+            .ib-kpi-label {
+                font-size: 0.82rem;
+                color: #6b7280;
+                margin-bottom: 6px;
+            }
+            .ib-kpi-value {
+                font-size: 1.35rem;
+                font-weight: 800;
+                color: #17202a;
+            }
+            .ib-list {
+                margin: 0;
+                padding-left: 1.1rem;
+            }
+            .ib-list li {
+                margin-bottom: 0.35rem;
+                line-height: 1.45;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    def render_status_chip(status: str) -> None:
+        chip_map = {
+            "success": ("调试成功", "ib-chip-success"),
+            "empty": ("无命中内容", "ib-chip-warning"),
+            "empty_candidates": ("暂无候选", "ib-chip-warning"),
+            "error": ("调试失败", "ib-chip-error"),
+        }
+        label, css_class = chip_map.get(status, ("状态未知", "ib-chip-neutral"))
+        st.markdown(
+            f'<div class="ib-chip-row"><span class="ib-chip {css_class}">{label}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    def render_kpi_strip(*, candidate_count: int, selected_count: int, using_fallback: bool, prompt_changed: bool) -> None:
+        fallback_label = "内置样例" if using_fallback else "真实 RSS"
+        draft_state = "已修改" if prompt_changed else "与当前一致"
+        st.markdown(
+            f"""
+            <div class="ib-kpi-grid">
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">候选条数</div>
+                <div class="ib-kpi-value">{candidate_count}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">命中条数</div>
+                <div class="ib-kpi-value">{selected_count}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">候选来源</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{fallback_label}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">草稿状态</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{draft_state}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
         """添加单个 RSS 源到 config.json"""
         try:
@@ -78,6 +241,7 @@ def main() -> None:
     runtime_config = load_runtime_view()
 
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
+    render_prompt_debug_styles()
     st.title("🚀 营销情报站 | 智控中心")
     st.caption(f"当前编辑配置文件: {active_edit_path}")
 
@@ -222,23 +386,56 @@ def main() -> None:
         if "prompt_debug_category" not in st.session_state and categories:
             st.session_state["prompt_debug_category"] = categories[0]
 
-        st.subheader("Prompt 调试台")
-        st.caption("先抓取真实候选内容，再用草稿 prompt 试跑；调试过程不会保存配置。")
+        st.markdown(
+            """
+            <div class="ib-hero">
+              <div class="ib-eyebrow">Prompt Debug Console</div>
+              <div class="ib-title">让管理员先试跑，再决定是否落盘</div>
+              <div class="ib-subtitle">
+                当前工作流只做一件事：先抓真实候选内容，再用草稿 Prompt 试跑，最后才选择是否把草稿写回内容配置。
+                运行时 AI 连接配置保持只读，避免把调优动作和生产连接参数混在一起。
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-        st.text_area("System Prompt (系统提示词)", value=ai_conf.get("system_prompt", ""), height=220, key="sys_prompt")
-        st.text_input("AI Model", value=runtime_ai.get("model", ""), disabled=True)
-        st.text_input("API URL", value=runtime_ai.get("api_url", ""), disabled=True)
-        st.caption("AI Model / API URL 属于运行时敏感配置，请通过 config.secrets.json 或环境变量维护。")
-        masked_api_key = runtime_ai.get("api_key", "")
-        if masked_api_key:
-            st.caption(f"API Key 来源于 secrets / 环境变量：{masked_api_key[:6]}...{masked_api_key[-4:]}")
-        else:
-            st.warning("当前未检测到 AI API Key。请在 config.secrets.json 或环境变量中配置。")
+        top_col1, top_col2 = st.columns([1.45, 1.0])
+        with top_col1:
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">全局 System Prompt</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="ib-section-copy">这是所有板块共享的全局系统规则。这里的保存会写入内容配置；不会触碰 AI 的运行时连接信息。</div>',
+                unsafe_allow_html=True,
+            )
+            st.text_area(
+                "System Prompt (系统提示词)",
+                value=ai_conf.get("system_prompt", ""),
+                height=220,
+                key="sys_prompt",
+                label_visibility="collapsed",
+            )
+            if st.button("💾 保存 System Prompt", use_container_width=True):
+                config["ai"]["system_prompt"] = st.session_state.sys_prompt
+                save_config(config)
+                st.toast("System Prompt 更新成功。")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-        if st.button("💾 更新 AI 大脑"):
-            config["ai"]["system_prompt"] = st.session_state.sys_prompt
-            save_config(config)
-            st.toast("System Prompt 更新成功！AI 连接配置请通过 secrets 或环境变量维护。")
+        with top_col2:
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">运行时 AI 连接</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="ib-section-copy">这些值来自 secrets 或环境变量。控制台只展示，不允许直接编辑。</div>',
+                unsafe_allow_html=True,
+            )
+            st.text_input("AI Model", value=runtime_ai.get("model", ""), disabled=True)
+            st.text_input("API URL", value=runtime_ai.get("api_url", ""), disabled=True)
+            masked_api_key = runtime_ai.get("api_key", "")
+            if masked_api_key:
+                st.caption(f"API Key：{masked_api_key[:6]}...{masked_api_key[-4:]}")
+            else:
+                st.warning("当前未检测到 AI API Key。请在 config.secrets.json 或环境变量中配置。")
+            st.markdown("</div>", unsafe_allow_html=True)
 
         st.divider()
         if not categories:
@@ -255,19 +452,50 @@ def main() -> None:
             draft_key = f"draft_prompt::{selected_category}"
             if draft_key not in st.session_state:
                 st.session_state[draft_key] = current_prompt
+            prompt_changed = st.session_state[draft_key].strip() != current_prompt.strip()
 
-            st.text_area(
-                "当前已保存板块 Prompt",
-                value=current_prompt,
-                height=120,
-                disabled=True,
-                key=f"saved_prompt_{selected_category}",
-            )
-            st.text_area(
-                "草稿 Prompt（仅用于调试）",
-                key=draft_key,
-                height=140,
-            )
+            prompt_col1, prompt_col2 = st.columns(2)
+            with prompt_col1:
+                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+                st.markdown('<div class="ib-section-title">当前已保存 Prompt</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="ib-section-copy">这里显示当前内容配置里真正会被生产任务读取的板块 Prompt。</div>',
+                    unsafe_allow_html=True,
+                )
+                st.text_area(
+                    "当前已保存板块 Prompt",
+                    value=current_prompt,
+                    height=170,
+                    disabled=True,
+                    key=f"saved_prompt_{selected_category}",
+                    label_visibility="collapsed",
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            with prompt_col2:
+                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+                st.markdown('<div class="ib-section-title">草稿 Prompt</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="ib-section-copy">这里的编辑只存在于当前会话，直到你手动“写回编辑区”为止。</div>',
+                    unsafe_allow_html=True,
+                )
+                st.text_area(
+                    "草稿 Prompt（仅用于调试）",
+                    key=draft_key,
+                    height=170,
+                    label_visibility="collapsed",
+                )
+                if prompt_changed:
+                    st.markdown(
+                        '<div class="ib-chip-row"><span class="ib-chip ib-chip-warning">草稿已偏离当前配置</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        '<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">草稿与当前配置一致</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                st.markdown("</div>", unsafe_allow_html=True)
 
             action_col1, action_col2, action_col3 = st.columns(3)
             with action_col1:
@@ -316,18 +544,43 @@ def main() -> None:
 
             candidates = st.session_state.get("prompt_debug_candidates", [])
             meta = st.session_state.get("prompt_debug_meta", {})
-            if candidates and meta.get("category") == selected_category:
-                if meta.get("using_fallback"):
-                    st.info(f"当前展示 {len(candidates)} 条内置样例候选。")
-                else:
-                    st.info(f"当前展示 {len(candidates)} 条真实候选。")
-                with st.expander("候选内容预览", expanded=True):
-                    for idx, item in enumerate(candidates, start=1):
-                        st.markdown(f"{idx}. [{item.get('title', '').strip()}]({item.get('link', '').strip()})")
-
             debug_result = st.session_state.get("prompt_debug_result")
-            if debug_result and st.session_state.get("prompt_debug_result_category") == selected_category:
+            result_matches_category = debug_result and st.session_state.get("prompt_debug_result_category") == selected_category
+            if candidates and meta.get("category") == selected_category:
+                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+                st.markdown('<div class="ib-section-title">候选池</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="ib-section-copy">这里是本次调试会送进 AI 的原始候选内容。先确认候选池质量，再判断 Prompt 是否合理。</div>',
+                    unsafe_allow_html=True,
+                )
+                selected_count = len(debug_result.get("selected_items", [])) if result_matches_category else 0
+                render_kpi_strip(
+                    candidate_count=len(candidates),
+                    selected_count=selected_count,
+                    using_fallback=bool(meta.get("using_fallback")),
+                    prompt_changed=prompt_changed,
+                )
+                candidate_preview = candidates[:12]
+                st.markdown("**候选预览**")
+                st.markdown('<ol class="ib-list">', unsafe_allow_html=True)
+                for item in candidate_preview:
+                    title = item.get("title", "").strip()
+                    link = item.get("link", "").strip()
+                    st.markdown(f'<li><a href="{link}">{title}</a></li>', unsafe_allow_html=True)
+                st.markdown("</ol>", unsafe_allow_html=True)
+                if len(candidates) > len(candidate_preview):
+                    st.caption(f"还有 {len(candidates) - len(candidate_preview)} 条候选未展开显示。")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            if result_matches_category:
                 status = debug_result.get("status", "unknown")
+                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+                st.markdown('<div class="ib-section-title">调试结果</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="ib-section-copy">这里展示本次草稿 Prompt 的结果状态、命中内容和最终输出预览。</div>',
+                    unsafe_allow_html=True,
+                )
+                render_status_chip(status)
                 if status == "success":
                     st.success(f"调试成功：候选 {debug_result['candidate_count']} 条，命中 {len(debug_result['selected_items'])} 条。")
                 elif status == "empty":
@@ -337,26 +590,36 @@ def main() -> None:
                 else:
                     st.error(f"调试失败：{debug_result.get('error', '未知错误')}")
 
-                metric_col1, metric_col2 = st.columns(2)
-                with metric_col1:
-                    st.metric("候选条数", debug_result.get("candidate_count", 0))
-                with metric_col2:
-                    st.metric("命中条数", len(debug_result.get("selected_items", [])))
+                selected_items = debug_result.get("selected_items", [])
+                if selected_items:
+                    with st.expander("命中内容详情", expanded=True):
+                        for idx, item in enumerate(selected_items, start=1):
+                            title = item.get("title", "").strip()
+                            url = item.get("url", "").strip()
+                            summary = item.get("summary", "").strip()
+                            st.markdown(f"**{idx}. [{title}]({url})**")
+                            st.caption(summary or "无摘要")
 
                 preview_md = debug_result.get("preview_markdown", "")
-                if preview_md:
-                    st.markdown("**预览输出**")
-                    st.markdown(preview_md)
+                preview_col1, preview_col2 = st.columns([1.2, 0.9])
+                with preview_col1:
+                    if preview_md:
+                        st.markdown("**管理员预览输出**")
+                        st.markdown(preview_md)
+                    else:
+                        st.info("本次没有生成可预览输出。")
 
-                with st.expander("批次调试详情", expanded=status != "success"):
-                    st.json(
-                        {
-                            "status": status,
-                            "selected_items": debug_result.get("selected_items", []),
-                            "batches": debug_result.get("batches", []),
-                        },
-                        expanded=False,
-                    )
+                with preview_col2:
+                    with st.expander("批次调试详情", expanded=status != "success"):
+                        st.json(
+                            {
+                                "status": status,
+                                "selected_items": selected_items,
+                                "batches": debug_result.get("batches", []),
+                            },
+                            expanded=False,
+                        )
+                st.markdown("</div>", unsafe_allow_html=True)
 
     with tab4:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
