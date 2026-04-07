@@ -27,7 +27,7 @@ from insightbot.prompt_debug_history import (
 )
 from insightbot.discovery.url_resolver import UrlResolver
 from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary, summarize_recent_run
-from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, run_prompt_debug
+from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, get_selection_settings, run_prompt_debug
 
 def main() -> None:
     bot_dir = default_bot_dir()
@@ -606,6 +606,7 @@ def main() -> None:
 
     with tab3:
         ai_conf = config.get("ai", {})
+        ai_selection = get_selection_settings(config)
         runtime_ai = runtime_config.get("ai", {})
         feeds = config.get("feeds", {})
         categories = list(feeds.keys())
@@ -645,6 +646,62 @@ def main() -> None:
                 config["ai"]["system_prompt"] = st.session_state.sys_prompt
                 save_config(config)
                 st.toast("System Prompt 更新成功。")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">输出规则</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="ib-section-copy">条数、标题长度、摘要长度和全量输入阈值由系统注入到 Prompt，不需要手写在 System Prompt 里。</div>',
+                unsafe_allow_html=True,
+            )
+            max_selected_items = st.slider(
+                "最多保留条数",
+                min_value=1,
+                max_value=10,
+                value=ai_selection["max_selected_items"],
+                key="selection_max_selected_items",
+            )
+            title_max_len = st.slider(
+                "标题最大字数",
+                min_value=20,
+                max_value=80,
+                value=ai_selection["title_max_len"],
+                key="selection_title_max_len",
+            )
+            summary_max_len = st.slider(
+                "摘要最大字数",
+                min_value=20,
+                max_value=80,
+                value=ai_selection["summary_max_len"],
+                key="selection_summary_max_len",
+            )
+            full_context_threshold_chars = st.slider(
+                "全量输入阈值（字符）",
+                min_value=4000,
+                max_value=40000,
+                step=1000,
+                value=ai_selection["full_context_threshold_chars"],
+                key="selection_full_context_threshold_chars",
+            )
+            batch_size = st.slider(
+                "超阈值后的分片大小",
+                min_value=5,
+                max_value=30,
+                value=ai_selection["batch_size"],
+                key="selection_batch_size",
+            )
+            if st.button("💾 保存输出规则", use_container_width=True):
+                config.setdefault("ai", {})
+                config["ai"]["selection"] = {
+                    "max_selected_items": max_selected_items,
+                    "title_max_len": title_max_len,
+                    "summary_max_len": summary_max_len,
+                    "full_context_threshold_chars": full_context_threshold_chars,
+                    "batch_size": batch_size,
+                }
+                save_config(config)
+                st.toast("输出规则已保存。")
+                st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
         with top_col2:
@@ -879,6 +936,14 @@ def main() -> None:
                     using_fallback=bool(meta.get("using_fallback")),
                     prompt_changed=prompt_changed,
                 )
+                current_mode = None
+                if compare_matches_category:
+                    current_mode = compare_result["draft"].get("selection_mode")
+                elif result_matches_category:
+                    current_mode = debug_result.get("selection_mode")
+                if current_mode:
+                    mode_label = "全量筛选" if current_mode == "full" else "分片 + 总选"
+                    st.caption(f"本次筛选模式：{mode_label}")
                 show_all_candidates = st.toggle(
                     "显示全部候选",
                     value=False,

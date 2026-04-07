@@ -64,6 +64,39 @@ class TestJsonRepair:
         )
         assert _validate_and_repair(raw) == []
 
+    def test_caps_items_at_five(self):
+        raw = json.dumps(
+            {
+                "items": [
+                    {"title": f"标题{i}", "url": f"https://example.com/{i}", "summary": "摘要"}
+                    for i in range(8)
+                ]
+            },
+            ensure_ascii=False,
+        )
+        items = _validate_and_repair(raw)
+        assert len(items) == 5
+        assert items[0]["url"] == "https://example.com/0"
+        assert items[-1]["url"] == "https://example.com/4"
+
+    def test_truncates_long_title_and_summary(self):
+        raw = json.dumps(
+            {
+                "items": [
+                    {
+                        "title": "很长的标题" * 20,
+                        "url": "https://example.com/1",
+                        "summary": "很长的摘要" * 20,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+        items = _validate_and_repair(raw)
+        assert len(items) == 1
+        assert len(items[0]["title"]) <= 53
+        assert len(items[0]["summary"]) <= 33
+
 
 class TestFetchRecentCandidates:
 
@@ -254,6 +287,97 @@ class TestPromptDebug:
                 )
         assert result["status"] == "success"
         assert len(result["selected_items"]) == 1
+
+    def test_limits_selected_items_to_five_even_if_model_returns_more(self, silent_logger):
+        news_list = [{"title": "新闻", "link": f"https://example.com/{i}"} for i in range(8)]
+        raw = json.dumps(
+            {
+                "items": [
+                    {"title": f"标题{i}", "url": f"https://example.com/{i}", "summary": "摘要"}
+                    for i in range(8)
+                ]
+            },
+            ensure_ascii=False,
+        )
+        with patch("insightbot.smart_brief_runner.chat_completion", return_value=raw):
+            result = run_prompt_debug(
+                config=self._base_config(),
+                category_name="测试板块",
+                news_list=news_list,
+                category_prompt="",
+                logger=silent_logger,
+            )
+        assert result["status"] == "success"
+        assert len(result["selected_items"]) == 5
+
+    def test_uses_full_mode_when_input_is_within_threshold(self, silent_logger):
+        news_list = [{"title": "新闻", "link": "https://example.com/1", "summary": "摘要"}]
+        captured_calls = []
+
+        def capture_call(**kwargs):
+            captured_calls.append(kwargs)
+            return '{"items": [{"title": "标题", "url": "https://example.com/1", "summary": "摘要"}]}'
+
+        with patch("insightbot.smart_brief_runner.chat_completion", side_effect=capture_call):
+            result = run_prompt_debug(
+                config=self._base_config(),
+                category_name="测试板块",
+                news_list=news_list,
+                category_prompt="",
+                logger=silent_logger,
+            )
+
+        assert result["selection_mode"] == "full"
+        assert len(captured_calls) == 1
+        assert result["batches"][0]["stage"] == "full"
+
+    def test_uses_chunked_mode_with_final_selection_when_over_threshold(self, silent_logger):
+        config = self._base_config()
+        config["ai"]["selection"] = {
+            "max_selected_items": 5,
+            "title_max_len": 50,
+            "summary_max_len": 30,
+            "full_context_threshold_chars": 100,
+            "batch_size": 2,
+        }
+        news_list = [
+            {
+                "title": f"新闻{i}",
+                "link": f"https://example.com/{i}",
+                "summary": "这是一段足够长的摘要，用来触发分片模式。",
+            }
+            for i in range(5)
+        ]
+        captured_calls = []
+
+        def capture_call(**kwargs):
+            captured_calls.append(kwargs)
+            return json.dumps(
+                {
+                    "items": [
+                        {
+                            "title": f"标题{len(captured_calls)}",
+                            "url": f"https://example.com/{len(captured_calls)}",
+                            "summary": "摘要",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+        with patch("insightbot.smart_brief_runner.chat_completion", side_effect=capture_call):
+            with patch("insightbot.smart_brief_runner.time.sleep"):
+                result = run_prompt_debug(
+                    config=config,
+                    category_name="测试板块",
+                    news_list=news_list,
+                    category_prompt="",
+                    logger=silent_logger,
+                )
+
+        assert result["selection_mode"] == "chunked"
+        assert len(captured_calls) == 4
+        assert [batch["stage"] for batch in result["batches"]] == ["chunk", "chunk", "chunk", "final"]
 
     def test_input_text_truncated_to_batch_size_scope(self, silent_logger):
         news_list = [

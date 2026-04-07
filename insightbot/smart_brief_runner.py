@@ -3,7 +3,7 @@ import re
 import time
 from datetime import datetime, timedelta
 from html import unescape
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import feedparser
 import requests
@@ -12,10 +12,16 @@ from .ai import chat_completion
 from .wecom import send_markdown_to_app
 
 # ---------- constants ----------
-MAX_ITEMS_PER_BATCH = 15   # 每批交给 AI 的新闻条数
 MAX_RETRIES = 3
 RETRY_DELAY_S = 5
 FEED_FETCH_TIMEOUT_S = 15
+DEFAULT_SELECTION_SETTINGS = {
+    "max_selected_items": 5,
+    "title_max_len": 50,
+    "summary_max_len": 30,
+    "full_context_threshold_chars": 18000,
+    "batch_size": 15,
+}
 DEBUG_SAMPLE_NEWS = [
     {
         "title": "[RSS] 微信视频号广告 ROI 提升 30%，品牌主加速布局",
@@ -44,24 +50,20 @@ DEBUG_SAMPLE_NEWS = [
     },
 ]
 
-# 简化的 system prompt（格式规则全部由代码处理，AI 只负责判断和提炼）
 DEFAULT_SYSTEM_PROMPT = """你是一个拥有 10 年经验的资深营销情报官。
 你的任务：从新闻列表中，挑选出与中国市场营销、公关传播最具参考价值的资讯，每条输出一句话影响点评。
 
 【行业聚焦】
 优先关注：生活方式、运动、时尚、地产、酒店、消费品牌等行业动态。
 剔除：低价值通稿、自媒体八卦、人事变动、娱乐新闻、算法学术论文、与营销无关的纯技术内容。"""
-# --------------------------------
 
 
 def _render_markdown(category: str, items: List[dict]) -> str:
-    """将结构化 items 渲染为 Markdown 格式"""
     blocks = [f"## {category}\n"]
     for item in items:
         title = item.get("title", "").strip()
         url = item.get("url", "").strip()
         summary = item.get("summary", "").strip()
-        # 防御：url 为空时跳过该条
         if not url:
             continue
         blocks.append(f"### [{title}]({url})\n")
@@ -69,24 +71,45 @@ def _render_markdown(category: str, items: List[dict]) -> str:
     return "".join(blocks).strip()
 
 
-def _build_system_prompt(base_system_prompt: str, category_prompt: str = "") -> str:
+def get_selection_settings(config: dict[str, Any]) -> dict[str, int]:
+    raw = (config.get("ai", {}) or {}).get("selection", {})
+    settings = dict(DEFAULT_SELECTION_SETTINGS)
+    if isinstance(raw, dict):
+        for key, default in DEFAULT_SELECTION_SETTINGS.items():
+            value = raw.get(key)
+            if isinstance(value, int) and value > 0:
+                settings[key] = value
+    return settings
+
+
+def _build_system_prompt(
+    base_system_prompt: str,
+    category_prompt: str = "",
+    *,
+    selection_settings: dict[str, int],
+) -> str:
+    max_selected_items = selection_settings["max_selected_items"]
+    title_max_len = selection_settings["title_max_len"]
+    summary_max_len = selection_settings["summary_max_len"]
+
     system_prompt = (base_system_prompt or DEFAULT_SYSTEM_PROMPT).strip()
-    system_prompt += """
+    system_prompt += f"""
 
 【输出格式】
-你必须返回 JSON 对象，不要返回任何其他内容：
-{
+你必须返回 JSON 对象，不要返回任何其他内容，且 items 最多 {max_selected_items} 条：
+{{
   "items": [
-    {
-      "title": "重写后的简体中文标题（必须去除'震惊''重磅''突发'等虚假修饰词；结构：[主体] + [核心动作]；不超过50字）",
+    {{
+      "title": "重写后的简体中文标题（必须去除'震惊''重磅''突发'等虚假修饰词；结构：[主体] + [核心动作]；不超过{title_max_len}字）",
       "url": "原文链接（必须保留，不可省略）",
-      "summary": "一句话摘要（30字以内，简体中文，平实老练，指出对营销人的具体启示）"
-    }
+      "summary": "一句话摘要（{summary_max_len}字以内，简体中文，平实老练，指出对营销人的具体启示）"
+    }}
   ]
-}
+}}
 
 【关键规则】
-- 宁缺毋滥：若列表中没有任何符合标准的新闻，返回 {"items": []}
+- 宁缺毋滥：若列表中没有任何符合标准的新闻，返回 {{"items": []}}
+- 最多只保留 {max_selected_items} 条最有价值的内容
 - url 必须为有效链接，不可为空，不可省略
 - 摘要必须使用简体中文
 - 不要输出任何解释、说明或开场白，只输出 JSON"""
@@ -115,6 +138,10 @@ def _build_candidate_lines(news_list: List[dict]) -> List[str]:
     return lines
 
 
+def _make_input_text(news_list: List[dict]) -> str:
+    return "【待筛选列表】：\n" + "\n".join(_build_candidate_lines(news_list))
+
+
 def _clean_text(value: str, *, limit: int = 240) -> str:
     text = unescape(str(value or ""))
     text = re.sub(r"<[^>]+>", " ", text)
@@ -126,7 +153,6 @@ def _clean_text(value: str, *, limit: int = 240) -> str:
 
 def _extract_entry_summary(entry) -> str:
     candidates = []
-
     if hasattr(entry, "summary"):
         candidates.append(getattr(entry, "summary"))
     if hasattr(entry, "description"):
@@ -145,6 +171,41 @@ def _extract_entry_summary(entry) -> str:
         if cleaned:
             return cleaned
     return ""
+
+
+def _truncate_text(value: str, *, limit: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip(" ，,.;；。") + "..."
+
+
+def _normalize_ai_items(items: List[dict], *, selection_settings: dict[str, int]) -> List[dict]:
+    normalized: List[dict] = []
+    seen_urls: set[str] = set()
+    title_max_len = selection_settings["title_max_len"]
+    summary_max_len = selection_settings["summary_max_len"]
+    max_selected_items = selection_settings["max_selected_items"]
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        url = str(item.get("url", "")).strip()
+        if not url or not url.startswith(("http://", "https://")) or url in seen_urls:
+            continue
+
+        title = _truncate_text(item.get("title", ""), limit=title_max_len)
+        summary = _truncate_text(item.get("summary", ""), limit=summary_max_len)
+        if not title:
+            continue
+
+        normalized.append({"title": title, "url": url, "summary": summary})
+        seen_urls.add(url)
+        if len(normalized) >= max_selected_items:
+            break
+
+    return normalized
 
 
 def _deduplicate_candidates(news_list: List[dict]) -> List[dict]:
@@ -192,43 +253,102 @@ def fetch_recent_candidates(*, feed_data: dict, logger) -> List[dict]:
     return _deduplicate_candidates(category_candidates)
 
 
-def _validate_and_repair(raw: str) -> List[dict]:
-    """
-    尝试解析 AI 返回的 JSON。
-    解析成功：返回 items 列表（可能为空）
-    解析失败：返回空列表（该批次内容丢弃，不发出去）
-    """
+def _validate_and_repair(raw: str, *, selection_settings: dict[str, int] | None = None) -> List[dict]:
+    selection_settings = selection_settings or DEFAULT_SELECTION_SETTINGS
     try:
-        # 尝试提取 JSON 代码块
         match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        if match:
-            text = match.group(1)
-        else:
-            # 尝试直接解析整个响应
-            text = raw.strip()
-
+        text = match.group(1) if match else raw.strip()
         data = json.loads(text)
         items = data.get("items", [])
         if not isinstance(items, list):
             return []
-
-        repaired = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            title = str(item.get("title", "")).strip()
-            url = str(item.get("url", "")).strip()
-            summary = str(item.get("summary", "")).strip()
-            # 防御：url 必须有效，否则跳过
-            if url and url.startswith(("http://", "https://")):
-                repaired.append({"title": title, "url": url, "summary": summary})
-
-        return repaired
+        return _normalize_ai_items(items, selection_settings=selection_settings)
     except Exception:
         return []
 
 
+def _call_selection_once(
+    *,
+    config: dict,
+    category_name: str,
+    news_list: List[dict],
+    category_prompt: str,
+    logger,
+    selection_settings: dict[str, int],
+    stage_label: str,
+    batch_no: int,
+) -> dict[str, Any]:
+    system_prompt = _build_system_prompt(
+        config.get("ai", {}).get("system_prompt", ""),
+        category_prompt,
+        selection_settings=selection_settings,
+    )
+    input_text = _make_input_text(news_list)
+    batch_record = {
+        "stage": stage_label,
+        "batch_no": batch_no,
+        "candidate_count": len(news_list),
+        "input_chars": len(input_text),
+        "raw_response": "",
+        "parsed_items": [],
+        "status": "pending",
+    }
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            raw = chat_completion(
+                api_url=config["ai"]["api_url"],
+                api_key=config["ai"]["api_key"],
+                model=config["ai"]["model"],
+                system_prompt=system_prompt,
+                user_text=input_text,
+                temperature=0.1,
+                timeout_s=120,
+                json_mode=True,
+            )
+            items = _validate_and_repair(raw, selection_settings=selection_settings)
+            batch_record["raw_response"] = raw
+            batch_record["parsed_items"] = items
+            batch_record["status"] = "success" if items else "empty"
+            return {
+                "ok": True,
+                "record": batch_record,
+                "items": items,
+                "system_prompt": system_prompt,
+                "error": None,
+            }
+        except Exception as e:
+            batch_record["status"] = "error"
+            batch_record["error"] = str(e)
+            logger.warning(f"⚠️ AI 分析第 {attempt + 1} 次尝试失败 [{category_name} / {stage_label} #{batch_no}]: {e}")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY_S)
+            else:
+                logger.error(f"❌ AI 分析彻底失败 [{category_name} / {stage_label} #{batch_no}]")
+                return {
+                    "ok": False,
+                    "record": batch_record,
+                    "items": [],
+                    "system_prompt": system_prompt,
+                    "error": str(e),
+                }
+    return {
+        "ok": False,
+        "record": batch_record,
+        "items": [],
+        "system_prompt": system_prompt,
+        "error": "unknown",
+    }
+
+
 def run_prompt_debug(*, config: dict, category_name: str, news_list: List[dict], category_prompt: str, logger) -> dict:
+    selection_settings = get_selection_settings(config)
+    system_prompt = _build_system_prompt(
+        config.get("ai", {}).get("system_prompt", ""),
+        category_prompt,
+        selection_settings=selection_settings,
+    )
+
     if not news_list:
         return {
             "status": "empty_candidates",
@@ -237,75 +357,107 @@ def run_prompt_debug(*, config: dict, category_name: str, news_list: List[dict],
             "selected_items": [],
             "preview_markdown": "",
             "batches": [],
-            "system_prompt": _build_system_prompt(config.get("ai", {}).get("system_prompt", ""), category_prompt),
+            "system_prompt": system_prompt,
+            "selection_mode": "empty",
         }
 
-    system_prompt = _build_system_prompt(config.get("ai", {}).get("system_prompt", ""), category_prompt)
-    all_items_md = _build_candidate_lines(news_list)
-    all_selected: List[dict] = []
-    batch_results = []
+    batch_results: List[dict[str, Any]] = []
+    total_input_text = _make_input_text(news_list)
+    threshold = selection_settings["full_context_threshold_chars"]
+    batch_size = selection_settings["batch_size"]
 
-    for batch_idx in range(0, len(all_items_md), MAX_ITEMS_PER_BATCH):
-        batch_lines = all_items_md[batch_idx:batch_idx + MAX_ITEMS_PER_BATCH]
-        input_text = "【待筛选列表】：\n" + "\n".join(batch_lines)
-        batch_no = batch_idx // MAX_ITEMS_PER_BATCH + 1
-        logger.info(f"🤖 AI 分析 [{category_name}] 批次 {batch_no}（{len(batch_lines)} 条）")
+    if len(total_input_text) <= threshold:
+        logger.info(f"🤖 AI 全量分析 [{category_name}]（{len(news_list)} 条）")
+        result = _call_selection_once(
+            config=config,
+            category_name=category_name,
+            news_list=news_list,
+            category_prompt=category_prompt,
+            logger=logger,
+            selection_settings=selection_settings,
+            stage_label="full",
+            batch_no=1,
+        )
+        batch_results.append(result["record"])
+        if not result["ok"]:
+            return {
+                "status": "error",
+                "category": category_name,
+                "candidate_count": len(news_list),
+                "selected_items": [],
+                "preview_markdown": "",
+                "batches": batch_results,
+                "system_prompt": system_prompt,
+                "selection_mode": "full",
+                "error": result["error"],
+            }
+        unique = result["items"]
+        selection_mode = "full"
+    else:
+        logger.info(
+            f"🤖 AI 分片分析 [{category_name}]（{len(news_list)} 条，输入 {len(total_input_text)} chars，阈值 {threshold}）"
+        )
+        stage_one_selected: List[dict] = []
+        for start in range(0, len(news_list), batch_size):
+            batch_news = news_list[start:start + batch_size]
+            batch_no = start // batch_size + 1
+            logger.info(f"🤖 AI 分析 [{category_name}] 分片 {batch_no}（{len(batch_news)} 条）")
+            result = _call_selection_once(
+                config=config,
+                category_name=category_name,
+                news_list=batch_news,
+                category_prompt=category_prompt,
+                logger=logger,
+                selection_settings=selection_settings,
+                stage_label="chunk",
+                batch_no=batch_no,
+            )
+            batch_results.append(result["record"])
+            if not result["ok"]:
+                return {
+                    "status": "error",
+                    "category": category_name,
+                    "candidate_count": len(news_list),
+                    "selected_items": [],
+                    "preview_markdown": "",
+                    "batches": batch_results,
+                    "system_prompt": system_prompt,
+                    "selection_mode": "chunked",
+                    "error": result["error"],
+                }
+            stage_one_selected.extend(result["items"])
+            time.sleep(3)
 
-        batch_record = {
-            "batch_no": batch_no,
-            "candidate_count": len(batch_lines),
-            "raw_response": "",
-            "parsed_items": [],
-            "status": "pending",
-        }
-
-        for attempt in range(MAX_RETRIES):
-            try:
-                raw = chat_completion(
-                    api_url=config["ai"]["api_url"],
-                    api_key=config["ai"]["api_key"],
-                    model=config["ai"]["model"],
-                    system_prompt=system_prompt,
-                    user_text=input_text,
-                    temperature=0.1,
-                    timeout_s=120,
-                    json_mode=True,
-                )
-                items = _validate_and_repair(raw)
-                batch_record["raw_response"] = raw
-                batch_record["parsed_items"] = items
-                batch_record["status"] = "success" if items else "empty"
-                all_selected.extend(items)
-                break
-            except Exception as e:
-                batch_record["status"] = "error"
-                batch_record["error"] = str(e)
-                logger.warning(f"⚠️ AI 分析第 {attempt + 1} 次尝试失败 [{category_name}]: {e}")
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY_S)
-                else:
-                    logger.error(f"❌ AI 分析彻底失败 [{category_name}]")
-                    batch_results.append(batch_record)
-                    return {
-                        "status": "error",
-                        "category": category_name,
-                        "candidate_count": len(news_list),
-                        "selected_items": [],
-                        "preview_markdown": "",
-                        "batches": batch_results,
-                        "system_prompt": system_prompt,
-                        "error": str(e),
-                    }
-
-        batch_results.append(batch_record)
-        time.sleep(3)
-
-    seen_urls: set[str] = set()
-    unique: List[dict] = []
-    for item in all_selected:
-        if item["url"] not in seen_urls:
-            seen_urls.add(item["url"])
-            unique.append(item)
+        deduped_stage_one = _normalize_ai_items(stage_one_selected, selection_settings=selection_settings)
+        if not deduped_stage_one:
+            unique = []
+        else:
+            logger.info(f"🤖 AI 总选 [{category_name}]（{len(deduped_stage_one)} 条入围候选）")
+            final_result = _call_selection_once(
+                config=config,
+                category_name=category_name,
+                news_list=deduped_stage_one,
+                category_prompt=category_prompt,
+                logger=logger,
+                selection_settings=selection_settings,
+                stage_label="final",
+                batch_no=1,
+            )
+            batch_results.append(final_result["record"])
+            if not final_result["ok"]:
+                return {
+                    "status": "error",
+                    "category": category_name,
+                    "candidate_count": len(news_list),
+                    "selected_items": [],
+                    "preview_markdown": "",
+                    "batches": batch_results,
+                    "system_prompt": system_prompt,
+                    "selection_mode": "chunked",
+                    "error": final_result["error"],
+                }
+            unique = final_result["items"]
+        selection_mode = "chunked"
 
     if not unique:
         logger.info(f"🈳 AI 判定 [{category_name}] 无合格内容，已拦截。")
@@ -317,6 +469,7 @@ def run_prompt_debug(*, config: dict, category_name: str, news_list: List[dict],
             "preview_markdown": "",
             "batches": batch_results,
             "system_prompt": system_prompt,
+            "selection_mode": selection_mode,
         }
 
     logger.info(f"✅ [{category_name}] 共筛选出 {len(unique)} 条有效内容")
@@ -328,6 +481,7 @@ def run_prompt_debug(*, config: dict, category_name: str, news_list: List[dict],
         "preview_markdown": _render_markdown(category_name, unique),
         "batches": batch_results,
         "system_prompt": system_prompt,
+        "selection_mode": selection_mode,
     }
 
 
@@ -367,7 +521,6 @@ def run_task(*, config: dict, logger) -> None:
         logger.info(f"\n📁 正在处理板块: 【{category}】")
         category_candidates = fetch_recent_candidates(feed_data=feed_data, logger=logger)
 
-        # 关键词接口预留（当前休眠）
         keywords = feed_data.get("keywords", [])
         if keywords:
             pass
@@ -383,13 +536,12 @@ def run_task(*, config: dict, logger) -> None:
             )
 
             if ai_summary:
-                msg_body = ai_summary
                 logger.info(f"📤 推送板块 【{category}】 成功")
                 send_markdown_to_app(
                     cid=config["wecom"]["cid"],
                     secret=config["wecom"]["secret"],
                     agent_id=str(config["wecom"]["aid"]),
-                    content=msg_body,
+                    content=ai_summary,
                 )
                 has_any_update = True
                 time.sleep(2)
