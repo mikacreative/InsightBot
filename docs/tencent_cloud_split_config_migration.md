@@ -30,6 +30,22 @@ ls /root/marketing_bot/config.content.json
 cp /root/marketing_bot/config.json /root/marketing_bot/config.json.bak.$(date +%Y%m%d-%H%M%S)
 ```
 
+如果你想直接把服务器上的旧配置自动拆成新版双层配置，也可以运行：
+
+```bash
+cd /root/marketing_bot
+python3 scripts/split_config.py \
+  --input /root/marketing_bot/config.json \
+  --content-out /root/marketing_bot/config.content.json \
+  --secrets-out /root/marketing_bot/config.secrets.json
+```
+
+这个脚本会：
+
+- 把 `wecom` 和 `ai.api_key` 拆到 `config.secrets.json`
+- 把 `ai.api_url` / `ai.model` 改成环境变量占位
+- 尽量保留旧配置里的其他内容结构
+
 ## 3. 生成 secrets 文件
 
 先复制模板：
