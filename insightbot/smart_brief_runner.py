@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 import feedparser
+import requests
 
 from .ai import chat_completion
 from .wecom import send_markdown_to_app
@@ -13,6 +14,7 @@ from .wecom import send_markdown_to_app
 MAX_ITEMS_PER_BATCH = 15   # 每批交给 AI 的新闻条数
 MAX_RETRIES = 3
 RETRY_DELAY_S = 5
+FEED_FETCH_TIMEOUT_S = 15
 DEBUG_SAMPLE_NEWS = [
     {"title": "[RSS] 微信视频号广告 ROI 提升 30%，品牌主加速布局", "link": "https://example.com/001"},
     {"title": "[RSS] 小红书推出品牌号新功能：支持直链跳转电商平台", "link": "https://example.com/002"},
@@ -22,30 +24,12 @@ DEBUG_SAMPLE_NEWS = [
 ]
 
 # 简化的 system prompt（格式规则全部由代码处理，AI 只负责判断和提炼）
-SYSTEM_PROMPT_TEMPLATE = """你是一个拥有 10 年经验的资深营销情报官。
+DEFAULT_SYSTEM_PROMPT = """你是一个拥有 10 年经验的资深营销情报官。
 你的任务：从新闻列表中，挑选出与中国市场营销、公关传播最具参考价值的资讯，每条输出一句话影响点评。
 
 【行业聚焦】
 优先关注：生活方式、运动、时尚、地产、酒店、消费品牌等行业动态。
-剔除：低价值通稿、自媒体八卦、人事变动、娱乐新闻、算法学术论文、与营销无关的纯技术内容。
-
-【输出格式】
-你必须返回 JSON 对象，不要返回任何其他内容：
-{{
-  "items": [
-    {{
-      "title": "重写后的简体中文标题（必须去除'震惊''重磅''突发'等虚假修饰词；结构：[主体] + [核心动作]；不超过50字）",
-      "url": "原文链接（必须保留，不可省略）",
-      "summary": "一句话摘要（30字以内，简体中文，平实老练，指出对营销人的具体启示）"
-    }}
-  ]
-}}
-
-【关键规则】
-- 宁缺毋滥：若列表中没有任何符合标准的新闻，返回 {{"items": []}}
-- url 必须为有效链接，不可为空，不可省略
-- 摘要必须使用简体中文
-- 不要输出任何解释、说明或开场白，只输出 JSON"""
+剔除：低价值通稿、自媒体八卦、人事变动、娱乐新闻、算法学术论文、与营销无关的纯技术内容。"""
 # --------------------------------
 
 
@@ -64,11 +48,40 @@ def _render_markdown(category: str, items: List[dict]) -> str:
     return "".join(blocks).strip()
 
 
-def _build_system_prompt(category_prompt: str = "") -> str:
-    system_prompt = SYSTEM_PROMPT_TEMPLATE
+def _build_system_prompt(base_system_prompt: str, category_prompt: str = "") -> str:
+    system_prompt = (base_system_prompt or DEFAULT_SYSTEM_PROMPT).strip()
+    system_prompt += """
+
+【输出格式】
+你必须返回 JSON 对象，不要返回任何其他内容：
+{
+  "items": [
+    {
+      "title": "重写后的简体中文标题（必须去除'震惊''重磅''突发'等虚假修饰词；结构：[主体] + [核心动作]；不超过50字）",
+      "url": "原文链接（必须保留，不可省略）",
+      "summary": "一句话摘要（30字以内，简体中文，平实老练，指出对营销人的具体启示）"
+    }
+  ]
+}
+
+【关键规则】
+- 宁缺毋滥：若列表中没有任何符合标准的新闻，返回 {"items": []}
+- url 必须为有效链接，不可为空，不可省略
+- 摘要必须使用简体中文
+- 不要输出任何解释、说明或开场白，只输出 JSON"""
     if category_prompt:
         system_prompt += f"\n\n【本板块额外筛选标准】：\n{category_prompt}"
     return system_prompt
+
+
+def _parse_feed_url(url: str):
+    response = requests.get(
+        url,
+        timeout=FEED_FETCH_TIMEOUT_S,
+        headers={"User-Agent": "InsightBot/0.3.0 (+https://github.com/mikacreative/InsightBot)"},
+    )
+    response.raise_for_status()
+    return feedparser.parse(response.content)
 
 
 def _build_candidate_lines(news_list: List[dict]) -> List[str]:
@@ -98,7 +111,7 @@ def fetch_recent_candidates(*, feed_data: dict, logger) -> List[dict]:
         if not url:
             continue
         try:
-            feed = feedparser.parse(url)
+            feed = _parse_feed_url(url)
             valid_count = 0
             for entry in feed.entries:
                 if hasattr(entry, "published_parsed") and entry.published_parsed:
@@ -162,10 +175,10 @@ def run_prompt_debug(*, config: dict, category_name: str, news_list: List[dict],
             "selected_items": [],
             "preview_markdown": "",
             "batches": [],
-            "system_prompt": _build_system_prompt(category_prompt),
+            "system_prompt": _build_system_prompt(config.get("ai", {}).get("system_prompt", ""), category_prompt),
         }
 
-    system_prompt = _build_system_prompt(category_prompt)
+    system_prompt = _build_system_prompt(config.get("ai", {}).get("system_prompt", ""), category_prompt)
     all_items_md = _build_candidate_lines(news_list)
     all_selected: List[dict] = []
     batch_results = []

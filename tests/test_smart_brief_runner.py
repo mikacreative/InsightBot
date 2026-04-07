@@ -70,7 +70,7 @@ class TestFetchRecentCandidates:
         recent_entry = _make_entry("近期文章标题", "https://example.com/recent", hours_ago=2)
         mock_feed = _make_feed([recent_entry])
 
-        with patch("insightbot.smart_brief_runner.feedparser.parse", return_value=mock_feed):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
             news_list = fetch_recent_candidates(
                 feed_data={"rss": ["https://example.com/feed.xml"], "keywords": [], "prompt": ""},
                 logger=silent_logger,
@@ -83,7 +83,7 @@ class TestFetchRecentCandidates:
         stale_entry = _make_entry("过期文章标题", "https://example.com/stale", hours_ago=30)
         mock_feed = _make_feed([stale_entry])
 
-        with patch("insightbot.smart_brief_runner.feedparser.parse", return_value=mock_feed):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
             news_list = fetch_recent_candidates(
                 feed_data={"rss": ["https://example.com/feed.xml"], "keywords": [], "prompt": ""},
                 logger=silent_logger,
@@ -98,7 +98,7 @@ class TestFetchRecentCandidates:
         del entry_no_time.published_parsed
         mock_feed = _make_feed([entry_no_time])
 
-        with patch("insightbot.smart_brief_runner.feedparser.parse", return_value=mock_feed):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
             news_list = fetch_recent_candidates(
                 feed_data={"rss": ["https://example.com/feed.xml"], "keywords": [], "prompt": ""},
                 logger=silent_logger,
@@ -116,7 +116,7 @@ class TestFetchRecentCandidates:
         ]
         mock_feed = _make_feed(entries)
 
-        with patch("insightbot.smart_brief_runner.feedparser.parse", return_value=mock_feed):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
             news_list = fetch_recent_candidates(
                 feed_data={"rss": ["https://example.com/feed.xml"], "keywords": [], "prompt": ""},
                 logger=silent_logger,
@@ -136,6 +136,7 @@ class TestPromptDebug:
                 "api_url": "https://api.test.com/v1/chat/completions",
                 "api_key": "test-key",
                 "model": "test-model",
+                "system_prompt": "这是配置里的系统提示词",
             }
         }
 
@@ -215,6 +216,7 @@ class TestPromptDebug:
             )
 
         assert len(captured_calls) == 1
+        assert "这是配置里的系统提示词" in captured_calls[0]["system_prompt"]
         assert category_prompt in captured_calls[0]["system_prompt"]
         assert captured_calls[0]["json_mode"] is True
 
@@ -282,7 +284,7 @@ class TestRunTaskIntegration:
         mock_feed = _make_feed([])
         sent_messages = []
 
-        with patch("insightbot.smart_brief_runner.feedparser.parse", return_value=mock_feed):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
             with patch(
                 "insightbot.smart_brief_runner.send_markdown_to_app",
                 side_effect=lambda **kw: sent_messages.append(kw["content"]) or True,
@@ -296,7 +298,7 @@ class TestRunTaskIntegration:
         mock_feed = _make_feed([])
         sent_messages = []
 
-        with patch("insightbot.smart_brief_runner.feedparser.parse", return_value=mock_feed):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
             with patch(
                 "insightbot.smart_brief_runner.send_markdown_to_app",
                 side_effect=lambda **kw: sent_messages.append(kw["content"]) or True,
@@ -311,7 +313,7 @@ class TestRunTaskIntegration:
         mock_feed = _make_feed([recent_entry])
         sent_messages = []
 
-        with patch("insightbot.smart_brief_runner.feedparser.parse", return_value=mock_feed):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
             with patch(
                 "insightbot.smart_brief_runner.send_markdown_to_app",
                 side_effect=lambda **kw: sent_messages.append(kw["content"]) or True,
@@ -327,7 +329,7 @@ class TestRunTaskIntegration:
         assert any(footer_text in msg for msg in sent_messages)
 
     def test_rss_fetch_failure_does_not_crash(self, test_config, silent_logger):
-        with patch("insightbot.smart_brief_runner.feedparser.parse", side_effect=Exception("Connection refused")):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", side_effect=Exception("Connection refused")):
             with patch("insightbot.smart_brief_runner.send_markdown_to_app", return_value=True):
                 run_task(config=test_config, logger=silent_logger)
 
@@ -346,7 +348,7 @@ class TestRunTaskIntegration:
             parsed_urls.append(url)
             return _make_feed([])
 
-        with patch("insightbot.smart_brief_runner.feedparser.parse", side_effect=capture_parse):
+        with patch("insightbot.smart_brief_runner._parse_feed_url", side_effect=capture_parse):
             with patch("insightbot.smart_brief_runner.send_markdown_to_app", return_value=True):
                 run_task(config=config_with_comment, logger=silent_logger)
 

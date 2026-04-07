@@ -1,17 +1,17 @@
 import json
-import socket
 import time
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
 
 import feedparser
+import requests
 
 from .paths import feed_health_cache_file_path
 
 CACHE_TTL_SECONDS = 300
+FEED_FETCH_TIMEOUT_S = 15
 
 
 def _now() -> datetime:
@@ -23,10 +23,14 @@ def _normalize_feed_url(raw_url: str) -> str:
 
 
 def _classify_exception(exc: Exception) -> tuple[str, str]:
-    if isinstance(exc, (TimeoutError, socket.timeout)):
+    if isinstance(exc, (TimeoutError, requests.exceptions.Timeout)):
         return "timeout", str(exc) or "请求超时"
-    if isinstance(exc, URLError):
-        return "unreachable", str(exc.reason) if getattr(exc, "reason", None) else str(exc)
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "unreachable", str(exc)
+    if isinstance(exc, requests.exceptions.HTTPError):
+        response = getattr(exc, "response", None)
+        status_code = response.status_code if response is not None else "unknown"
+        return "invalid_feed", f"HTTP {status_code}"
 
     text = str(exc).lower()
     if "timeout" in text or "timed out" in text:
@@ -69,7 +73,13 @@ def inspect_feed(url: str) -> dict[str, Any]:
 
     try:
         start = time.time()
-        feed = feedparser.parse(normalized_url)
+        response = requests.get(
+            normalized_url,
+            timeout=FEED_FETCH_TIMEOUT_S,
+            headers={"User-Agent": "InsightBot/0.3.0 (+https://github.com/mikacreative/InsightBot)"},
+        )
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
         result["elapsed_s"] = round(time.time() - start, 2)
 
         entries = list(getattr(feed, "entries", []))

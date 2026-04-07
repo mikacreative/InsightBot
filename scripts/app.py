@@ -290,7 +290,7 @@ def main() -> None:
         hours = minutes // 60
         return f"{hours} 小时"
 
-    def render_diagnosis_card(card: dict, *, prompt_categories: list[str]) -> None:
+    def render_diagnosis_card(card: dict, *, prompt_categories: list[str], key_prefix: str) -> None:
         st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
         st.markdown(f'<div class="ib-section-title">{card["title"]}</div>', unsafe_allow_html=True)
         st.markdown(
@@ -302,7 +302,10 @@ def main() -> None:
             blocked = [item.get("category") for item in card.get("details", []) if item.get("category")]
             if blocked:
                 default_category = blocked[0]
-                if st.button(f"🎯 预设到 Prompt Debug：{default_category}", key=f"diag_prompt_{default_category}"):
+                if st.button(
+                    f"🎯 预设到 Prompt Debug：{default_category}",
+                    key=f"{key_prefix}_diag_prompt_{default_category}",
+                ):
                     st.session_state["prompt_debug_category"] = default_category
                     if default_category in prompt_categories:
                         draft_key = f"draft_prompt::{default_category}"
@@ -500,7 +503,11 @@ def main() -> None:
         )
         if overview_diagnosis_cards:
             for card in overview_diagnosis_cards[:3]:
-                render_diagnosis_card(card, prompt_categories=list(config.get("feeds", {}).keys()))
+                render_diagnosis_card(
+                    card,
+                    prompt_categories=list(config.get("feeds", {}).keys()),
+                    key_prefix="overview",
+                )
         else:
             st.success("当前没有明显异常摘要，系统状态看起来比较稳定。")
         st.markdown("</div>", unsafe_allow_html=True)
@@ -966,7 +973,11 @@ def main() -> None:
                 )
                 st.markdown("</div>", unsafe_allow_html=True)
                 for card in diagnosis_cards:
-                    render_diagnosis_card(card, prompt_categories=list(config.get("feeds", {}).keys()))
+                    render_diagnosis_card(
+                        card,
+                        prompt_categories=list(config.get("feeds", {}).keys()),
+                        key_prefix="health",
+                    )
 
             checked_at = health_snapshot.get("checked_at")
             age_text = summarize_cache_age(health_snapshot.get("cache_age_seconds"))
