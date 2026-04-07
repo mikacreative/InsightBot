@@ -213,6 +213,46 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
+    def render_result_panel(*, title: str, result: dict) -> None:
+        status = result.get("status", "unknown")
+        selected_items = result.get("selected_items", [])
+        preview_md = result.get("preview_markdown", "")
+
+        st.markdown(f"**{title}**")
+        render_status_chip(status)
+        if status == "success":
+            st.success(f"候选 {result.get('candidate_count', 0)} 条，命中 {len(selected_items)} 条。")
+        elif status == "empty":
+            st.warning(f"候选 {result.get('candidate_count', 0)} 条，但没有命中内容。")
+        elif status == "empty_candidates":
+            st.warning("当前没有可调试的候选内容。")
+        else:
+            st.error(f"调试失败：{result.get('error', '未知错误')}")
+
+        if selected_items:
+            with st.expander(f"{title} 命中内容", expanded=False):
+                for idx, item in enumerate(selected_items, start=1):
+                    item_title = item.get("title", "").strip()
+                    item_url = item.get("url", "").strip()
+                    item_summary = item.get("summary", "").strip()
+                    st.markdown(f"**{idx}. [{item_title}]({item_url})**")
+                    st.caption(item_summary or "无摘要")
+
+        if preview_md:
+            st.markdown(preview_md)
+        else:
+            st.info("本次没有生成可预览输出。")
+
+        with st.expander(f"{title} 批次详情", expanded=status != "success"):
+            st.json(
+                {
+                    "status": status,
+                    "selected_items": selected_items,
+                    "batches": result.get("batches", []),
+                },
+                expanded=False,
+            )
+
     def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
         """添加单个 RSS 源到 config.json"""
         try:
@@ -497,7 +537,7 @@ def main() -> None:
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            action_col1, action_col2, action_col3 = st.columns(3)
+            action_col1, action_col2, action_col3, action_col4 = st.columns(4)
             with action_col1:
                 if st.button("📥 抓取最新候选", use_container_width=True):
                     ui_logger = build_ui_logger()
@@ -511,6 +551,8 @@ def main() -> None:
                         "category": selected_category,
                         "using_fallback": using_fallback,
                     }
+                    st.session_state.pop("prompt_debug_result", None)
+                    st.session_state.pop("prompt_debug_compare", None)
                     if using_fallback:
                         st.warning("实时 RSS 未抓到近 24 小时候选，已自动切换为内置样例数据。")
                     else:
@@ -533,8 +575,38 @@ def main() -> None:
                         )
                         st.session_state["prompt_debug_result"] = debug_result
                         st.session_state["prompt_debug_result_category"] = selected_category
+                        st.session_state.pop("prompt_debug_compare", None)
 
             with action_col3:
+                if st.button("⚖️ 对比当前 vs 草稿", use_container_width=True):
+                    candidates = st.session_state.get("prompt_debug_candidates", [])
+                    meta = st.session_state.get("prompt_debug_meta", {})
+                    if not candidates or meta.get("category") != selected_category:
+                        st.warning("请先为当前板块抓取候选内容。")
+                    else:
+                        ui_logger = build_ui_logger()
+                        current_result = run_prompt_debug(
+                            config=runtime_config,
+                            category_name=selected_category,
+                            news_list=candidates,
+                            category_prompt=current_prompt,
+                            logger=ui_logger,
+                        )
+                        draft_result = run_prompt_debug(
+                            config=runtime_config,
+                            category_name=selected_category,
+                            news_list=candidates,
+                            category_prompt=st.session_state[draft_key],
+                            logger=ui_logger,
+                        )
+                        st.session_state["prompt_debug_compare"] = {
+                            "category": selected_category,
+                            "current": current_result,
+                            "draft": draft_result,
+                        }
+                        st.session_state.pop("prompt_debug_result", None)
+
+            with action_col4:
                 if st.button("↩️ 草稿覆盖到编辑区", use_container_width=True):
                     feeds[selected_category]["prompt"] = st.session_state[draft_key].strip()
                     config["feeds"] = feeds
@@ -545,7 +617,9 @@ def main() -> None:
             candidates = st.session_state.get("prompt_debug_candidates", [])
             meta = st.session_state.get("prompt_debug_meta", {})
             debug_result = st.session_state.get("prompt_debug_result")
+            compare_result = st.session_state.get("prompt_debug_compare")
             result_matches_category = debug_result and st.session_state.get("prompt_debug_result_category") == selected_category
+            compare_matches_category = compare_result and compare_result.get("category") == selected_category
             if candidates and meta.get("category") == selected_category:
                 st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
                 st.markdown('<div class="ib-section-title">候选池</div>', unsafe_allow_html=True)
@@ -553,7 +627,10 @@ def main() -> None:
                     '<div class="ib-section-copy">这里是本次调试会送进 AI 的原始候选内容。先确认候选池质量，再判断 Prompt 是否合理。</div>',
                     unsafe_allow_html=True,
                 )
-                selected_count = len(debug_result.get("selected_items", [])) if result_matches_category else 0
+                if compare_matches_category:
+                    selected_count = len(compare_result["draft"].get("selected_items", []))
+                else:
+                    selected_count = len(debug_result.get("selected_items", [])) if result_matches_category else 0
                 render_kpi_strip(
                     candidate_count=len(candidates),
                     selected_count=selected_count,
@@ -572,7 +649,32 @@ def main() -> None:
                     st.caption(f"还有 {len(candidates) - len(candidate_preview)} 条候选未展开显示。")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            if result_matches_category:
+            if compare_matches_category:
+                current_result = compare_result["current"]
+                draft_result = compare_result["draft"]
+                current_selected = len(current_result.get("selected_items", []))
+                draft_selected = len(draft_result.get("selected_items", []))
+                delta = draft_selected - current_selected
+
+                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+                st.markdown('<div class="ib-section-title">当前版 vs 草稿版</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="ib-section-copy">两边使用同一批候选内容，方便直接比较草稿 Prompt 是否真的优于当前版本。</div>',
+                    unsafe_allow_html=True,
+                )
+                delta_label = f"草稿多命中 {delta} 条" if delta > 0 else (f"草稿少命中 {abs(delta)} 条" if delta < 0 else "命中数量一致")
+                delta_class = "ib-chip-success" if delta > 0 else ("ib-chip-warning" if delta < 0 else "ib-chip-neutral")
+                st.markdown(
+                    f'<div class="ib-chip-row"><span class="ib-chip {delta_class}">{delta_label}</span></div>',
+                    unsafe_allow_html=True,
+                )
+                compare_col1, compare_col2 = st.columns(2)
+                with compare_col1:
+                    render_result_panel(title="当前已保存 Prompt", result=current_result)
+                with compare_col2:
+                    render_result_panel(title="草稿 Prompt", result=draft_result)
+                st.markdown("</div>", unsafe_allow_html=True)
+            elif result_matches_category:
                 status = debug_result.get("status", "unknown")
                 st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
                 st.markdown('<div class="ib-section-title">调试结果</div>', unsafe_allow_html=True)
@@ -590,35 +692,7 @@ def main() -> None:
                 else:
                     st.error(f"调试失败：{debug_result.get('error', '未知错误')}")
 
-                selected_items = debug_result.get("selected_items", [])
-                if selected_items:
-                    with st.expander("命中内容详情", expanded=True):
-                        for idx, item in enumerate(selected_items, start=1):
-                            title = item.get("title", "").strip()
-                            url = item.get("url", "").strip()
-                            summary = item.get("summary", "").strip()
-                            st.markdown(f"**{idx}. [{title}]({url})**")
-                            st.caption(summary or "无摘要")
-
-                preview_md = debug_result.get("preview_markdown", "")
-                preview_col1, preview_col2 = st.columns([1.2, 0.9])
-                with preview_col1:
-                    if preview_md:
-                        st.markdown("**管理员预览输出**")
-                        st.markdown(preview_md)
-                    else:
-                        st.info("本次没有生成可预览输出。")
-
-                with preview_col2:
-                    with st.expander("批次调试详情", expanded=status != "success"):
-                        st.json(
-                            {
-                                "status": status,
-                                "selected_items": selected_items,
-                                "batches": debug_result.get("batches", []),
-                            },
-                            expanded=False,
-                        )
+                render_result_panel(title="草稿 Prompt", result=debug_result)
                 st.markdown("</div>", unsafe_allow_html=True)
 
     with tab4:
