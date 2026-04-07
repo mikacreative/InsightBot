@@ -879,15 +879,22 @@ def main() -> None:
                     using_fallback=bool(meta.get("using_fallback")),
                     prompt_changed=prompt_changed,
                 )
-                candidate_preview = candidates[:12]
+                show_all_candidates = st.toggle(
+                    "显示全部候选",
+                    value=False,
+                    key=f"show_all_candidates::{selected_category}",
+                )
+                candidate_preview = candidates if show_all_candidates else candidates[:12]
                 st.markdown("**候选预览**")
                 st.markdown('<ol class="ib-list">', unsafe_allow_html=True)
                 for item in candidate_preview:
                     title = item.get("title", "").strip()
                     link = item.get("link", "").strip()
+                    summary = item.get("summary", "").strip()
                     st.markdown(f'<li><a href="{link}">{title}</a></li>', unsafe_allow_html=True)
+                    st.caption(f"Summary: {summary or '无摘要'}")
                 st.markdown("</ol>", unsafe_allow_html=True)
-                if len(candidates) > len(candidate_preview):
+                if not show_all_candidates and len(candidates) > len(candidate_preview):
                     st.caption(f"还有 {len(candidates) - len(candidate_preview)} 条候选未展开显示。")
                 st.markdown("</div>", unsafe_allow_html=True)
 
