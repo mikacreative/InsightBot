@@ -317,3 +317,402 @@ all feeds
 - 保持当前 `dev` 继续可用于生产验证
 - 让新编辑流水线单独演进
 - 便于后续灰度对比新旧方案效果
+
+## 11. Implementation Draft
+
+这一节将设计收敛成可执行的实施稿，目标是回答：
+
+- 第一版具体改哪些文件
+- 新增哪些函数
+- 哪些逻辑能复用
+- 怎么灰度接入而不破坏现有流程
+
+### 11.1 Non-Goals For MVP
+
+第一版明确不做这些事情：
+
+- 不做多板块归属
+- 不做正文全文抓取增强
+- 不做复杂相似度聚类
+- 不改企业微信推送协议
+- 不立即替换现有 Prompt Debug 页面为全新控制台
+
+先把主编辑流水线跑通，再考虑增强。
+
+### 11.2 File-Level Change Plan
+
+建议修改/新增这些文件：
+
+#### Existing Files To Update
+
+- [insightbot/smart_brief_runner.py](D:/Documents/GitHub/InsightBot/insightbot/smart_brief_runner.py)
+  - 保留现有候选抓取、文本清洗、AI 选择基础设施
+  - 增加新流水线入口，但不要删除旧入口
+
+- [scripts/app.py](D:/Documents/GitHub/InsightBot/scripts/app.py)
+  - 新增双入口调试面板
+  - 新增编辑流水线开关和调试展示
+
+- [config.content.json](D:/Documents/GitHub/InsightBot/config.content.json)
+  - 增加 editorial pipeline 相关配置
+
+- [tests/test_smart_brief_runner.py](D:/Documents/GitHub/InsightBot/tests/test_smart_brief_runner.py)
+  - 增加新流水线单测
+
+#### New Files To Add
+
+- `insightbot/editorial_pipeline.py`
+  - 放新的全局初筛、板块分配、流水线编排逻辑
+
+- `tests/test_editorial_pipeline.py`
+  - 覆盖全局初筛、单归属分配、灰度开关
+
+如果后续 UI 逻辑过重，再考虑拆：
+
+- `insightbot/editorial_debug.py`
+
+但第一版不强求。
+
+## 12. Proposed Config Additions
+
+建议在 `config.content.json` 中增加一个独立配置块，而不是把新逻辑散落到现有字段里。
+
+建议结构：
+
+```json
+{
+  "ai": {
+    "system_prompt": "...",
+    "selection": {
+      "max_selected_items": 5,
+      "title_max_len": 50,
+      "summary_max_len": 30,
+      "full_context_threshold_chars": 18000,
+      "batch_size": 15
+    },
+    "editorial_pipeline": {
+      "enabled": false,
+      "global_shortlist_multiplier": 3,
+      "allow_multi_assign": false,
+      "inject_publication_scope_into_global": true,
+      "assignment_batch_size": 20
+    }
+  }
+}
+```
+
+说明：
+
+- `enabled`
+  - 灰度开关
+  - `false` 时继续走当前老流程
+
+- `global_shortlist_multiplier`
+  - 初筛倍率
+
+- `allow_multi_assign`
+  - 第一版默认 `false`
+
+- `inject_publication_scope_into_global`
+  - 是否把刊物整体栏目定位摘要注入全局初筛
+
+- `assignment_batch_size`
+  - 板块分配阶段的批大小
+
+## 13. Proposed Data Structures
+
+### 13.1 GlobalCandidate
+
+```python
+{
+  "id": "uuid-or-stable-hash",
+  "title": "...",
+  "link": "...",
+  "summary": "...",
+  "published_at": "...",
+  "source_url": "...",
+  "source_name": "...",
+  "source_category_hint": "💡 营销行业"
+}
+```
+
+### 13.2 ScreenedCandidate
+
+```python
+{
+  "id": "...",
+  "title": "...",
+  "link": "...",
+  "summary": "...",
+  "editorial_reason": "...",
+  "priority_score": 0.0
+}
+```
+
+### 13.3 AssignedCandidate
+
+```python
+{
+  "id": "...",
+  "assigned_category": "🤖 数智前沿",
+  "assignment_reason": "..."
+}
+```
+
+### 13.4 CategoryCandidateMap
+
+```python
+{
+  "💡 营销行业": [candidate_a, candidate_b],
+  "🤖 数智前沿": [candidate_c],
+  "📢 政策导向": []
+}
+```
+
+## 14. Function Interface Draft
+
+建议在 `insightbot/editorial_pipeline.py` 中提供以下函数：
+
+### 14.1 `build_global_candidates`
+
+```python
+def build_global_candidates(*, config: dict, logger) -> list[dict]:
+    ...
+```
+
+职责：
+
+- 抓取所有 RSS 候选
+- 统一清洗
+- 去重
+- 产出统一候选池
+
+### 14.2 `screen_global_candidates`
+
+```python
+def screen_global_candidates(
+    *,
+    config: dict,
+    candidates: list[dict],
+    logger,
+) -> dict:
+    ...
+```
+
+职责：
+
+- 根据“总编辑”角色做初筛
+- 返回 shortlist
+- 适配全量 / 分片自适应策略
+
+### 14.3 `assign_candidates_to_categories`
+
+```python
+def assign_candidates_to_categories(
+    *,
+    config: dict,
+    screened_candidates: list[dict],
+    logger,
+) -> dict[str, list[dict]]:
+    ...
+```
+
+职责：
+
+- 单归属板块分配
+- 返回按板块聚合的候选映射
+
+### 14.4 `select_for_category`
+
+```python
+def select_for_category(
+    *,
+    config: dict,
+    category_name: str,
+    candidates: list[dict],
+    logger,
+) -> dict:
+    ...
+```
+
+职责：
+
+- 复用现有板块最终精筛与改写能力
+
+### 14.5 `run_editorial_pipeline`
+
+```python
+def run_editorial_pipeline(*, config: dict, logger) -> dict:
+    ...
+```
+
+职责：
+
+- 串起全局初筛、板块分配、板块最终输出
+- 返回调试友好的完整中间结果
+
+## 15. Reuse Strategy
+
+为了控制风险，建议最大化复用现有逻辑：
+
+### 15.1 Reuse Directly
+
+- `fetch_recent_candidates`
+- `_render_markdown`
+- `_validate_and_repair`
+- 现有 AI 调用和结构化输出修复
+- 现有 selection settings 注入方式
+
+### 15.2 Reuse With Thin Wrappers
+
+- `run_prompt_debug`
+  - 不直接删
+  - 作为板块最终精筛的底座，或抽出其中共用部分
+
+### 15.3 Keep Old Pipeline In Place
+
+旧流程第一版不要删除。
+
+保留两个入口：
+
+- `run_task`：当前老流程
+- `run_editorial_pipeline`：新流程
+
+再由配置决定走哪条。
+
+## 16. Rollout Strategy
+
+### 16.1 Phase 0: Docs + Branch Only
+
+当前状态。
+
+### 16.2 Phase 1: Hidden Backend Implementation
+
+做后端实现，但默认不开：
+
+- `editorial_pipeline.enabled = false`
+
+目标：
+
+- 能本地调试
+- 不影响生产
+
+### 16.3 Phase 2: Debug-Only UI
+
+只在控制台提供调试入口，不接正式推送。
+
+目标：
+
+- 对比新旧流程的候选质量
+- 看误杀和分配问题
+
+### 16.4 Phase 3: Optional Runtime Switch
+
+加入显式切换：
+
+- `classic`
+- `editorial`
+
+仍然建议默认 `classic`。
+
+### 16.5 Phase 4: Production Trial
+
+只在腾讯云 `dev` 环境试跑：
+
+- 不直接替换 `main`
+- 用真实 RSS 和真实模型做 3~7 天观察
+
+## 17. Debug UI Draft
+
+第一版调试 UI 建议增加两个区块：
+
+### 17.1 Global Screening Debug
+
+展示：
+
+- 全局候选池
+- 全局初筛 shortlist
+- 全局初筛理由
+- 是全量还是分片模式
+
+### 17.2 Category Assignment Debug
+
+展示：
+
+- 每条 shortlist 被分配到哪个板块
+- 为什么分配到该板块
+- 哪些板块为空
+
+### 17.3 Keep Existing Category Prompt Debug
+
+保留现有单板块 Prompt Debug，不立即删除。
+
+原因：
+
+- 它仍然适合做板块层 prompt 微调
+
+## 18. Test Plan
+
+建议新增这些测试：
+
+### 18.1 Global Candidate Tests
+
+- 全量源汇总成功
+- 全局候选去重正确
+
+### 18.2 Global Screening Tests
+
+- shortlist 数量符合倍率
+- 超阈值时走分片
+- 阈值内走全量
+
+### 18.3 Assignment Tests
+
+- 单条内容只归属一个板块
+- 不匹配时不强塞
+- 空板块允许为空
+
+### 18.4 Rollout Tests
+
+- `enabled=false` 时旧流程不受影响
+- `enabled=true` 时新流程入口生效
+
+## 19. MVP Milestone Proposal
+
+建议按这 4 个里程碑推进：
+
+### Milestone A
+
+- 新增 `editorial_pipeline.py`
+- 完成全局候选池与全局初筛
+
+### Milestone B
+
+- 完成单归属板块分配
+- 可输出 `category_candidate_map`
+
+### Milestone C
+
+- 接入板块最终精筛
+- 跑通完整 debug 链路
+
+### Milestone D
+
+- 控制台双入口调试
+- 灰度开关
+- 腾讯云 `dev` 验证
+
+## 20. Decision Summary
+
+当前实施稿采用以下明确决策：
+
+- 默认单归属
+- 空则空
+- 全局初筛倍率先用 `3x`
+- 全局层只注入“刊物整体栏目定位摘要”，不注入每个板块完整规则
+- MVP 先做新旧流程并存，不替换老流程
+
+这意味着第一版的成功标准不是“立刻上线替换”，而是：
+
+- 在 `dev-editorial` 上形成可调试、可比较、可灰度的新流水线
+- 用真实运行结果证明它比现有逐板块独立筛选更像一个“编辑系统”
