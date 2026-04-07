@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from insightbot.paths import (
     default_bot_dir,
 )
 from insightbot.discovery.url_resolver import UrlResolver
+from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, run_prompt_debug
 
 def main() -> None:
     bot_dir = default_bot_dir()
@@ -39,6 +41,14 @@ def main() -> None:
     def save_config(config: dict) -> None:
         with open(active_edit_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
+
+    def build_ui_logger() -> logging.Logger:
+        logger = logging.getLogger("InsightBot.PromptDebug")
+        logger.setLevel(logging.INFO)
+        logger.handlers.clear()
+        logger.addHandler(logging.NullHandler())
+        logger.propagate = False
+        return logger
 
     def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
         """添加单个 RSS 源到 config.json"""
@@ -73,6 +83,8 @@ def main() -> None:
 
     if "settings" not in config:
         config["settings"] = {}
+    if "ai" not in config:
+        config["ai"] = {}
 
     with st.sidebar:
         st.header("⚡ 快捷操作")
@@ -205,7 +217,15 @@ def main() -> None:
     with tab3:
         ai_conf = config.get("ai", {})
         runtime_ai = runtime_config.get("ai", {})
-        st.text_area("System Prompt (系统提示词)", value=ai_conf.get("system_prompt", ""), height=300, key="sys_prompt")
+        feeds = config.get("feeds", {})
+        categories = list(feeds.keys())
+        if "prompt_debug_category" not in st.session_state and categories:
+            st.session_state["prompt_debug_category"] = categories[0]
+
+        st.subheader("Prompt 调试台")
+        st.caption("先抓取真实候选内容，再用草稿 prompt 试跑；调试过程不会保存配置。")
+
+        st.text_area("System Prompt (系统提示词)", value=ai_conf.get("system_prompt", ""), height=220, key="sys_prompt")
         st.text_input("AI Model", value=runtime_ai.get("model", ""), disabled=True)
         st.text_input("API URL", value=runtime_ai.get("api_url", ""), disabled=True)
         st.caption("AI Model / API URL 属于运行时敏感配置，请通过 config.secrets.json 或环境变量维护。")
@@ -219,6 +239,124 @@ def main() -> None:
             config["ai"]["system_prompt"] = st.session_state.sys_prompt
             save_config(config)
             st.toast("System Prompt 更新成功！AI 连接配置请通过 secrets 或环境变量维护。")
+
+        st.divider()
+        if not categories:
+            st.info("当前还没有板块。请先在“板块与信源管理”里创建板块。")
+        else:
+            selected_category = st.selectbox(
+                "调试板块",
+                options=categories,
+                index=categories.index(st.session_state["prompt_debug_category"])
+                if st.session_state["prompt_debug_category"] in categories else 0,
+                key="prompt_debug_category",
+            )
+            current_prompt = feeds.get(selected_category, {}).get("prompt", "")
+            draft_key = f"draft_prompt::{selected_category}"
+            if draft_key not in st.session_state:
+                st.session_state[draft_key] = current_prompt
+
+            st.text_area(
+                "当前已保存板块 Prompt",
+                value=current_prompt,
+                height=120,
+                disabled=True,
+                key=f"saved_prompt_{selected_category}",
+            )
+            st.text_area(
+                "草稿 Prompt（仅用于调试）",
+                key=draft_key,
+                height=140,
+            )
+
+            action_col1, action_col2, action_col3 = st.columns(3)
+            with action_col1:
+                if st.button("📥 抓取最新候选", use_container_width=True):
+                    ui_logger = build_ui_logger()
+                    candidates = fetch_recent_candidates(feed_data=feeds.get(selected_category, {}), logger=ui_logger)
+                    using_fallback = False
+                    if not candidates:
+                        candidates = list(DEBUG_SAMPLE_NEWS)
+                        using_fallback = True
+                    st.session_state["prompt_debug_candidates"] = candidates
+                    st.session_state["prompt_debug_meta"] = {
+                        "category": selected_category,
+                        "using_fallback": using_fallback,
+                    }
+                    if using_fallback:
+                        st.warning("实时 RSS 未抓到近 24 小时候选，已自动切换为内置样例数据。")
+                    else:
+                        st.success(f"已抓取 {len(candidates)} 条候选内容。")
+
+            with action_col2:
+                if st.button("🧪 运行草稿 Prompt", use_container_width=True):
+                    candidates = st.session_state.get("prompt_debug_candidates", [])
+                    meta = st.session_state.get("prompt_debug_meta", {})
+                    if not candidates or meta.get("category") != selected_category:
+                        st.warning("请先为当前板块抓取候选内容。")
+                    else:
+                        ui_logger = build_ui_logger()
+                        debug_result = run_prompt_debug(
+                            config=runtime_config,
+                            category_name=selected_category,
+                            news_list=candidates,
+                            category_prompt=st.session_state[draft_key],
+                            logger=ui_logger,
+                        )
+                        st.session_state["prompt_debug_result"] = debug_result
+                        st.session_state["prompt_debug_result_category"] = selected_category
+
+            with action_col3:
+                if st.button("↩️ 草稿覆盖到编辑区", use_container_width=True):
+                    feeds[selected_category]["prompt"] = st.session_state[draft_key].strip()
+                    config["feeds"] = feeds
+                    save_config(config)
+                    st.toast(f"已将草稿 Prompt 写回 [{selected_category}]。")
+                    st.rerun()
+
+            candidates = st.session_state.get("prompt_debug_candidates", [])
+            meta = st.session_state.get("prompt_debug_meta", {})
+            if candidates and meta.get("category") == selected_category:
+                if meta.get("using_fallback"):
+                    st.info(f"当前展示 {len(candidates)} 条内置样例候选。")
+                else:
+                    st.info(f"当前展示 {len(candidates)} 条真实候选。")
+                with st.expander("候选内容预览", expanded=True):
+                    for idx, item in enumerate(candidates, start=1):
+                        st.markdown(f"{idx}. [{item.get('title', '').strip()}]({item.get('link', '').strip()})")
+
+            debug_result = st.session_state.get("prompt_debug_result")
+            if debug_result and st.session_state.get("prompt_debug_result_category") == selected_category:
+                status = debug_result.get("status", "unknown")
+                if status == "success":
+                    st.success(f"调试成功：候选 {debug_result['candidate_count']} 条，命中 {len(debug_result['selected_items'])} 条。")
+                elif status == "empty":
+                    st.warning(f"调试结果为空：候选 {debug_result['candidate_count']} 条，但没有命中内容。")
+                elif status == "empty_candidates":
+                    st.warning("当前没有可调试的候选内容。")
+                else:
+                    st.error(f"调试失败：{debug_result.get('error', '未知错误')}")
+
+                metric_col1, metric_col2 = st.columns(2)
+                with metric_col1:
+                    st.metric("候选条数", debug_result.get("candidate_count", 0))
+                with metric_col2:
+                    st.metric("命中条数", len(debug_result.get("selected_items", [])))
+
+                preview_md = debug_result.get("preview_markdown", "")
+                if preview_md:
+                    st.markdown("**预览输出**")
+                    st.markdown(preview_md)
+
+                with st.expander("批次调试详情", expanded=status != "success"):
+                    st.json(
+                        {
+                            "status": status,
+                            "selected_items": debug_result.get("selected_items", []),
+                            "batches": debug_result.get("batches", []),
+                        },
+                        expanded=False,
+                    )
 
     with tab4:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")

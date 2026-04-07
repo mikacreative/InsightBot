@@ -2,7 +2,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Optional
 
 import feedparser
 
@@ -13,6 +13,13 @@ from .wecom import send_markdown_to_app
 MAX_ITEMS_PER_BATCH = 15   # 每批交给 AI 的新闻条数
 MAX_RETRIES = 3
 RETRY_DELAY_S = 5
+DEBUG_SAMPLE_NEWS = [
+    {"title": "[RSS] 微信视频号广告 ROI 提升 30%，品牌主加速布局", "link": "https://example.com/001"},
+    {"title": "[RSS] 小红书推出品牌号新功能：支持直链跳转电商平台", "link": "https://example.com/002"},
+    {"title": "[RSS] AI 文案工具月活突破 500 万，营销效率提升显著", "link": "https://example.com/003"},
+    {"title": "[RSS] 某明星离婚八卦新闻（无关内容，测试拦截）", "link": "https://example.com/004"},
+    {"title": "[RSS] 抖音电商 GMV 同比增长 45%，直播带货进入精细化运营阶段", "link": "https://example.com/005"},
+]
 
 # 简化的 system prompt（格式规则全部由代码处理，AI 只负责判断和提炼）
 SYSTEM_PROMPT_TEMPLATE = """你是一个拥有 10 年经验的资深营销情报官。
@@ -57,6 +64,59 @@ def _render_markdown(category: str, items: List[dict]) -> str:
     return "".join(blocks).strip()
 
 
+def _build_system_prompt(category_prompt: str = "") -> str:
+    system_prompt = SYSTEM_PROMPT_TEMPLATE
+    if category_prompt:
+        system_prompt += f"\n\n【本板块额外筛选标准】：\n{category_prompt}"
+    return system_prompt
+
+
+def _build_candidate_lines(news_list: List[dict]) -> List[str]:
+    lines = []
+    for i, news in enumerate(news_list):
+        clean_title = str(news.get("title", "")).replace("\n", " ")
+        lines.append(f"{i+1}. {clean_title} (Link: {news.get('link','')})")
+    return lines
+
+
+def _deduplicate_candidates(news_list: List[dict]) -> List[dict]:
+    seen_links: set[str] = set()
+    unique_candidates: List[dict] = []
+    for item in news_list:
+        link = str(item.get("link", ""))
+        if link and link not in seen_links:
+            unique_candidates.append(item)
+            seen_links.add(link)
+    return unique_candidates
+
+
+def fetch_recent_candidates(*, feed_data: dict, logger) -> List[dict]:
+    category_candidates: List[dict] = []
+    rss_urls = feed_data.get("rss", [])
+    for raw_url in rss_urls:
+        url = str(raw_url).split("#")[0].strip()
+        if not url:
+            continue
+        try:
+            feed = feedparser.parse(url)
+            valid_count = 0
+            for entry in feed.entries:
+                if hasattr(entry, "published_parsed") and entry.published_parsed:
+                    dt = datetime.fromtimestamp(time.mktime(entry.published_parsed))
+                    if datetime.now() - dt > timedelta(hours=24):
+                        continue
+
+                category_candidates.append({"title": f"[RSS] {entry.title}", "link": entry.link})
+                valid_count += 1
+                logger.info(f"  📥 抓取命中 -> {entry.title} ({entry.link})")
+
+            logger.info(f"✅ RSS源 [{url}] 抓取完成，共获得 {valid_count} 条有效资讯")
+        except Exception as e:
+            logger.error(f"⚠️ RSS抓取失败 [{url}]: {e}")
+
+    return _deduplicate_candidates(category_candidates)
+
+
 def _validate_and_repair(raw: str) -> List[dict]:
     """
     尝试解析 AI 返回的 JSON。
@@ -93,29 +153,36 @@ def _validate_and_repair(raw: str) -> List[dict]:
         return []
 
 
-def _ai_process_category(*, config: dict, category_name: str, news_list: List[dict], category_prompt: str, logger) -> Optional[str]:
+def run_prompt_debug(*, config: dict, category_name: str, news_list: List[dict], category_prompt: str, logger) -> dict:
     if not news_list:
-        return None
+        return {
+            "status": "empty_candidates",
+            "category": category_name,
+            "candidate_count": 0,
+            "selected_items": [],
+            "preview_markdown": "",
+            "batches": [],
+            "system_prompt": _build_system_prompt(category_prompt),
+        }
 
-    # 构建 user_text（分批，每批最多 MAX_ITEMS_PER_BATCH 条）
-    all_items_md = []
-    for i, news in enumerate(news_list):
-        clean_title = str(news.get("title", "")).replace("\n", " ")
-        all_items_md.append(f"{i+1}. {clean_title} (Link: {news.get('link','')})")
-
-    system_prompt = SYSTEM_PROMPT_TEMPLATE
-    if category_prompt:
-        system_prompt += f"\n\n【本板块额外筛选标准】：\n{category_prompt}"
-
-    # 分批处理
-    batch_size = MAX_ITEMS_PER_BATCH
+    system_prompt = _build_system_prompt(category_prompt)
+    all_items_md = _build_candidate_lines(news_list)
     all_selected: List[dict] = []
+    batch_results = []
 
-    for batch_idx in range(0, len(all_items_md), batch_size):
-        batch_lines = all_items_md[batch_idx:batch_idx + batch_size]
+    for batch_idx in range(0, len(all_items_md), MAX_ITEMS_PER_BATCH):
+        batch_lines = all_items_md[batch_idx:batch_idx + MAX_ITEMS_PER_BATCH]
         input_text = "【待筛选列表】：\n" + "\n".join(batch_lines)
+        batch_no = batch_idx // MAX_ITEMS_PER_BATCH + 1
+        logger.info(f"🤖 AI 分析 [{category_name}] 批次 {batch_no}（{len(batch_lines)} 条）")
 
-        logger.info(f"🤖 AI 分析 [{category_name}] 批次 {batch_idx // batch_size + 1}（{len(batch_lines)} 条）")
+        batch_record = {
+            "batch_no": batch_no,
+            "candidate_count": len(batch_lines),
+            "raw_response": "",
+            "parsed_items": [],
+            "status": "pending",
+        }
 
         for attempt in range(MAX_RETRIES):
             try:
@@ -130,23 +197,34 @@ def _ai_process_category(*, config: dict, category_name: str, news_list: List[di
                     json_mode=True,
                 )
                 items = _validate_and_repair(raw)
+                batch_record["raw_response"] = raw
+                batch_record["parsed_items"] = items
+                batch_record["status"] = "success" if items else "empty"
                 all_selected.extend(items)
                 break
             except Exception as e:
+                batch_record["status"] = "error"
+                batch_record["error"] = str(e)
                 logger.warning(f"⚠️ AI 分析第 {attempt + 1} 次尝试失败 [{category_name}]: {e}")
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(RETRY_DELAY_S)
                 else:
                     logger.error(f"❌ AI 分析彻底失败 [{category_name}]")
-                    return None
+                    batch_results.append(batch_record)
+                    return {
+                        "status": "error",
+                        "category": category_name,
+                        "candidate_count": len(news_list),
+                        "selected_items": [],
+                        "preview_markdown": "",
+                        "batches": batch_results,
+                        "system_prompt": system_prompt,
+                        "error": str(e),
+                    }
 
-        time.sleep(3)  # 批次间稍作喘息
+        batch_results.append(batch_record)
+        time.sleep(3)
 
-    if not all_selected:
-        logger.info(f"🈳 AI 判定 [{category_name}] 无合格内容，已拦截。")
-        return None
-
-    # 去重（按 url）
     seen_urls: set[str] = set()
     unique: List[dict] = []
     for item in all_selected:
@@ -154,8 +232,41 @@ def _ai_process_category(*, config: dict, category_name: str, news_list: List[di
             seen_urls.add(item["url"])
             unique.append(item)
 
+    if not unique:
+        logger.info(f"🈳 AI 判定 [{category_name}] 无合格内容，已拦截。")
+        return {
+            "status": "empty",
+            "category": category_name,
+            "candidate_count": len(news_list),
+            "selected_items": [],
+            "preview_markdown": "",
+            "batches": batch_results,
+            "system_prompt": system_prompt,
+        }
+
     logger.info(f"✅ [{category_name}] 共筛选出 {len(unique)} 条有效内容")
-    return _render_markdown(category_name, unique)
+    return {
+        "status": "success",
+        "category": category_name,
+        "candidate_count": len(news_list),
+        "selected_items": unique,
+        "preview_markdown": _render_markdown(category_name, unique),
+        "batches": batch_results,
+        "system_prompt": system_prompt,
+    }
+
+
+def _ai_process_category(*, config: dict, category_name: str, news_list: List[dict], category_prompt: str, logger) -> Optional[str]:
+    debug_result = run_prompt_debug(
+        config=config,
+        category_name=category_name,
+        news_list=news_list,
+        category_prompt=category_prompt,
+        logger=logger,
+    )
+    if debug_result["status"] != "success":
+        return None
+    return debug_result["preview_markdown"]
 
 
 def run_task(*, config: dict, logger) -> None:
@@ -179,29 +290,7 @@ def run_task(*, config: dict, logger) -> None:
 
     for category, feed_data in config.get("feeds", {}).items():
         logger.info(f"\n📁 正在处理板块: 【{category}】")
-        category_candidates: List[dict] = []
-
-        rss_urls = feed_data.get("rss", [])
-        for raw_url in rss_urls:
-            url = str(raw_url).split("#")[0].strip()
-            if not url:
-                continue
-            try:
-                feed = feedparser.parse(url)
-                valid_count = 0
-                for entry in feed.entries:
-                    if hasattr(entry, "published_parsed") and entry.published_parsed:
-                        dt = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-                        if datetime.now() - dt > timedelta(hours=24):
-                            continue
-
-                    category_candidates.append({"title": f"[RSS] {entry.title}", "link": entry.link})
-                    valid_count += 1
-                    logger.info(f"  📥 抓取命中 -> {entry.title} ({entry.link})")
-
-                logger.info(f"✅ RSS源 [{url}] 抓取完成，共获得 {valid_count} 条有效资讯")
-            except Exception as e:
-                logger.error(f"⚠️ RSS抓取失败 [{url}]: {e}")
+        category_candidates = fetch_recent_candidates(feed_data=feed_data, logger=logger)
 
         # 关键词接口预留（当前休眠）
         keywords = feed_data.get("keywords", [])
@@ -209,19 +298,11 @@ def run_task(*, config: dict, logger) -> None:
             pass
 
         if category_candidates:
-            seen_links: set[str] = set()
-            unique_candidates: List[dict] = []
-            for item in category_candidates:
-                link = str(item.get("link", ""))
-                if link and link not in seen_links:
-                    unique_candidates.append(item)
-                    seen_links.add(link)
-
-            logger.info(f"⏳ 板块 【{category}】 排重后剩余 {len(unique_candidates)} 条数据交由 AI 筛选...")
+            logger.info(f"⏳ 板块 【{category}】 排重后剩余 {len(category_candidates)} 条数据交由 AI 筛选...")
             ai_summary = _ai_process_category(
                 config=config,
                 category_name=category,
-                news_list=unique_candidates,
+                news_list=category_candidates,
                 category_prompt=feed_data.get("prompt", ""),
                 logger=logger,
             )
