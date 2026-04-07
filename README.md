@@ -32,8 +32,8 @@ cp .env.example .env
 cp config.secrets.example.json config.secrets.json
 ```
 
-- `config.content.json`：已纳入版本控制，保存 feeds、settings、system prompt 等非敏感内容
-- `config.secrets.json`：已在 `.gitignore` 中忽略，只保存企业微信凭证和 API Key
+- `config.content.json`：已纳入版本控制，保存 feeds、settings、system prompt 等内容规则
+- `config.secrets.json`：已在 `.gitignore` 中忽略，保存企业微信凭证和 AI 运行时连接配置（`api_key` / `api_url` / `model`）
 - 如果你仍在使用旧版单文件 `config.json`，当前版本仍兼容；也可以通过 `CONFIG_FILE` 指向旧路径
 
 3) 启动信源服务（可选，但建议）

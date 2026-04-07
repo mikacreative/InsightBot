@@ -206,11 +206,9 @@ def main() -> None:
         ai_conf = config.get("ai", {})
         runtime_ai = runtime_config.get("ai", {})
         st.text_area("System Prompt (系统提示词)", value=ai_conf.get("system_prompt", ""), height=300, key="sys_prompt")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.text_input("AI Model", value=ai_conf.get("model", ""), key="ai_model")
-        with col2:
-            st.text_input("API URL", value=ai_conf.get("api_url", ""), key="ai_url")
+        st.text_input("AI Model", value=runtime_ai.get("model", ""), disabled=True)
+        st.text_input("API URL", value=runtime_ai.get("api_url", ""), disabled=True)
+        st.caption("AI Model / API URL 属于运行时敏感配置，请通过 config.secrets.json 或环境变量维护。")
         masked_api_key = runtime_ai.get("api_key", "")
         if masked_api_key:
             st.caption(f"API Key 来源于 secrets / 环境变量：{masked_api_key[:6]}...{masked_api_key[-4:]}")
@@ -219,10 +217,8 @@ def main() -> None:
 
         if st.button("💾 更新 AI 大脑"):
             config["ai"]["system_prompt"] = st.session_state.sys_prompt
-            config["ai"]["model"] = st.session_state.ai_model
-            config["ai"]["api_url"] = st.session_state.ai_url
             save_config(config)
-            st.toast("AI 内容配置更新成功！敏感信息请通过 secrets 或环境变量维护。")
+            st.toast("System Prompt 更新成功！AI 连接配置请通过 secrets 或环境变量维护。")
 
     with tab4:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")

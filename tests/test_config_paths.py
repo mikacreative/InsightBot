@@ -148,13 +148,13 @@ class TestLoadRuntimeConfig:
 
     def test_prefers_split_config_and_merges_secrets(self, tmp_path):
         content = {
-            "ai": {"model": "kimi", "system_prompt": "sys"},
+            "ai": {"system_prompt": "sys"},
             "feeds": {"营销": {"rss": ["https://example.com/feed"], "keywords": [], "prompt": "筛选"}},
             "settings": {"report_title": "日报"},
         }
         secrets = {
             "wecom": {"cid": "cid", "secret": "secret", "aid": "10001"},
-            "ai": {"api_key": "secret-key", "api_url": "https://api.example.com"},
+            "ai": {"api_key": "secret-key", "api_url": "https://api.example.com", "model": "kimi"},
         }
         (tmp_path / "config.content.json").write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8")
         (tmp_path / "config.secrets.json").write_text(json.dumps(secrets, ensure_ascii=False), encoding="utf-8")

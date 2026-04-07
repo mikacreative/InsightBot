@@ -14,10 +14,6 @@ from copy import deepcopy
 from pathlib import Path
 
 
-AI_URL_PLACEHOLDER = "${AI_API_URL}"
-AI_MODEL_PLACEHOLDER = "${AI_MODEL}"
-
-
 def load_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -41,15 +37,18 @@ def split_legacy_config(legacy: dict) -> tuple[dict, dict]:
     ai_in = deepcopy(legacy.get("ai", {}))
     if ai_in:
         content_ai = deepcopy(ai_in)
-        content_ai["api_url"] = AI_URL_PLACEHOLDER
-        content_ai["model"] = AI_MODEL_PLACEHOLDER
+        content_ai.pop("api_url", None)
+        content_ai.pop("model", None)
         content_ai.pop("api_key", None)
         content["ai"] = content_ai
 
-        api_key = ai_in.get("api_key")
-        if api_key:
-            secrets.setdefault("ai", {})
-            secrets["ai"]["api_key"] = api_key
+        secrets_ai = {}
+        for key in ("api_key", "api_url", "model"):
+            value = ai_in.get(key)
+            if value:
+                secrets_ai[key] = value
+        if secrets_ai:
+            secrets["ai"] = secrets_ai
 
     return content, secrets
 
@@ -88,7 +87,7 @@ def main() -> None:
     print("拆分完成：")
     print(f"  content -> {content_out}")
     print(f"  secrets -> {secrets_out}")
-    print("后续请补充环境变量：AI_API_URL / AI_MODEL")
+    print("后续可根据部署方式选择：直接维护 secrets 文件，或继续用环境变量覆盖。")
 
 
 if __name__ == "__main__":

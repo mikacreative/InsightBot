@@ -42,8 +42,8 @@ python3 scripts/split_config.py \
 
 这个脚本会：
 
-- 把 `wecom` 和 `ai.api_key` 拆到 `config.secrets.json`
-- 把 `ai.api_url` / `ai.model` 改成环境变量占位
+- 把 `wecom` 和整个 `ai` 连接配置（`api_key` / `api_url` / `model`）拆到 `config.secrets.json`
+- 在 `config.content.json` 里只保留 `ai.system_prompt`
 - 尽量保留旧配置里的其他内容结构
 
 ## 3. 生成 secrets 文件
@@ -64,14 +64,16 @@ cp /root/marketing_bot/config.secrets.example.json /root/marketing_bot/config.se
     "aid": "你的企业微信 agent id"
   },
   "ai": {
-    "api_key": "你的 AI API Key"
+    "api_key": "你的 AI API Key",
+    "api_url": "你的 AI 接口 URL",
+    "model": "你的模型名"
   }
 }
 ```
 
 ## 4. 配置环境变量
 
-推荐在生产机的 `.env`、`systemd` 或 shell profile 中设置：
+推荐在生产机的 `.env`、`systemd` 或 shell profile 中设置；这些环境变量会覆盖 `config.secrets.json` 里的同名字段：
 
 ```bash
 export MARKETING_BOT_DIR=/root/marketing_bot
@@ -80,6 +82,10 @@ export CONFIG_SECRETS_FILE=/root/marketing_bot/config.secrets.json
 
 export AI_API_URL="你的 AI 接口 URL"
 export AI_MODEL="你的模型名"
+export AI_API_KEY="你的 AI API Key"
+export WECOM_CID="你的企业微信 corp id"
+export WECOM_SECRET="你的企业微信应用 secret"
+export WECOM_AID="你的企业微信 agent id"
 ```
 
 如果你的定时任务或服务已经固定在 `/root/marketing_bot` 下运行，`MARKETING_BOT_DIR` 也可以省略，但显式设置更稳。
@@ -104,7 +110,7 @@ PY
 预期：
 
 - `feeds` 能打印出三个板块
-- `ai_model` / `ai_url` 能显示环境变量值
+- `ai_model` / `ai_url` 能显示 secrets 或环境变量值
 - `has_ai_key` / `has_wecom` 都应为 `True`
 
 ## 6. 手动跑一次任务
