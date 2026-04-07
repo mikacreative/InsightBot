@@ -1,5 +1,6 @@
 # Local config / secrets
 config.json
+config.secrets.json
 .env
 .env.*
 !.env.example

@@ -20,6 +20,16 @@ def config_file_path(bot_dir: str | None = None) -> str:
     return os.getenv("CONFIG_FILE", os.path.join(bot_dir, "config.json"))
 
 
+def config_content_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("CONFIG_CONTENT_FILE", os.path.join(bot_dir, "config.content.json"))
+
+
+def config_secrets_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("CONFIG_SECRETS_FILE", os.path.join(bot_dir, "config.secrets.json"))
+
+
 def bot_log_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("BOT_LOG_FILE", os.path.join(logs_dir(bot_dir), "bot.log"))
@@ -28,4 +38,3 @@ def bot_log_file_path(bot_dir: str | None = None) -> str:
 def cron_log_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("LOG_FILE", os.path.join(logs_dir(bot_dir), "cron.log"))
-

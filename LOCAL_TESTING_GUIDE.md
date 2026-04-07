@@ -10,7 +10,7 @@
 ## 1. 环境隔离策略
 
 本地测试环境的核心原则是**与生产环境完全隔离**：
-- **配置隔离**：使用 `.env.local` 和 `config.local.json`，不读取生产配置。
+- **配置隔离**：使用 `.env.local`、`config.local.content.json` 和 `config.local.secrets.json`，不读取生产配置。
 - **日志隔离**：所有本地运行日志输出到 `logs_local/` 目录。
 - **推送隔离**：提供 `DRY_RUN` 模式（仅输出到本地文件），或配置专用的测试企业微信 Agent ID。
 
@@ -36,11 +36,17 @@ pip install -r requirements.txt
    ```
    打开 `.env.local`，填入你的测试用 API Key 和企业微信凭证（如果开启了 `DRY_RUN=1`，企业微信凭证可以随便填）。
 
-2. **业务配置**：
+2. **内容配置**：
    ```bash
-   cp config.local.example.json config.local.json
+   cp config.content.json config.local.content.json
    ```
-   这是一个精简版的配置，包含用于测试的 RSS 源和 Prompt。
+   这是一个可安全纳入版本控制的配置，包含用于测试的 RSS 源、版式与 Prompt。
+
+3. **敏感信息配置**：
+   ```bash
+   cp config.secrets.example.json config.local.secrets.json
+   ```
+   打开 `config.local.secrets.json`，填入测试用 API Key 和企业微信凭证；或完全通过 `.env.local` 提供。
 
 ---
 
@@ -57,6 +63,8 @@ pip install -r requirements.txt
 ```bash
 # 加载本地环境变量并运行
 set -a; source .env.local; set +a
+export CONFIG_CONTENT_FILE=./config.local.content.json
+export CONFIG_SECRETS_FILE=./config.local.secrets.json
 python debug_run.py
 ```
 运行结束后，直接使用 Markdown 编辑器打开 `logs_local/dry_run_report.md` 即可预览推送效果。
@@ -67,8 +75,10 @@ python debug_run.py
 **运行方式**：
 ```bash
 set -a; source .env.local; set +a
+export CONFIG_CONTENT_FILE=./config.local.content.json
+export CONFIG_SECRETS_FILE=./config.local.secrets.json
 
-# 1. 使用 config.local.json 中的 RSS 源实时抓取，测试指定板块
+# 1. 使用本地内容配置中的 RSS 源实时抓取，测试指定板块
 python debug_prompt.py --category "📢 测试板块-营销行业"
 
 # 2. 如果 RSS 源暂时没更新，可以使用内置的模拟新闻列表强制测试
@@ -85,6 +95,8 @@ python debug_prompt.py --category "📢 测试板块-营销行业" --mock-news -
 **运行方式**：
 ```bash
 set -a; source .env.local; set +a
+export CONFIG_CONTENT_FILE=./config.local.content.json
+export CONFIG_SECRETS_FILE=./config.local.secrets.json
 python debug_rss_check.py
 ```
 
@@ -123,4 +135,4 @@ pytest tests/test_smart_brief_runner.py -v
 set -a; source .env.local; set +a
 streamlit run scripts/app.py
 ```
-此时控制台读取和修改的都是 `config.local.json`，点击"立即手动运行"触发的也是本地的测试配置，完全不会影响生产环境。
+此时控制台读取和修改的都是 `config.local.content.json`，敏感信息来自 `config.local.secrets.json` 或环境变量；点击"立即手动运行"触发的也是本地的测试配置，完全不会影响生产环境。

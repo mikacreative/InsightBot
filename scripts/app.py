@@ -7,24 +7,37 @@ from datetime import datetime
 import streamlit as st
 from crontab import CronTab
 
-from insightbot.paths import bot_log_file_path, config_file_path, cron_log_file_path, default_bot_dir
+from insightbot.config import load_runtime_config
+from insightbot.paths import (
+    bot_log_file_path,
+    config_content_file_path,
+    config_file_path,
+    cron_log_file_path,
+    default_bot_dir,
+)
 from insightbot.discovery.url_resolver import UrlResolver
 
 def main() -> None:
     bot_dir = default_bot_dir()
-    config_path = config_file_path(bot_dir)
+    content_config_path = config_content_file_path(bot_dir)
+    legacy_config_path = config_file_path(bot_dir)
     cron_log_path = cron_log_file_path(bot_dir)
     bot_log_path = bot_log_file_path(bot_dir)
 
     smart_brief_path = os.getenv("SMART_BRIEF_PATH", os.path.join(bot_dir, "smart_brief.py"))
     smart_brief_mode = os.getenv("SMART_BRIEF_MODE", "script").strip().lower()  # script | module
 
+    active_edit_path = content_config_path if os.path.exists(content_config_path) else legacy_config_path
+
     def load_config() -> dict:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(active_edit_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
+    def load_runtime_view() -> dict:
+        return load_runtime_config(bot_dir)
+
     def save_config(config: dict) -> None:
-        with open(config_path, "w", encoding="utf-8") as f:
+        with open(active_edit_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
 
     def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
@@ -51,10 +64,13 @@ def main() -> None:
             st.error(f"保存失败: {e}")
             return False
 
+    config = load_config()
+    runtime_config = load_runtime_view()
+
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
     st.title("🚀 营销情报站 | 智控中心")
+    st.caption(f"当前编辑配置文件: {active_edit_path}")
 
-    config = load_config()
     if "settings" not in config:
         config["settings"] = {}
 
@@ -188,22 +204,25 @@ def main() -> None:
 
     with tab3:
         ai_conf = config.get("ai", {})
+        runtime_ai = runtime_config.get("ai", {})
         st.text_area("System Prompt (系统提示词)", value=ai_conf.get("system_prompt", ""), height=300, key="sys_prompt")
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             st.text_input("AI Model", value=ai_conf.get("model", ""), key="ai_model")
         with col2:
-            st.text_input("API Key", value=ai_conf.get("api_key", ""), type="password", key="ai_key")
-        with col3:
             st.text_input("API URL", value=ai_conf.get("api_url", ""), key="ai_url")
+        masked_api_key = runtime_ai.get("api_key", "")
+        if masked_api_key:
+            st.caption(f"API Key 来源于 secrets / 环境变量：{masked_api_key[:6]}...{masked_api_key[-4:]}")
+        else:
+            st.warning("当前未检测到 AI API Key。请在 config.secrets.json 或环境变量中配置。")
 
         if st.button("💾 更新 AI 大脑"):
             config["ai"]["system_prompt"] = st.session_state.sys_prompt
             config["ai"]["model"] = st.session_state.ai_model
-            config["ai"]["api_key"] = st.session_state.ai_key
             config["ai"]["api_url"] = st.session_state.ai_url
             save_config(config)
-            st.toast("AI 配置更新成功！")
+            st.toast("AI 内容配置更新成功！敏感信息请通过 secrets 或环境变量维护。")
 
     with tab4:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
@@ -392,4 +411,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

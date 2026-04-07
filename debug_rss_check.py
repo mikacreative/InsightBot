@@ -3,7 +3,7 @@
 debug_rss_check.py — RSS 信源健康度检查工具
 
 功能：
-  - 检查 config.local.json 中所有 RSS 源的可达性
+  - 检查当前内容配置中的所有 RSS 源可达性
   - 统计每个源的文章数量和最新文章时间
   - 标记出无法访问或长时间无更新的信源
 
@@ -22,8 +22,8 @@ import feedparser
 REPO_ROOT = Path(__file__).parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from insightbot.config import load_json_config
-from insightbot.paths import config_file_path, default_bot_dir
+from insightbot.config import load_runtime_config
+from insightbot.paths import config_content_file_path, config_file_path, default_bot_dir
 
 
 def check_feed(url: str) -> dict:
@@ -70,13 +70,14 @@ def check_feed(url: str) -> dict:
 
 def main():
     bot_dir = default_bot_dir()
-    config_path = config_file_path(bot_dir)
+    content_path = config_content_file_path(bot_dir)
+    legacy_path = config_file_path(bot_dir)
 
-    if not os.path.exists(config_path):
-        print(f"❌ 找不到配置文件: {config_path}")
+    if not os.path.exists(content_path) and not os.path.exists(legacy_path):
+        print(f"❌ 找不到配置文件: {content_path}")
         sys.exit(1)
 
-    config = load_json_config(config_path)
+    config = load_runtime_config(bot_dir)
     feeds = config.get("feeds", {})
 
     print("\n" + "=" * 70)

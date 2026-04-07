@@ -14,7 +14,7 @@ debug_run.py — InsightBot 本地调试入口脚本
   python debug_run.py
 
   # 或直接指定变量
-  DRY_RUN=1 CONFIG_FILE=./config.local.json python debug_run.py
+  DRY_RUN=1 CONFIG_CONTENT_FILE=./config.local.content.json CONFIG_SECRETS_FILE=./config.local.secrets.json python debug_run.py
 """
 import json
 import logging
@@ -28,9 +28,9 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from insightbot.config import load_json_config
+from insightbot.config import load_runtime_config
 from insightbot.logging_setup import build_logger
-from insightbot.paths import bot_log_file_path, config_file_path, default_bot_dir
+from insightbot.paths import bot_log_file_path, config_content_file_path, config_file_path, default_bot_dir
 from insightbot.smart_brief_runner import run_task
 
 
@@ -76,16 +76,17 @@ def main():
 
     # ── 加载配置 ──────────────────────────────────────────────────────────────
     bot_dir = default_bot_dir()
-    config_path = config_file_path(bot_dir)
+    content_path = config_content_file_path(bot_dir)
+    legacy_path = config_file_path(bot_dir)
 
-    if not os.path.exists(config_path):
-        print(f"\n❌ 错误：找不到配置文件 [{config_path}]")
-        print("   请先执行：cp config.local.example.json config.local.json")
-        print("   并填写真实的 API Key 和企业微信凭证。")
+    if not os.path.exists(content_path) and not os.path.exists(legacy_path):
+        print(f"\n❌ 错误：找不到配置文件 [{content_path}]")
+        print("   请先准备 config.content.json（推荐）或兼容旧版的 config.json。")
         sys.exit(1)
 
-    config = load_json_config(config_path)
-    print(f"\n✅ 已加载配置文件: {config_path}")
+    config = load_runtime_config(bot_dir)
+    active_path = content_path if os.path.exists(content_path) else legacy_path
+    print(f"\n✅ 已加载配置文件: {active_path}")
     print(f"   板块数量: {len(config.get('feeds', {}))}")
     print(f"   AI 模型: {config.get('ai', {}).get('model', '未配置')}")
 

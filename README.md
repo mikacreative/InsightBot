@@ -26,8 +26,15 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-- 同时需要一个 `config.json`（默认位置：`./config.json`，已在 `.gitignore` 中忽略）。
-  你也可以通过环境变量 `CONFIG_FILE` / `MARKETING_BOT_DIR` 指向其他路径。
+- 推荐使用拆分配置：
+
+```bash
+cp config.secrets.example.json config.secrets.json
+```
+
+- `config.content.json`：已纳入版本控制，保存 feeds、settings、system prompt 等非敏感内容
+- `config.secrets.json`：已在 `.gitignore` 中忽略，只保存企业微信凭证和 API Key
+- 如果你仍在使用旧版单文件 `config.json`，当前版本仍兼容；也可以通过 `CONFIG_FILE` 指向旧路径
 
 3) 启动信源服务（可选，但建议）
 
@@ -57,9 +64,11 @@ python smart_brief.py
 
 代码默认会按以下顺序找配置/日志路径：
 
-1. 环境变量（`CONFIG_FILE`, `LOGS_DIR`, `LOG_FILE`, `BOT_LOG_FILE`, `SMART_BRIEF_PATH`）
-2. 如果存在 `/root/marketing_bot` 则使用它
-3. 否则使用当前仓库目录（脚本所在目录）
+1. 显式指定的 `CONFIG_FILE`（旧版单文件）
+2. 当前目录下的 `config.content.json` + `config.secrets.json`
+3. 当前目录下的兼容旧版 `config.json`
+4. 如果存在 `/root/marketing_bot` 则使用它；否则使用当前仓库目录
+
+运行时环境变量（如 `AI_API_KEY`、`WECOM_SECRET`）会覆盖文件中的同名配置，便于生产环境做 secrets 注入。
 
 这样本地和服务器（`/root/marketing_bot`）都能跑同一套代码。
-

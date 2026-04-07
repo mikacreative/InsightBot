@@ -10,7 +10,7 @@ debug_prompt.py — AI Prompt 调优专用工具
 用法：
   set -a; source .env.local; set +a
 
-  # 测试指定板块的 Prompt（使用 config.local.json 中的 RSS 源实时抓取）
+  # 测试指定板块的 Prompt（使用本地内容配置中的 RSS 源实时抓取）
   python debug_prompt.py --category "📢 营销行业"
 
   # 使用自定义新闻列表测试（不需要 RSS 源）
@@ -34,8 +34,8 @@ REPO_ROOT = Path(__file__).parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from insightbot.ai import chat_completion
-from insightbot.config import load_json_config
-from insightbot.paths import config_file_path, default_bot_dir
+from insightbot.config import load_runtime_config
+from insightbot.paths import config_content_file_path, config_file_path, default_bot_dir
 
 # ── 模拟新闻数据（用于快速测试，不依赖 RSS 源）─────────────────────────────────
 MOCK_NEWS_LIST = [
@@ -100,11 +100,12 @@ def main():
 
     # ── 加载配置 ──────────────────────────────────────────────────────────────
     bot_dir = default_bot_dir()
-    config_path = config_file_path(bot_dir)
-    if not os.path.exists(config_path):
-        logger.error(f"找不到配置文件: {config_path}")
+    content_path = config_content_file_path(bot_dir)
+    legacy_path = config_file_path(bot_dir)
+    if not os.path.exists(content_path) and not os.path.exists(legacy_path):
+        logger.error(f"找不到配置文件: {content_path}")
         sys.exit(1)
-    config = load_json_config(config_path)
+    config = load_runtime_config(bot_dir)
 
     # ── 查找目标板块 ──────────────────────────────────────────────────────────
     feeds = config.get("feeds", {})
