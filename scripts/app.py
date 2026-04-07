@@ -767,8 +767,10 @@ def main() -> None:
             )
             current_prompt = feeds.get(selected_category, {}).get("prompt", "")
             draft_key = f"draft_prompt::{selected_category}"
+            saved_prompt_key = f"saved_prompt_{selected_category}"
             if draft_key not in st.session_state:
                 st.session_state[draft_key] = current_prompt
+            st.session_state[saved_prompt_key] = current_prompt
             prompt_changed = st.session_state[draft_key].strip() != current_prompt.strip()
 
             prompt_col1, prompt_col2 = st.columns(2)
@@ -784,7 +786,7 @@ def main() -> None:
                     value=current_prompt,
                     height=170,
                     disabled=True,
-                    key=f"saved_prompt_{selected_category}",
+                    key=saved_prompt_key,
                     label_visibility="collapsed",
                 )
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -906,8 +908,10 @@ def main() -> None:
 
             with action_col4:
                 if st.button("↩️ 草稿覆盖到编辑区", use_container_width=True):
-                    feeds[selected_category]["prompt"] = st.session_state[draft_key].strip()
+                    updated_prompt = st.session_state[draft_key].strip()
+                    feeds[selected_category]["prompt"] = updated_prompt
                     config["feeds"] = feeds
+                    st.session_state[saved_prompt_key] = updated_prompt
                     save_config(config)
                     st.toast(f"已将草稿 Prompt 写回 [{selected_category}]。")
                     st.rerun()
