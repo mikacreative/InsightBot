@@ -206,3 +206,35 @@ def build_no_push_diagnosis(*, health_snapshot: dict[str, Any] | None, run_summa
 
     cards.sort(key=lambda item: item["priority"])
     return cards
+
+
+def summarize_recent_run(run_summary: dict[str, Any]) -> dict[str, Any]:
+    categories = run_summary.get("categories", {})
+    category_values = list(categories.values())
+    candidate_total = sum(item.get("candidate_count", 0) or 0 for item in category_values)
+    pushed_count = sum(1 for item in category_values if item.get("status") == "pushed")
+    blocked_count = sum(1 for item in category_values if item.get("status") == "blocked_by_prompt")
+    no_candidate_count = sum(1 for item in category_values if item.get("status") == "no_candidates")
+    ai_error_count = sum(1 for item in category_values if item.get("status") == "ai_error")
+
+    if run_summary.get("status") == "missing_log":
+        result_label = "无运行记录"
+    elif run_summary.get("runtime_errors") or ai_error_count:
+        result_label = "部分异常"
+    elif run_summary.get("overall_no_push"):
+        result_label = "空结果"
+    elif pushed_count > 0:
+        result_label = "成功"
+    else:
+        result_label = "待确认"
+
+    return {
+        "result_label": result_label,
+        "task_started_at": run_summary.get("task_started_at"),
+        "candidate_total": candidate_total,
+        "pushed_count": pushed_count,
+        "blocked_count": blocked_count,
+        "no_candidate_count": no_candidate_count,
+        "ai_error_count": ai_error_count,
+        "category_count": len(category_values),
+    }

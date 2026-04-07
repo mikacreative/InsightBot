@@ -25,7 +25,7 @@ from insightbot.prompt_debug_history import (
     make_draft_run_record,
 )
 from insightbot.discovery.url_resolver import UrlResolver
-from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary
+from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary, summarize_recent_run
 from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, run_prompt_debug
 
 def main() -> None:
@@ -358,6 +358,15 @@ def main() -> None:
 
     config = load_config()
     runtime_config = load_runtime_view()
+    overview_health_snapshot = load_health_cache(bot_dir)
+    overview_run_summary = parse_recent_run_summary(bot_log_path)
+    overview_run_metrics = summarize_recent_run(overview_run_summary)
+    overview_diagnosis_cards = build_no_push_diagnosis(
+        health_snapshot=overview_health_snapshot,
+        run_summary=overview_run_summary,
+        configured_categories=list(config.get("feeds", {}).keys()),
+    )
+    overview_prompt_history = load_prompt_debug_history(bot_dir)
 
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
     render_prompt_debug_styles()
@@ -415,7 +424,86 @@ def main() -> None:
             except Exception:
                 st.error("保存失败，请检查权限。")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志", "🔍 信源发现"])
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🏠 概览", "📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志", "🔍 信源发现"])
+
+    with tab0:
+        st.subheader("运营概览")
+        st.caption("这里不是实时计算中心，而是最近状态总览。优先看最近一次任务、异常摘要和最近调试动作。")
+
+        health_counts = (overview_health_snapshot or {}).get("counts", {})
+        st.markdown(
+            f"""
+            <div class="ib-kpi-grid">
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">今日板块数</div>
+                <div class="ib-kpi-value">{len(config.get('feeds', {}))}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">异常 RSS 源</div>
+                <div class="ib-kpi-value">{health_counts.get('error', 0)}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">最近运行结果</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{overview_run_metrics.get('result_label', '未知')}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">今日候选总条数</div>
+                <div class="ib-kpi-value">{overview_run_metrics.get('candidate_total', 0)}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        top_col1, top_col2 = st.columns([1.35, 1.0])
+        with top_col1:
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">最近一次任务</div>', unsafe_allow_html=True)
+            task_started_at = overview_run_metrics.get("task_started_at")
+            started_copy = format_timestamp(task_started_at) if task_started_at else "暂无记录"
+            st.markdown(
+                f"""
+                <div class="ib-section-copy">
+                  最近开始时间：{started_copy}<br/>
+                  已推送板块：{overview_run_metrics.get('pushed_count', 0)}<br/>
+                  Prompt 全拦截：{overview_run_metrics.get('blocked_count', 0)}<br/>
+                  无候选板块：{overview_run_metrics.get('no_candidate_count', 0)}<br/>
+                  AI 异常板块：{overview_run_metrics.get('ai_error_count', 0)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with top_col2:
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">最近调试动态</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="ib-section-copy">来自 Prompt Debug 的最近记录，帮助你判断最近都在调哪些板块。</div>',
+                unsafe_allow_html=True,
+            )
+            if overview_prompt_history:
+                for item in overview_prompt_history[:3]:
+                    mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
+                    st.markdown(
+                        f"- {item.get('created_at', '')} | {item.get('category', '未命名板块')} | {mode_label} | 草稿状态：{item.get('draft_status', '未知')}"
+                    )
+            else:
+                st.info("还没有 Prompt 调试记录。")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="ib-section-title">异常摘要</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ib-section-copy">优先展示当前最值得处理的问题。如果要排查“为什么今天没推送”，先看这里。</div>',
+            unsafe_allow_html=True,
+        )
+        if overview_diagnosis_cards:
+            for card in overview_diagnosis_cards[:3]:
+                render_diagnosis_card(card, prompt_categories=list(config.get("feeds", {}).keys()))
+        else:
+            st.success("当前没有明显异常摘要，系统状态看起来比较稳定。")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with tab1:
         st.subheader("内容板块控制")

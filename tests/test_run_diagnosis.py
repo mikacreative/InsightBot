@@ -1,4 +1,4 @@
-from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary
+from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary, summarize_recent_run
 
 
 def test_parse_recent_run_summary_extracts_category_states(tmp_path):
@@ -58,3 +58,25 @@ def test_build_no_push_diagnosis_prioritizes_source_error():
 
     assert cards[0]["kind"] == "source_error"
     assert cards[1]["kind"] == "prompt_block"
+
+
+def test_summarize_recent_run_counts_candidate_and_status():
+    summary = summarize_recent_run(
+        {
+            "status": "ok",
+            "overall_no_push": False,
+            "task_started_at": "2026-04-07 09:00:00",
+            "runtime_errors": [],
+            "categories": {
+                "营销": {"status": "pushed", "candidate_count": 5},
+                "政策": {"status": "blocked_by_prompt", "candidate_count": 12},
+                "数智": {"status": "no_candidates", "candidate_count": 0},
+            },
+        }
+    )
+
+    assert summary["result_label"] == "成功"
+    assert summary["candidate_total"] == 17
+    assert summary["pushed_count"] == 1
+    assert summary["blocked_count"] == 1
+    assert summary["no_candidate_count"] == 1
