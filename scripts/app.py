@@ -18,6 +18,12 @@ from insightbot.paths import (
     default_bot_dir,
     feed_health_cache_file_path,
 )
+from insightbot.prompt_debug_history import (
+    append_prompt_debug_history,
+    load_prompt_debug_history,
+    make_compare_record,
+    make_draft_run_record,
+)
 from insightbot.discovery.url_resolver import UrlResolver
 from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary
 from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, run_prompt_debug
@@ -313,6 +319,18 @@ def main() -> None:
             with st.expander("查看诊断细节", expanded=False):
                 st.json(details, expanded=False)
         st.markdown("</div>", unsafe_allow_html=True)
+
+    def render_history_status(label: str, status: str | None, count: int | None) -> str:
+        if status is None:
+            return f"{label}: —"
+        label_map = {
+            "success": "成功",
+            "empty": "空结果",
+            "empty_candidates": "无候选",
+            "error": "错误",
+        }
+        count_text = f" / 命中 {count}" if count is not None else ""
+        return f"{label}: {label_map.get(status, status)}{count_text}"
 
     def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
         """添加单个 RSS 源到 config.json"""
@@ -634,6 +652,16 @@ def main() -> None:
                             category_prompt=st.session_state[draft_key],
                             logger=ui_logger,
                         )
+                        append_prompt_debug_history(
+                            bot_dir,
+                            make_draft_run_record(
+                                category=selected_category,
+                                candidate_count=len(candidates),
+                                result=debug_result,
+                                using_fallback_candidates=bool(meta.get("using_fallback")),
+                                draft_prompt=st.session_state[draft_key],
+                            ),
+                        )
                         st.session_state["prompt_debug_result"] = debug_result
                         st.session_state["prompt_debug_result_category"] = selected_category
                         st.session_state.pop("prompt_debug_compare", None)
@@ -665,6 +693,17 @@ def main() -> None:
                             "current": current_result,
                             "draft": draft_result,
                         }
+                        append_prompt_debug_history(
+                            bot_dir,
+                            make_compare_record(
+                                category=selected_category,
+                                candidate_count=len(candidates),
+                                saved_result=current_result,
+                                draft_result=draft_result,
+                                using_fallback_candidates=bool(meta.get("using_fallback")),
+                                draft_prompt=st.session_state[draft_key],
+                            ),
+                        )
                         st.session_state.pop("prompt_debug_result", None)
 
             with action_col4:
@@ -679,6 +718,7 @@ def main() -> None:
             meta = st.session_state.get("prompt_debug_meta", {})
             debug_result = st.session_state.get("prompt_debug_result")
             compare_result = st.session_state.get("prompt_debug_compare")
+            prompt_debug_history = load_prompt_debug_history(bot_dir)
             result_matches_category = debug_result and st.session_state.get("prompt_debug_result_category") == selected_category
             compare_matches_category = compare_result and compare_result.get("category") == selected_category
             if candidates and meta.get("category") == selected_category:
@@ -755,6 +795,45 @@ def main() -> None:
 
                 render_result_panel(title="草稿 Prompt", result=debug_result)
                 st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">最近调试记录</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="ib-section-copy">这里保留最近 20 次草稿试跑或对比记录，方便管理员回看最近调过哪些板块、结果是更好还是更差。</div>',
+                unsafe_allow_html=True,
+            )
+            if not prompt_debug_history:
+                st.info("还没有调试记录。先运行一次草稿 Prompt 或做一次“当前 vs 草稿”对比。")
+            else:
+                history_preview = prompt_debug_history[:8]
+                for item in history_preview:
+                    mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
+                    fallback_label = "内置样例" if item.get("using_fallback_candidates") else "真实 RSS"
+                    st.markdown(
+                        f"""
+                        <div class="ib-panel" style="margin-top:12px; margin-bottom:0;">
+                          <div class="ib-chip-row">
+                            <span class="ib-chip ib-chip-neutral">{mode_label}</span>
+                            <span class="ib-chip ib-chip-neutral">{item.get('category', '未命名板块')}</span>
+                            <span class="ib-chip ib-chip-neutral">{fallback_label}</span>
+                          </div>
+                          <div style="font-weight:700; margin:8px 0 6px;">{item.get('created_at', '')}</div>
+                          <div class="ib-section-copy" style="margin-bottom:6px;">
+                            候选 {item.get('candidate_count', 0)} 条 | {render_history_status('草稿', item.get('draft_status'), item.get('draft_selected_count'))}
+                          </div>
+                          <div class="ib-section-copy" style="margin-bottom:0;">
+                            {render_history_status('当前', item.get('saved_status'), item.get('saved_selected_count'))}
+                          </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    excerpt = item.get("draft_prompt_excerpt", "").strip()
+                    if excerpt:
+                        st.caption(f"草稿摘要：{excerpt}")
+                if len(prompt_debug_history) > len(history_preview):
+                    st.caption(f"当前共保存 {len(prompt_debug_history)} 条记录，仅展开最近 {len(history_preview)} 条。")
+            st.markdown("</div>", unsafe_allow_html=True)
 
     with tab4:
         st.subheader("RSS 源健康度")

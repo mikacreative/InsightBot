@@ -48,3 +48,8 @@ def cron_log_file_path(bot_dir: str | None = None) -> str:
 def feed_health_cache_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("FEED_HEALTH_CACHE_FILE", os.path.join(data_dir(bot_dir), "feed_health_cache.json"))
+
+
+def prompt_debug_history_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("PROMPT_DEBUG_HISTORY_FILE", os.path.join(data_dir(bot_dir), "prompt_debug_history.json"))
