@@ -4,6 +4,13 @@ from typing import Optional
 import requests
 
 
+def _response_preview(resp: requests.Response, limit: int = 300) -> str:
+    text = (resp.text or "").strip()
+    if not text:
+        return "<empty>"
+    return text[:limit].replace("\n", "\\n")
+
+
 def chat_completion(
     *,
     api_url: str,
@@ -34,7 +41,11 @@ def chat_completion(
     try:
         data = resp.json()
     except ValueError as exc:
-        raise ValueError(f"AI API 返回了非 JSON 响应，HTTP {resp.status_code}") from exc
+        content_type = resp.headers.get("Content-Type", "unknown")
+        preview = _response_preview(resp)
+        raise ValueError(
+            f"AI API 返回了非 JSON 响应，HTTP {resp.status_code}，Content-Type: {content_type}，Body: {preview}"
+        ) from exc
 
     if resp.status_code >= 400:
         detail = data.get("error") if isinstance(data, dict) else data

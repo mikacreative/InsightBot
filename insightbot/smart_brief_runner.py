@@ -2,6 +2,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta
+from html import unescape
 from typing import List, Optional
 
 import feedparser
@@ -16,11 +17,31 @@ MAX_RETRIES = 3
 RETRY_DELAY_S = 5
 FEED_FETCH_TIMEOUT_S = 15
 DEBUG_SAMPLE_NEWS = [
-    {"title": "[RSS] 微信视频号广告 ROI 提升 30%，品牌主加速布局", "link": "https://example.com/001"},
-    {"title": "[RSS] 小红书推出品牌号新功能：支持直链跳转电商平台", "link": "https://example.com/002"},
-    {"title": "[RSS] AI 文案工具月活突破 500 万，营销效率提升显著", "link": "https://example.com/003"},
-    {"title": "[RSS] 某明星离婚八卦新闻（无关内容，测试拦截）", "link": "https://example.com/004"},
-    {"title": "[RSS] 抖音电商 GMV 同比增长 45%，直播带货进入精细化运营阶段", "link": "https://example.com/005"},
+    {
+        "title": "[RSS] 微信视频号广告 ROI 提升 30%，品牌主加速布局",
+        "link": "https://example.com/001",
+        "summary": "平台广告投放效率提升，品牌预算正在向视频号倾斜，适合观察内容投放与转化闭环的新玩法。",
+    },
+    {
+        "title": "[RSS] 小红书推出品牌号新功能：支持直链跳转电商平台",
+        "link": "https://example.com/002",
+        "summary": "品牌号链路更接近效果广告与种草转化一体化，适合评估小红书站内外闭环经营机会。",
+    },
+    {
+        "title": "[RSS] AI 文案工具月活突破 500 万，营销效率提升显著",
+        "link": "https://example.com/003",
+        "summary": "AI 工具继续向营销执行层渗透，值得关注内容生产与团队分工方式的变化。",
+    },
+    {
+        "title": "[RSS] 某明星离婚八卦新闻（无关内容，测试拦截）",
+        "link": "https://example.com/004",
+        "summary": "娱乐八卦，无品牌传播方法论，也没有营销行业参考价值。",
+    },
+    {
+        "title": "[RSS] 抖音电商 GMV 同比增长 45%，直播带货进入精细化运营阶段",
+        "link": "https://example.com/005",
+        "summary": "平台增速和运营方式变化对品牌直播策略、投放节奏和内容组织都有参考意义。",
+    },
 ]
 
 # 简化的 system prompt（格式规则全部由代码处理，AI 只负责判断和提炼）
@@ -87,9 +108,43 @@ def _parse_feed_url(url: str):
 def _build_candidate_lines(news_list: List[dict]) -> List[str]:
     lines = []
     for i, news in enumerate(news_list):
-        clean_title = str(news.get("title", "")).replace("\n", " ")
-        lines.append(f"{i+1}. {clean_title} (Link: {news.get('link','')})")
+        clean_title = str(news.get("title", "")).replace("\n", " ").strip()
+        clean_summary = str(news.get("summary", "")).replace("\n", " ").strip()
+        summary_part = f" | Summary: {clean_summary}" if clean_summary else ""
+        lines.append(f"{i+1}. {clean_title}{summary_part} (Link: {news.get('link','')})")
     return lines
+
+
+def _clean_text(value: str, *, limit: int = 240) -> str:
+    text = unescape(str(value or ""))
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > limit:
+        return text[:limit].rstrip() + "..."
+    return text
+
+
+def _extract_entry_summary(entry) -> str:
+    candidates = []
+
+    if hasattr(entry, "summary"):
+        candidates.append(getattr(entry, "summary"))
+    if hasattr(entry, "description"):
+        candidates.append(getattr(entry, "description"))
+
+    content_items = getattr(entry, "content", None)
+    if isinstance(content_items, list):
+        for item in content_items:
+            if isinstance(item, dict):
+                candidates.append(item.get("value", ""))
+            else:
+                candidates.append(getattr(item, "value", ""))
+
+    for candidate in candidates:
+        cleaned = _clean_text(candidate)
+        if cleaned:
+            return cleaned
+    return ""
 
 
 def _deduplicate_candidates(news_list: List[dict]) -> List[dict]:
@@ -119,7 +174,14 @@ def fetch_recent_candidates(*, feed_data: dict, logger) -> List[dict]:
                     if datetime.now() - dt > timedelta(hours=24):
                         continue
 
-                category_candidates.append({"title": f"[RSS] {entry.title}", "link": entry.link})
+                summary = _extract_entry_summary(entry)
+                category_candidates.append(
+                    {
+                        "title": f"[RSS] {entry.title}",
+                        "link": entry.link,
+                        "summary": summary,
+                    }
+                )
                 valid_count += 1
                 logger.info(f"  📥 抓取命中 -> {entry.title} ({entry.link})")
 

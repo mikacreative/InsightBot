@@ -14,6 +14,7 @@ from insightbot.paths import (
     bot_log_file_path,
     config_content_file_path,
     config_file_path,
+    config_secrets_file_path,
     cron_log_file_path,
     default_bot_dir,
     feed_health_cache_file_path,
@@ -31,6 +32,7 @@ from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candid
 def main() -> None:
     bot_dir = default_bot_dir()
     content_config_path = config_content_file_path(bot_dir)
+    secrets_config_path = config_secrets_file_path(bot_dir)
     legacy_config_path = config_file_path(bot_dir)
     cron_log_path = cron_log_file_path(bot_dir)
     bot_log_path = bot_log_file_path(bot_dir)
@@ -50,6 +52,16 @@ def main() -> None:
     def save_config(config: dict) -> None:
         with open(active_edit_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
+
+    def load_secrets_config() -> dict:
+        if os.path.exists(secrets_config_path):
+            with open(secrets_config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def save_secrets_config(secrets: dict) -> None:
+        with open(secrets_config_path, "w", encoding="utf-8") as f:
+            json.dump(secrets, f, indent=4, ensure_ascii=False)
 
     def build_ui_logger() -> logging.Logger:
         logger = logging.getLogger("InsightBot.PromptDebug")
@@ -636,19 +648,53 @@ def main() -> None:
             st.markdown("</div>", unsafe_allow_html=True)
 
         with top_col2:
+            env_ai_override_names = ["AI_API_KEY", "AI_API_URL", "AI_MODEL"]
+            env_ai_overrides = [name for name in env_ai_override_names if os.getenv(name)]
+            secrets_config = load_secrets_config()
+            secrets_ai = secrets_config.setdefault("ai", {})
             st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
             st.markdown('<div class="ib-section-title">运行时 AI 连接</div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="ib-section-copy">这些值来自 secrets 或环境变量。控制台只展示，不允许直接编辑。</div>',
-                unsafe_allow_html=True,
-            )
-            st.text_input("AI Model", value=runtime_ai.get("model", ""), disabled=True)
-            st.text_input("API URL", value=runtime_ai.get("api_url", ""), disabled=True)
-            masked_api_key = runtime_ai.get("api_key", "")
-            if masked_api_key:
-                st.caption(f"API Key：{masked_api_key[:6]}...{masked_api_key[-4:]}")
+            if env_ai_overrides:
+                st.markdown(
+                    '<div class="ib-section-copy">当前检测到环境变量覆盖，控制台里的保存不会立刻生效。请先移除环境变量覆盖，或直接改服务器环境。</div>',
+                    unsafe_allow_html=True,
+                )
+                st.warning(f"当前环境变量覆盖项：{', '.join(env_ai_overrides)}")
+                st.text_input("AI Model", value=runtime_ai.get("model", ""), disabled=True)
+                st.text_input("API URL", value=runtime_ai.get("api_url", ""), disabled=True)
+                masked_api_key = runtime_ai.get("api_key", "")
+                if masked_api_key:
+                    st.caption(f"API Key：{masked_api_key[:6]}...{masked_api_key[-4:]}")
+                else:
+                    st.warning("当前未检测到 AI API Key。请在 config.secrets.json 或环境变量中配置。")
             else:
-                st.warning("当前未检测到 AI API Key。请在 config.secrets.json 或环境变量中配置。")
+                st.markdown(
+                    '<div class="ib-section-copy">这些值会写入 config.secrets.json，保存后会立即用于当前控制台调试。</div>',
+                    unsafe_allow_html=True,
+                )
+                st.text_input(
+                    "AI Model",
+                    value=secrets_ai.get("model", runtime_ai.get("model", "")),
+                    key="runtime_ai_model",
+                )
+                st.text_input(
+                    "API URL",
+                    value=secrets_ai.get("api_url", runtime_ai.get("api_url", "")),
+                    key="runtime_ai_url",
+                )
+                st.text_input(
+                    "API Key",
+                    value=secrets_ai.get("api_key", runtime_ai.get("api_key", "")),
+                    type="password",
+                    key="runtime_ai_key",
+                )
+                if st.button("💾 保存 AI 连接", use_container_width=True):
+                    secrets_ai["model"] = st.session_state["runtime_ai_model"].strip()
+                    secrets_ai["api_url"] = st.session_state["runtime_ai_url"].strip()
+                    secrets_ai["api_key"] = st.session_state["runtime_ai_key"].strip()
+                    save_secrets_config(secrets_config)
+                    st.toast("AI 连接配置已写入 config.secrets.json")
+                    st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
         st.divider()

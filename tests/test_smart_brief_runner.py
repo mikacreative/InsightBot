@@ -23,7 +23,8 @@ def _make_entry(title: str, link: str, hours_ago: float = 1.0):
     entry = MagicMock()
     entry.title = title
     entry.link = link
-    entry.get = lambda key, default="": title if key == "summary" else default
+    entry.summary = f"{title} 的摘要信息"
+    entry.get = lambda key, default="": entry.summary if key == "summary" else default
     pub_time = datetime.now() - timedelta(hours=hours_ago)
     entry.published_parsed = pub_time.timetuple()
     return entry
@@ -78,6 +79,7 @@ class TestFetchRecentCandidates:
 
         links = [item["link"] for item in news_list]
         assert "https://example.com/recent" in links
+        assert news_list[0]["summary"]
 
     def test_stale_entries_are_excluded(self, silent_logger):
         stale_entry = _make_entry("过期文章标题", "https://example.com/stale", hours_ago=30)
@@ -255,7 +257,11 @@ class TestPromptDebug:
 
     def test_input_text_truncated_to_batch_size_scope(self, silent_logger):
         news_list = [
-            {"title": f"新闻标题{'x' * 200} {i}", "link": f"https://example.com/{i}"}
+            {
+                "title": f"新闻标题{'x' * 200} {i}",
+                "link": f"https://example.com/{i}",
+                "summary": f"这是一段用于测试的摘要 {'y' * 50}",
+            }
             for i in range(100)
         ]
         captured = []
@@ -276,6 +282,33 @@ class TestPromptDebug:
 
         assert len(captured) > 1
         assert all(text.startswith("【待筛选列表】：\n") for text in captured)
+        assert all("Summary:" in text for text in captured)
+
+    def test_candidate_summary_is_included_in_prompt_input(self, silent_logger):
+        news_list = [
+            {
+                "title": "营销新闻",
+                "link": "https://example.com/1",
+                "summary": "品牌在短视频渠道测试新的效果广告打法。",
+            }
+        ]
+        captured_calls = []
+
+        def capture_call(**kwargs):
+            captured_calls.append(kwargs)
+            return '{"items": []}'
+
+        with patch("insightbot.smart_brief_runner.chat_completion", side_effect=capture_call):
+            run_prompt_debug(
+                config=self._base_config(),
+                category_name="测试板块",
+                news_list=news_list,
+                category_prompt="",
+                logger=silent_logger,
+            )
+
+        assert len(captured_calls) == 1
+        assert "品牌在短视频渠道测试新的效果广告打法" in captured_calls[0]["user_text"]
 
 
 class TestRunTaskIntegration:
