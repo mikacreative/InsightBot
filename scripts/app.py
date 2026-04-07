@@ -19,6 +19,7 @@ from insightbot.paths import (
     feed_health_cache_file_path,
 )
 from insightbot.discovery.url_resolver import UrlResolver
+from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary
 from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, run_prompt_debug
 
 def main() -> None:
@@ -282,6 +283,36 @@ def main() -> None:
             return f"{minutes} 分钟"
         hours = minutes // 60
         return f"{hours} 小时"
+
+    def render_diagnosis_card(card: dict, *, prompt_categories: list[str]) -> None:
+        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+        st.markdown(f'<div class="ib-section-title">{card["title"]}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="ib-section-copy">{card["summary"]}<br/>下一步：{card["next_step"]}</div>',
+            unsafe_allow_html=True,
+        )
+        kind = card.get("kind")
+        if kind == "prompt_block":
+            blocked = [item.get("category") for item in card.get("details", []) if item.get("category")]
+            if blocked:
+                default_category = blocked[0]
+                if st.button(f"🎯 预设到 Prompt Debug：{default_category}", key=f"diag_prompt_{default_category}"):
+                    st.session_state["prompt_debug_category"] = default_category
+                    if default_category in prompt_categories:
+                        draft_key = f"draft_prompt::{default_category}"
+                        if draft_key not in st.session_state:
+                            st.session_state[draft_key] = config.get("feeds", {}).get(default_category, {}).get("prompt", "")
+                    st.success("已预设 Prompt Debug 板块，请切到“🧠 AI 提示词调优”继续。")
+        elif kind == "source_error":
+            st.caption("建议先在当前页的 RSS 健康度列表里查看这些异常源。")
+        elif kind == "runtime_error":
+            st.caption("建议切到“📝 运行日志”查看完整错误上下文。")
+
+        details = card.get("details", [])
+        if details:
+            with st.expander("查看诊断细节", expanded=False):
+                st.json(details, expanded=False)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
         """添加单个 RSS 源到 config.json"""
@@ -730,6 +761,7 @@ def main() -> None:
         st.caption("缓存优先、手动刷新。优先帮助管理员判断：源是坏了、没更新，还是只是今天没有候选。")
 
         health_snapshot = load_health_cache(bot_dir)
+        run_summary = parse_recent_run_summary(bot_log_path)
 
         header_col1, header_col2, header_col3 = st.columns([1.3, 1.0, 1.2])
         with header_col1:
@@ -750,6 +782,25 @@ def main() -> None:
         if health_snapshot is None:
             st.info("当前还没有健康度缓存。点击“立即刷新健康度”后，控制台会生成第一份检查结果。")
         else:
+            diagnosis_cards = build_no_push_diagnosis(
+                health_snapshot=health_snapshot,
+                run_summary=run_summary,
+                configured_categories=list(config.get("feeds", {}).keys()),
+            )
+            if diagnosis_cards:
+                st.markdown('<div class="ib-hero">', unsafe_allow_html=True)
+                st.markdown('<div class="ib-eyebrow">No Push Diagnosis</div>', unsafe_allow_html=True)
+                st.markdown('<div class="ib-title">为什么今天没推送？</div>', unsafe_allow_html=True)
+                task_started = run_summary.get("task_started_at")
+                task_copy = f"最近一次任务开始于 {task_started}。" if task_started else "已根据最近一次任务日志和当前健康度缓存生成诊断。"
+                st.markdown(
+                    f'<div class="ib-subtitle">{task_copy} 以下卡片按优先级排序，先处理靠前问题。</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
+                for card in diagnosis_cards:
+                    render_diagnosis_card(card, prompt_categories=list(config.get("feeds", {}).keys()))
+
             checked_at = health_snapshot.get("checked_at")
             age_text = summarize_cache_age(health_snapshot.get("cache_age_seconds"))
             source_label = "缓存结果" if health_snapshot.get("source") == "cache" else "刚刚刷新"
