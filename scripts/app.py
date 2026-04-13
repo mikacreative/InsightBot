@@ -28,6 +28,13 @@ from insightbot.prompt_debug_history import (
 from insightbot.discovery.url_resolver import UrlResolver
 from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary, summarize_recent_run
 from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, get_selection_settings, run_prompt_debug
+from insightbot.editorial_pipeline import (
+    build_global_candidates,
+    screen_global_candidates,
+    assign_candidates_to_categories,
+    select_for_category,
+    run_editorial_pipeline,
+)
 
 def main() -> None:
     bot_dir = default_bot_dir()
@@ -397,10 +404,7 @@ def main() -> None:
         st.header("⚡ 快捷操作")
         if st.button("▶️ 立即手动运行", type="primary", use_container_width=True):
             with st.spinner("AI 正在全网检索并撰写简报..."):
-                if smart_brief_mode == "module":
-                    subprocess.run([sys.executable, "-m", "insightbot.cli"])
-                else:
-                    subprocess.run([sys.executable, smart_brief_path])
+                subprocess.run([sys.executable, "-m", "insightbot.cli"])
                 st.success("运行指令已发送，请查看企业微信或日志。")
 
         st.divider()
@@ -439,7 +443,7 @@ def main() -> None:
             except Exception:
                 st.error("保存失败，请检查权限。")
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🏠 概览", "📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志", "🔍 信源发现"])
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🏠 概览", "📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志", "🔍 信源发现", "📡 Editorial Pipeline"])
 
     with tab0:
         st.subheader("运营概览")
@@ -1376,6 +1380,266 @@ def main() -> None:
                 st.warning("请先创建板块后再订阅")
 
         st.divider()
+
+    with tab7:
+        st.subheader("📡 Editorial Pipeline 调试面板")
+        st.caption("双阶段编辑流水线：全局初筛 → 板块分配 → 板块精选。用于验证新流程相比老流程的选题质量差异。")
+
+        editorial_config = config.setdefault("ai", {}).setdefault("editorial_pipeline", {})
+        pipeline_enabled = editorial_config.get("enabled", False)
+        multiplier = editorial_config.get("global_shortlist_multiplier", 3)
+        assignment_batch_size = editorial_config.get("assignment_batch_size", 20)
+
+        # ---- 全局配置区 ----
+        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+        st.markdown("**📡 Editorial Pipeline 全局设置**", unsafe_allow_html=True)
+        st.markdown('<div class="ib-section-copy">控制生产走新流程还是老流程，以及全局初筛参数。</div>', unsafe_allow_html=True)
+
+        col_toggle, col_multiplier, col_batch = st.columns([1, 1, 1])
+        with col_toggle:
+            new_enabled = st.toggle(
+                "启用 Editorial Pipeline",
+                value=pipeline_enabled,
+                help="开启后生产任务走新流程（全局初筛→板块分配→精选），关闭则走老流程。",
+            )
+        with col_multiplier:
+            new_multiplier = st.slider(
+                "全局初筛倍率",
+                min_value=2,
+                max_value=10,
+                value=multiplier,
+                step=1,
+                help="初筛 shortlist = 最终输出目标 × 倍率。如最终每版计划出 10 条，倍率 3x 则初筛约 30 条。",
+            )
+        with col_batch:
+            new_batch = st.slider(
+                "板块分配批大小",
+                min_value=5,
+                max_value=50,
+                value=assignment_batch_size,
+                step=5,
+                help="每批送入板块分配 AI 的候选条数。越大上下文越长，成本越低，但误判风险略升。",
+            )
+
+        if st.button("💾 保存 Editorial Pipeline 设置", use_container_width=True):
+            editorial_config["enabled"] = new_enabled
+            editorial_config["global_shortlist_multiplier"] = new_multiplier
+            editorial_config["assignment_batch_size"] = new_batch
+            config["ai"]["editorial_pipeline"] = editorial_config
+            save_config(config)
+            st.toast("Editorial Pipeline 设置已保存！")
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.divider()
+
+        # ---- Stage 1 & 2: 全局候选池 + 全局初筛 ----
+        st.markdown("### 🔍 Stage 1 & 2：全局候选池 → 全局初筛")
+
+        stage1_col1, stage1_col2 = st.columns([1, 1])
+        with stage1_col1:
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">全局候选池</div>', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-copy">抓取所有板块 RSS 源，汇总后去重。超过 24h 的条目会被过滤。</div>', unsafe_allow_html=True)
+
+            if st.button("📥 抓取全局候选池", use_container_width=True):
+                ui_logger = build_ui_logger()
+                with st.spinner("正在抓取所有 RSS 源..."):
+                    global_candidates = build_global_candidates(config=runtime_config, logger=ui_logger)
+                st.session_state["ep_global_candidates"] = global_candidates
+                if global_candidates:
+                    st.success(f"全局候选池：{len(global_candidates)} 条（去重后）")
+                else:
+                    st.warning("全局候选池为空，请检查 RSS 源是否正常。")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with stage1_col2:
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">全局初筛</div>', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-copy">站在「总编辑」视角做初筛，筛选出今天最值得进入简报的内容。</div>', unsafe_allow_html=True)
+
+            if st.button("🧪 运行全局初筛", use_container_width=True):
+                candidates = st.session_state.get("ep_global_candidates", [])
+                if not candidates:
+                    st.warning("请先抓取全局候选池。")
+                else:
+                    ui_logger = build_ui_logger()
+                    with st.spinner("正在进行全局初筛..."):
+                        screened_result = screen_global_candidates(
+                            config=runtime_config,
+                            candidates=candidates,
+                            logger=ui_logger,
+                        )
+                    st.session_state["ep_screened_result"] = screened_result
+                    if screened_result["ok"]:
+                        st.success(
+                            f"全局初筛完成：通过 {screened_result['global_shortlist_size']} 条"
+                            f"（模式：{'全量' if screened_result['selection_mode'] == 'full' else '分片'}）"
+                        )
+                    else:
+                        st.error(f"全局初筛失败：{screened_result.get('error', '未知错误')}")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # 展示全局初筛结果
+        if "ep_screened_result" in st.session_state and st.session_state["ep_screened_result"]["ok"]:
+            screened_result = st.session_state["ep_screened_result"]
+            screened = screened_result.get("screened", [])
+
+            if screened:
+                st.markdown("#### 📋 全局初筛 Shortlist")
+                for i, item in enumerate(screened, start=1):
+                    score = item.get("priority_score", 0)
+                    note = item.get("editorial_note", "")
+                    with st.expander(f"{i}. {item.get('title', '')}（优先级：{score:.1f}）"):
+                        st.markdown(f"**链接**：[{item.get('link', '')}]({item.get('link', '')})")
+                        st.markdown(f"**摘要**：{item.get('summary', '')}")
+                        if note:
+                            st.markdown(f"**初筛理由**：{note}")
+            else:
+                st.info("全局初筛未选出任何内容。")
+
+            with st.expander("🔬 全局初筛批次详情", expanded=False):
+                st.json({
+                    "ok": screened_result["ok"],
+                    "global_shortlist_size": screened_result["global_shortlist_size"],
+                    "selection_mode": screened_result["selection_mode"],
+                    "batches": screened_result.get("batches", []),
+                }, expanded=False)
+
+        st.divider()
+
+        # ---- Stage 3: 板块分配 ----
+        st.markdown("### 🔀 Stage 3：板块分配")
+
+        if st.button("🧪 运行板块分配", use_container_width=True):
+            screened_result = st.session_state.get("ep_screened_result")
+            if not screened_result or not screened_result.get("ok"):
+                st.warning("请先完成全局初筛。")
+            else:
+                ui_logger = build_ui_logger()
+                with st.spinner("正在进行板块分配..."):
+                    assignment_result = assign_candidates_to_categories(
+                        config=runtime_config,
+                        screened_candidates=screened_result["screened"],
+                        logger=ui_logger,
+                    )
+                st.session_state["ep_assignment_result"] = assignment_result
+                st.success("板块分配完成。")
+
+        # 展示板块分配结果
+        if "ep_assignment_result" in st.session_state:
+            assignment_result = st.session_state["ep_assignment_result"]
+            cat_map = assignment_result.get("category_candidate_map", {})
+            unassigned = assignment_result.get("unassigned", [])
+
+            st.markdown("#### 📬 板块候选映射")
+            for category, candidates in cat_map.items():
+                st.markdown(f"**{category}**：{len(candidates)} 条")
+                if candidates:
+                    for c in candidates:
+                        reason = c.get("assignment_reason", "")
+                        with st.expander(f"  - {c.get('title', '')}"):
+                            st.markdown(f"**链接**：[{c.get('link', '')}]({c.get('link', '')})")
+                            st.markdown(f"**摘要**：{c.get('summary', '')}")
+                            if reason:
+                                st.markdown(f"**分配理由**：{reason}")
+
+            if unassigned:
+                st.markdown("#### ⚠️ 未分配候选")
+                for c in unassigned:
+                    with st.expander(f"❓ {c.get('title', '')}"):
+                        st.markdown(f"**链接**：[{c.get('link', '')}]({c.get('link', '')})")
+                        st.markdown(f"**摘要**：{c.get('summary', '')}")
+            else:
+                st.success("所有候选都已分配到板块。")
+
+        st.divider()
+
+        # ---- Stage 4: 板块最终精选 ----
+        st.markdown("### ✂️ Stage 4：板块最终精选")
+
+        if st.button("🧪 运行全部板块最终精选", use_container_width=True):
+            assignment_result = st.session_state.get("ep_assignment_result")
+            if not assignment_result:
+                st.warning("请先完成板块分配。")
+            else:
+                ui_logger = build_ui_logger()
+                category_results = {}
+                final_blocks = []
+
+                for category in config.get("feeds", {}).keys():
+                    cat_candidates = assignment_result["category_candidate_map"].get(category, [])
+                    if not cat_candidates:
+                        continue
+
+                    result = select_for_category(
+                        config=runtime_config,
+                        category_name=category,
+                        candidates=cat_candidates,
+                        logger=ui_logger,
+                    )
+                    category_results[category] = result
+
+                    if result.get("status") == "success" and result.get("preview_markdown"):
+                        final_blocks.append(result["preview_markdown"])
+
+                st.session_state["ep_category_results"] = category_results
+                st.session_state["ep_final_markdown"] = "\n\n".join(final_blocks)
+                st.success("板块最终精选完成。")
+
+        # 展示板块最终精选结果
+        if "ep_category_results" in st.session_state:
+            category_results = st.session_state["ep_category_results"]
+
+            for category, result in category_results.items():
+                st.markdown(f"**{category}**")
+                status = result.get("status", "unknown")
+                if status == "success":
+                    selected = result.get("selected_items", [])
+                    st.success(f"命中 {len(selected)} 条")
+                    if result.get("preview_markdown"):
+                        st.markdown(result["preview_markdown"])
+                elif status == "empty":
+                    st.warning("无合格内容被拦截")
+                elif status == "empty_candidates":
+                    st.info("无候选内容")
+                else:
+                    st.error(f"错误：{result.get('error', '未知')}")
+
+            # 完整 Markdown 输出
+            if st.session_state.get("ep_final_markdown"):
+                st.markdown("#### 📤 完整简报预览")
+                st.markdown(st.session_state["ep_final_markdown"])
+
+        st.divider()
+
+        # ---- 完整流水线一键运行 ----
+        st.markdown("### 🚀 完整流水线一键运行")
+
+        if st.button("▶️ 运行完整 Editorial Pipeline", type="primary", use_container_width=True):
+            ui_logger = build_ui_logger()
+            with st.spinner("正在运行完整 Editorial Pipeline..."):
+                pipeline_result = run_editorial_pipeline(config=runtime_config, logger=ui_logger)
+            st.session_state["ep_pipeline_result"] = pipeline_result
+
+            if pipeline_result["ok"]:
+                st.success("Editorial Pipeline 运行完成！")
+                screened = pipeline_result.get("screened_result", {}).get("screened", [])
+                st.info(f"全局初筛通过 {len(screened)} 条")
+            else:
+                st.error(f"流水线运行失败：{pipeline_result.get('error', '未知错误')}")
+
+        if "ep_pipeline_result" in st.session_state:
+            pr = st.session_state["ep_pipeline_result"]
+            with st.expander("🔬 完整流水线中间结果（调试用）", expanded=False):
+                st.json({
+                    "ok": pr["ok"],
+                    "error": pr.get("error"),
+                    "global_candidates_count": len(pr.get("global_candidates", [])),
+                    "screened_count": len(pr.get("screened_result", {}).get("screened", [])),
+                    "assignment_categories": list(pr.get("assignment_result", {}).get("category_candidate_map", {}).keys()),
+                    "category_results_count": len(pr.get("category_results", {})),
+                }, expanded=False)
 
 
 if __name__ == "__main__":
