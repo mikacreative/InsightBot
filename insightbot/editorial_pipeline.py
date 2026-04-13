@@ -11,7 +11,6 @@ import json
 import logging
 from datetime import datetime
 
-import feedparser
 import re
 import time
 import uuid
@@ -21,6 +20,7 @@ from typing import Any
 
 import feedparser
 import requests
+from bs4 import BeautifulSoup
 
 from .ai import chat_completion
 from .wecom import send_markdown_to_app
@@ -82,12 +82,178 @@ DEFAULT_GLOBAL_SYSTEM_PROMPT = """你是一个资深营销情报官，站在"总
 """
 
 
+# ---------- Search: Global Candidate Supplementation ----------
+
+
+def search_global_candidates(*, config: dict, logger) -> list[dict]:
+    """
+    读取 config["search"]，执行搜索引擎查询，归一化为 GlobalCandidate。
+    搜索引擎可插拔（baidu / duckduckgo）。
+
+    返回 list[GlobalCandidate]，格式与 RSS 候选完全一致。
+    """
+    search_config = config.get("search", {})
+    if not search_config.get("enabled", False):
+        return []
+
+    provider = search_config.get("provider", "baidu")
+    queries = search_config.get("queries", [])
+    if not queries:
+        # 自动从各板块 keywords 生成 queries
+        queries = _derive_queries_from_feeds(config)
+        logger.info(f"🔍 搜索 query 为空，已从板块 keywords 自动派生 {len(queries)} 条")
+
+    all_results: list[dict] = []
+    for q in queries:
+        keywords = q.get("keywords", "").strip()
+        if not keywords:
+            continue
+        max_results = q.get("max_results", 10)
+        category_hint = q.get("category_hint", "")
+
+        try:
+            if provider == "baidu":
+                raw_results = _search_baidu(keywords, max_results)
+            elif provider == "duckduckgo":
+                raw_results = _search_duckduckgo(keywords, max_results)
+            else:
+                logger.warning(f"⚠️ 未知搜索 provider: {provider}，跳过")
+                continue
+
+            for r in raw_results:
+                normalized = _normalize_search_result(r, category_hint=category_hint)
+                all_results.append(normalized)
+            logger.info(f"🔍 [{provider}] 关键词「{keywords}」→ {len(raw_results)} 条")
+        except Exception as e:
+            logger.warning(f"⚠️ 搜索失败 [{keywords}]: {e}")
+
+    # 同 link 去重
+    unique = _deduplicate_candidates(all_results)
+    logger.info(f"🔍 搜索补充：{len(unique)} 条（来自 {len(queries)} 个 query）")
+    return unique
+
+
+def _derive_queries_from_feeds(config: dict) -> list[dict]:
+    """从各板块 keywords 自动派生搜索 query。"""
+    queries = []
+    feeds = config.get("feeds", {})
+    for category, feed_data in feeds.items():
+        keywords = feed_data.get("keywords", [])
+        if not keywords:
+            continue
+        prompt_snippet = feed_data.get("prompt", "")[:20].replace("\n", " ")
+        keywords_str = " ".join(keywords)
+        queries.append({
+            "keywords": keywords_str,
+            "category_hint": category,
+            "max_results": 10,
+            "_auto_generated": True,
+        })
+    return queries
+
+
+def _normalize_search_result(raw: dict, *, category_hint: str = "") -> dict:
+    """将搜索引擎原始结果归一化为 GlobalCandidate 格式。"""
+    link = raw.get("link", "").strip()
+    title = raw.get("title", "").strip()
+    snippet = _clean_text(raw.get("snippet", ""))
+    source_name = raw.get("source", "搜索结果")
+
+    candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, link)) if link else str(uuid.uuid4())
+
+    return {
+        "id": candidate_id,
+        "title": f"[搜索] {title}",
+        "link": link,
+        "summary": snippet,
+        "published_at": "",                              # 搜索结果无时间
+        "source_url": link,
+        "source_name": source_name,
+        "source_category_hint": category_hint,
+        "source_type": "search",
+    }
+
+
+def _search_baidu(keywords: str, max_results: int) -> list[dict]:
+    """
+    使用 requests + BeautifulSoup 搜索百度。
+    腾讯云内地节点可正常访问，无需额外依赖。
+    """
+    results: list[dict] = []
+    encoded_kw = requests.utils.quote(keywords)
+    url = f"https://www.baidu.com/s?wd={encoded_kw}&rn={max_results}"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9",
+    }
+    resp = requests.get(url, headers=headers, timeout=10)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    for item in soup.select(".result, .result-op")[:max_results]:
+        title_el = item.select_one("h3 a") or item.select_one("a")
+        if not title_el:
+            continue
+        title = title_el.get_text(strip=True)
+        link = title_el.get("href", "")
+        # 百度搜索结果 link 通常是重定向 URL，尝试取真实 URL
+        if link.startswith("/"):
+            link = "https://www.baidu.com" + link
+
+        snippet_el = item.select_one(".c-abstract") or item.select_one(".content-right_8Zs40") or item.select_one("span")
+        snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+
+        if not title or not link:
+            continue
+        results.append({
+            "title": title,
+            "link": link,
+            "snippet": snippet,
+            "source": "baidu",
+        })
+
+    return results
+
+
+def _search_duckduckgo(keywords: str, max_results: int) -> list[dict]:
+    """
+    使用 duckduckgo-search 搜索，复用现有 discovery/search.py 逻辑。
+    """
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        return []
+
+    results: list[dict] = []
+    try:
+        with DDGS() as ddgs:
+            for result in ddgs.text(keywords, max_results=max_results):
+                title = result.get("title", "")
+                link = result.get("href", "")
+                snippet = result.get("body", "")
+                if not title or not link:
+                    continue
+                results.append({
+                    "title": title,
+                    "link": link,
+                    "snippet": snippet,
+                    "source": "duckduckgo",
+                })
+    except Exception:
+        pass
+    return results
+
+
 # ---------- Stage 1: Build Global Candidates ----------
 
 
 def build_global_candidates(*, config: dict, logger) -> list[dict]:
     """
-    聚合所有板块 RSS 源，形成统一候选池（GlobalCandidate 列表）。
+    聚合所有板块 RSS 源 + 搜索结果，形成统一候选池（GlobalCandidate 列表）。
     只做工程清洗，不做板块判断。
     """
     all_candidates: list[dict] = []
@@ -125,9 +291,18 @@ def build_global_candidates(*, config: dict, logger) -> list[dict]:
             except Exception as e:
                 logger.warning(f"⚠️ 全局抓取失败 [{url}]: {e}")
 
-    # 去重（按 link）
+    # 搜索补充（并行）
+    search_candidates = search_global_candidates(config=config, logger=logger)
+    all_candidates.extend(search_candidates)
+
+    # 全局去重（按 link）
     unique_candidates = _deduplicate_candidates(all_candidates)
-    logger.info(f"📦 全局候选池：{len(all_candidates)} 条 → 去重后 {len(unique_candidates)} 条")
+    rss_count = sum(1 for c in all_candidates if c.get("source_type") != "search")
+    search_count = len(all_candidates) - rss_count
+    logger.info(
+        f"📦 全局候选池：RSS {rss_count} + 搜索 {search_count} = "
+        f"去重后 {len(unique_candidates)} 条"
+    )
 
     return unique_candidates
 
