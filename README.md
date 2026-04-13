@@ -1,18 +1,27 @@
 ## InsightBot (营销情报站)
 
-> 当前阶段版本：`v0.3.0`
+> 当前阶段版本：`v0.3.1`
 
-一个“RSS + AI + 企业微信”的营销情报简报机器人：
+一个”RSS + AI + 企业微信”的营销情报简报机器人：
 
-- `smart_brief.py`: 抓取 RSS → 去重 → 调用 LLM 筛选/改写摘要 → 企业微信推送
-- `app.py`: Streamlit 管理台（概览、信源健康、Prompt 调试、日志与诊断）
+- `insightbot/cli.py`: 统一入口，生产任务和手动运行均通过此模块触发
+- `insightbot/editorial_pipeline.py`: **默认主流程**——全局初筛 → 板块分配 → 板块精选 → 企业微信推送
+- `insightbot/smart_brief_runner.py`: 经典老流程（可通过 `editorial_pipeline.enabled=false` 回退）
+- `scripts/app.py`: Streamlit 管理台（概览、信源健康、Prompt 调试、日志与诊断、Editorial Pipeline 配置）
 - `docker-compose.yml`: WeWe RSS + RSSHub + Redis（用于信源聚合）
-- `scripts/`: 入口脚本（root 目录的 `app.py` 仍保留为兼容包装器）
 - `logs/`: 运行日志（每日轮转）
 
-### v0.3.0 已完成能力
+### v0.3.1 Editorial Pipeline
 
-这一阶段的重点不再只是“能跑”，而是让管理员能在控制台里更稳定地做日常运营判断。
+默认生产流程升级为双阶段编辑流水线：
+
+- **全局初筛**：聚合所有 RSS 源，站在”总编辑”视角做第一轮精选
+- **板块分配**：单归属判断，每条内容只进一个最合适的板块
+- **板块精选**：各板块在分配到的候选内做最终精选与标题/摘要改写
+- **生产开关**：控制台 tab7 可实时切换 `editorial_pipeline.enabled`，无需改代码
+- **参数可配**：全局初筛倍率（2-10x）、板块分配批大小均可在 tab7 调整
+
+### v0.3.0 已完成能力
 
 - 拆分配置：`config.content.json` 可纳入 Git，`config.secrets.json` 与环境变量负责敏感信息
 - Prompt Debug Console：
@@ -27,7 +36,7 @@
   - 5 分钟缓存 + 手动刷新
 - 无推送诊断：
   - 结合最近一次运行日志与 RSS 健康度
-  - 区分“源异常 / 无候选 / Prompt 全拦截 / 运行异常”
+  - 区分”源异常 / 无候选 / Prompt 全拦截 / 运行异常”
 - 概览页：
   - 最近一次任务摘要
   - 异常 RSS 源数
@@ -37,6 +46,7 @@
 
 如果你想看这一阶段的设计说明，可参考：
 
+- [Editorial Pipeline 设计文档](./docs/editorial_pipeline_design.md)
 - [v0.3.0 管理台 PRD](./docs/v0.3.0_admin_console_prd.md)
 
 ### Quick start (local)
@@ -82,8 +92,14 @@ streamlit run app.py
 ### Running the bot
 
 ```bash
+# 统一入口（路由逻辑由 config.content.json 中的 editorial_pipeline.enabled 决定）
+python -m insightbot.cli
+
+# 老流程（已废弃，仅保留用于回退）
 python smart_brief.py
 ```
+
+生产默认走 `editorial_pipeline.enabled=true`（Editorial Pipeline），切老流程需在控制台 tab7 关闭开关。
 
 ### Logs
 

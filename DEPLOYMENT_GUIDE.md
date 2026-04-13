@@ -12,9 +12,11 @@
 *   在目标运行环境完成一次真实链路验证：
     *   控制台能正常打开
     *   RSS 健康度面板能读取或刷新
-    *   `python smart_brief.py` 能完整跑通
+    *   `python -m insightbot.cli` 能完整跑通
+    *   Editorial Pipeline 开关在控制台 tab7 可正常切换
     *   企业微信推送或 `DRY_RUN` 输出符合预期
 *   确认生产环境使用的分支、配置文件路径、日志目录和定时任务配置都与当前代码兼容。
+*   若使用老流程（`editorial_pipeline.enabled=false`），确认 `smart_brief_runner.py` 仍可正常跑通。
 
 ## 一、将 `dev` 分支合并到 `main`
 
@@ -94,8 +96,8 @@ pip install -r requirements.txt
 #    - 如果是直接运行 Python 脚本 (例如通过 systemd 或 nohup)：
 #      sudo systemctl restart insightbot.service  # 假设你配置了 systemd 服务
 #      # 或者手动停止再启动
-#      pkill -f smart_brief.py  # 停止旧进程
-#      nohup python3 smart_brief.py > insightbot.log 2>&1 & # 启动新进程
+#      pkill -f insightbot  # 停止旧进程
+#      nohup python3 -m insightbot.cli > insightbot.log 2>&1 & # 启动新进程（统一入口）
 
 #    - 如果是使用 Docker Compose 部署：
 #      docker-compose down
@@ -121,7 +123,7 @@ crontab -e
 
 # 确保 cron 任务中的 Python 路径和脚本路径正确，并且引用了正确的环境变量
 # 例如：
-# 0 9 * * * cd /path/to/your/InsightBot/project && set -a; source .env; set +a && python3 smart_brief.py >> /var/log/insightbot_cron.log 2>&1
+# 0 9 * * * cd /path/to/your/InsightBot/project && set -a; source .env; set +a && python3 -m insightbot.cli >> /var/log/insightbot_cron.log 2>&1
 ```
 
 ### 策略二：使用腾讯云云函数 (SCF) 部署 (如果适用)

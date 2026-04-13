@@ -135,4 +135,6 @@ pytest tests/test_smart_brief_runner.py -v
 set -a; source .env.local; set +a
 streamlit run scripts/app.py
 ```
-此时控制台读取和修改的都是 `config.local.content.json`，敏感信息来自 `config.local.secrets.json` 或环境变量；点击"立即手动运行"触发的也是本地的测试配置，完全不会影响生产环境。
+此时控制台读取和修改的都是 `config.local.content.json`，敏感信息来自 `config.local.secrets.json` 或环境变量；点击"立即手动运行"触发 `python -m insightbot.cli`（统一入口），受 `editorial_pipeline.enabled` 控制，本地配置不影响生产环境。
+
+> **Editorial Pipeline 本地测试**：控制台 tab7 提供了完整的流水线调试面板，可分阶段（全局候选池 → 全局初筛 → 板块分配 → 板块精选）逐步验证新流程效果，无需推送即可预览最终 Markdown 输出。
