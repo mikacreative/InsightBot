@@ -1433,6 +1433,108 @@ def main() -> None:
 
         st.divider()
 
+        # ---- 搜索补充配置 ----
+        search_config = config.setdefault("search", {})
+        if "ep_search_queries" not in st.session_state:
+            st.session_state["ep_search_queries"] = list(search_config.get("queries", []))
+
+        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+        st.markdown("**🔍 搜索补充配置**", unsafe_allow_html=True)
+        st.markdown('<div class="ib-section-copy">在 RSS 抓取之外，通过搜索引擎补充候选内容。并入全局候选池后统一初筛。</div>', unsafe_allow_html=True)
+
+        col_search_toggle, col_provider = st.columns([1, 2])
+        with col_search_toggle:
+            search_enabled = st.toggle(
+                "启用搜索补充",
+                value=search_config.get("enabled", False),
+                help="开启后，搜索结果将并入全局候选池。搜索引擎默认使用百度（腾讯云内可访问）。",
+            )
+        with col_provider:
+            search_provider = st.selectbox(
+                "搜索引擎",
+                options=["baidu", "duckduckgo"],
+                index=["baidu", "duckduckgo"].index(search_config.get("provider", "baidu")),
+                help="百度：适合腾讯云内地节点；DuckDuckGo：适合海外节点或本地开发。",
+            )
+
+        st.markdown("---")
+        st.markdown("**搜索 Query 管理**")
+        categories = list(config.get("feeds", {}).keys())
+        hint_options = ["（不预设板块）"] + categories
+
+        queries = st.session_state["ep_search_queries"]
+        # 删除标记
+        to_delete = set()
+        for i, q in enumerate(queries):
+            with st.container():
+                col_kw, col_hint, col_mr, col_del = st.columns([4, 2, 1, 1])
+                kw_val = st.text_input(
+                    "关键词",
+                    value=q.get("keywords", ""),
+                    placeholder="品牌 AI 营销 新动作",
+                    key=f"sq_kw_{i}",
+                    label_visibility="collapsed",
+                )
+                current_hint = q.get("category_hint", "")
+                hint_idx = hint_options.index(current_hint) if current_hint in hint_options else 0
+                hint_val = st.selectbox(
+                    "板块 Hint",
+                    options=hint_options,
+                    index=hint_idx,
+                    key=f"sq_hint_{i}",
+                    label_visibility="collapsed",
+                )
+                mr_val = st.number_input(
+                    "最大结果",
+                    min_value=1,
+                    max_value=30,
+                    value=q.get("max_results", 10),
+                    key=f"sq_mr_{i}",
+                    label_visibility="collapsed",
+                )
+                if st.button("🗑️", key=f"sq_del_{i}", help="删除此 Query"):
+                    to_delete.add(i)
+
+        # 过滤掉被删除的
+        remaining = [q for i, q in enumerate(queries) if i not in to_delete]
+        st.session_state["ep_search_queries"] = remaining
+
+        col_add_query, col_auto_gen = st.columns([1, 1])
+        with col_add_query:
+            if st.button("➕ 添加 Query", use_container_width=True):
+                st.session_state["ep_search_queries"].append({
+                    "keywords": "",
+                    "category_hint": "",
+                    "max_results": 10,
+                })
+                st.rerun()
+        with col_auto_gen:
+            if st.button("🔄 从板块 Keywords 自动派生", use_container_width=True):
+                derived = []
+                for cat, feed_data in config.get("feeds", {}).items():
+                    kw_list = feed_data.get("keywords", [])
+                    if kw_list:
+                        derived.append({
+                            "keywords": " ".join(kw_list),
+                            "category_hint": cat,
+                            "max_results": 10,
+                        })
+                st.session_state["ep_search_queries"] = derived
+                st.toast(f"已从 {len(derived)} 个板块派生搜索 Query")
+                st.rerun()
+
+        if st.button("💾 保存搜索配置", use_container_width=True):
+            search_config["enabled"] = search_enabled
+            search_config["provider"] = search_provider
+            search_config["queries"] = st.session_state["ep_search_queries"]
+            config["search"] = search_config
+            save_config(config)
+            st.toast("搜索配置已保存！")
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.divider()
+
         # ---- Stage 1 & 2: 全局候选池 + 全局初筛 ----
         st.markdown("### 🔍 Stage 1 & 2：全局候选池 → 全局初筛")
 
@@ -1448,7 +1550,12 @@ def main() -> None:
                     global_candidates = build_global_candidates(config=runtime_config, logger=ui_logger)
                 st.session_state["ep_global_candidates"] = global_candidates
                 if global_candidates:
-                    st.success(f"全局候选池：{len(global_candidates)} 条（去重后）")
+                    rss_count = sum(1 for c in global_candidates if c.get("source_type") != "search")
+                    search_count = len(global_candidates) - rss_count
+                    if search_count > 0:
+                        st.success(f"全局候选池：{len(global_candidates)} 条（RSS {rss_count} + 搜索 {search_count}）")
+                    else:
+                        st.success(f"全局候选池：{len(global_candidates)} 条（RSS）")
                 else:
                     st.warning("全局候选池为空，请检查 RSS 源是否正常。")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -1490,7 +1597,8 @@ def main() -> None:
                 for i, item in enumerate(screened, start=1):
                     score = item.get("priority_score", 0)
                     note = item.get("editorial_note", "")
-                    with st.expander(f"{i}. {item.get('title', '')}（优先级：{score:.1f}）"):
+                    source_tag = "🔍" if item.get("source_type") == "search" else "📡"
+                    with st.expander(f"{i}. {source_tag} {item.get('title', '')}（优先级：{score:.1f}）"):
                         st.markdown(f"**链接**：[{item.get('link', '')}]({item.get('link', '')})")
                         st.markdown(f"**摘要**：{item.get('summary', '')}")
                         if note:
