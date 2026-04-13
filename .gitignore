@@ -6,6 +6,8 @@ config.secrets.json
 !.env.example
 !.env.local.example
 config.local.json
+config.local.content.json
+config.local.secrets.json
 
 # Python
 venv/
@@ -31,3 +33,7 @@ data/*.sqlite3
 
 # OS/editor
 .DS_Store
+
+# Build / packaging / test artifacts
+marketing_bot.egg-info/
+pytest-of-mikawang/
