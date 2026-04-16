@@ -3,7 +3,14 @@ import os
 import re
 from copy import deepcopy
 
-from .paths import config_content_file_path, config_file_path, config_secrets_file_path, default_bot_dir
+from .paths import (
+    channels_file_path,
+    config_content_file_path,
+    config_file_path,
+    config_secrets_file_path,
+    default_bot_dir,
+    tasks_file_path,
+)
 
 
 def _replace_env_vars(data):
@@ -112,3 +119,84 @@ def load_runtime_config(bot_dir: str | None = None) -> dict:
         )
 
     return _deep_merge(config, _env_runtime_overrides())
+
+
+def load_channels(bot_dir: str | None = None) -> dict:
+    """Load channels.json. Returns {"channels": {}} if file does not exist."""
+    bot_dir = bot_dir or default_bot_dir()
+    path = channels_file_path(bot_dir)
+    if not os.path.exists(path):
+        return {"channels": {}}
+    return load_json_config(path)
+
+
+def save_channels(channels: dict, bot_dir: str | None = None) -> None:
+    """Atomically write channels.json."""
+    bot_dir = bot_dir or default_bot_dir()
+    path = channels_file_path(bot_dir)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(channels, f, indent=4, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def load_tasks(bot_dir: str | None = None) -> dict:
+    """Load tasks.json. Returns {"tasks": {}} if file does not exist."""
+    bot_dir = bot_dir or default_bot_dir()
+    path = tasks_file_path(bot_dir)
+    if not os.path.exists(path):
+        return {"tasks": {}}
+    return load_json_config(path)
+
+
+def save_tasks(tasks: dict, bot_dir: str | None = None) -> None:
+    """Atomically write tasks.json."""
+    bot_dir = bot_dir or default_bot_dir()
+    path = tasks_file_path(bot_dir)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(tasks, f, indent=4, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def load_tasks_config(task_id: str, bot_dir: str | None = None) -> dict:
+    """
+    Assemble a full runtime config for a specific task.
+    Merges base config (AI, secrets, settings) with task-level feeds and pipeline_config.
+    Raises KeyError if task not found.
+    """
+    bot_dir = bot_dir or default_bot_dir()
+    base = load_runtime_config(bot_dir)
+    tasks_data = load_tasks(bot_dir)
+    tasks_map = tasks_data.get("tasks", {})
+    if task_id not in tasks_map:
+        raise KeyError(f"Task '{task_id}' not found in tasks.json")
+    task_def = tasks_map[task_id]
+
+    # Start from base config
+    config = deepcopy(base)
+
+    # Merge task-level feeds (replaces global feeds)
+    feeds = task_def.get("feeds", {})
+    if feeds:
+        config["feeds"] = deepcopy(feeds)
+
+    # Merge pipeline_config into ai section
+    pipeline_config = task_def.get("pipeline_config", {})
+    if pipeline_config:
+        ai = config.setdefault("ai", {})
+        editorial = ai.setdefault("editorial_pipeline", {})
+        editorial.update(deepcopy(pipeline_config))
+
+    # Merge search if present in task
+    search = task_def.get("search", {})
+    if search:
+        config["search"] = deepcopy(search)
+
+    # Inject task's channels list so task_runner can read it
+    config["_task_channels"] = list(task_def.get("channels", []))
+
+    # Inject pipeline type
+    config["_task_pipeline"] = task_def.get("pipeline", "editorial")
+
+    return config

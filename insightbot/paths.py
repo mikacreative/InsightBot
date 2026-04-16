@@ -53,3 +53,13 @@ def feed_health_cache_file_path(bot_dir: str | None = None) -> str:
 def prompt_debug_history_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("PROMPT_DEBUG_HISTORY_FILE", os.path.join(data_dir(bot_dir), "prompt_debug_history.json"))
+
+
+def channels_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("CHANNELS_FILE", os.path.join(bot_dir, "channels.json"))
+
+
+def tasks_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("TASKS_FILE", os.path.join(bot_dir, "tasks.json"))

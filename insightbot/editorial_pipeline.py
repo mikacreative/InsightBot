@@ -23,7 +23,6 @@ import requests
 from bs4 import BeautifulSoup
 
 from .ai import chat_completion
-from .wecom import send_markdown_to_app
 from .smart_brief_runner import (
     _build_system_prompt,
     _call_selection_once,
@@ -932,48 +931,6 @@ def run_editorial_pipeline(*, config: dict, logger) -> dict:
             logger.info(f"  🚫 【{category}】无合格内容被拦截")
 
     final_markdown = "\n\n".join(final_blocks)
-
-    # --- WeChat 推送 ---
-    settings = config.get("settings", {})
-    today_str = datetime.now().strftime("%m-%d")
-    title_template = settings.get("report_title", "📅 营销情报早报 | {date}")
-    header_msg = f"# {title_template.replace('{date}', today_str)}\n> 正在为您通过 AI 融合检索定向信源与全网热词..."
-    send_markdown_to_app(
-        cid=config["wecom"]["cid"],
-        secret=config["wecom"]["secret"],
-        agent_id=str(config["wecom"]["aid"]),
-        content=header_msg,
-    )
-
-    has_any_update = False
-    for block in final_blocks:
-        send_markdown_to_app(
-            cid=config["wecom"]["cid"],
-            secret=config["wecom"]["secret"],
-            agent_id=str(config["wecom"]["aid"]),
-            content=block,
-        )
-        has_any_update = True
-        time.sleep(2)
-
-    if has_any_update:
-        if settings.get("show_footer", True):
-            send_markdown_to_app(
-                cid=config["wecom"]["cid"],
-                secret=config["wecom"]["secret"],
-                agent_id=str(config["wecom"]["aid"]),
-                content=f"\n{settings.get('footer_text', '')}",
-            )
-        logger.info("✅ Editorial Pipeline 推送完成")
-    else:
-        empty_msg = settings.get("empty_message", "📭 今日全网无重要更新。")
-        send_markdown_to_app(
-            cid=config["wecom"]["cid"],
-            secret=config["wecom"]["secret"],
-            agent_id=str(config["wecom"]["aid"]),
-            content=empty_msg,
-        )
-        logger.info("📭 今日无内容推送")
 
     return {
         "ok": True,

@@ -437,60 +437,51 @@ class TestPromptDebug:
 
 class TestRunTaskIntegration:
 
-    def test_sends_header_message_first(self, test_config, silent_logger):
+    def test_returns_dict_with_final_markdown(self, test_config, silent_logger):
+        """run_task 应返回 dict 且包含 final_markdown 字段（不发送任何 channel）"""
         mock_feed = _make_feed([])
-        sent_messages = []
-
         with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
-            with patch(
-                "insightbot.smart_brief_runner.send_markdown_to_app",
-                side_effect=lambda **kw: sent_messages.append(kw["content"]) or True,
-            ):
-                run_task(config=test_config, logger=silent_logger)
+            result = run_task(config=test_config, logger=silent_logger)
 
-        assert len(sent_messages) >= 1
-        assert "[TEST]" in sent_messages[0] or "营销情报" in sent_messages[0]
+        assert isinstance(result, dict)
+        assert "final_markdown" in result
+        assert "ok" in result
 
-    def test_sends_empty_message_when_no_updates(self, test_config, silent_logger):
+    def test_returns_empty_final_markdown_when_no_candidates(self, test_config, silent_logger):
+        """无候选时 final_markdown 应为空字符串"""
         mock_feed = _make_feed([])
-        sent_messages = []
-
         with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
-            with patch(
-                "insightbot.smart_brief_runner.send_markdown_to_app",
-                side_effect=lambda **kw: sent_messages.append(kw["content"]) or True,
-            ):
-                run_task(config=test_config, logger=silent_logger)
+            result = run_task(config=test_config, logger=silent_logger)
 
-        empty_msg = test_config["settings"]["empty_message"]
-        assert any(empty_msg in msg for msg in sent_messages)
+        assert result["final_markdown"] == ""
 
-    def test_sends_footer_when_has_updates(self, test_config, silent_logger):
+    def test_includes_selected_markdown_in_final(self, test_config, silent_logger):
+        """有内容时 final_markdown 应包含 AI 精选结果"""
         recent_entry = _make_entry("营销新闻", "https://example.com/news", hours_ago=1)
         mock_feed = _make_feed([recent_entry])
-        sent_messages = []
+        ai_output = "### [营销新闻](https://example.com/news)\n摘要"
 
         with patch("insightbot.smart_brief_runner._parse_feed_url", return_value=mock_feed):
             with patch(
-                "insightbot.smart_brief_runner.send_markdown_to_app",
-                side_effect=lambda **kw: sent_messages.append(kw["content"]) or True,
+                "insightbot.smart_brief_runner._ai_process_category",
+                return_value=ai_output,
             ):
-                with patch(
-                    "insightbot.smart_brief_runner._ai_process_category",
-                    return_value="### [营销新闻](https://example.com/news)\n摘要",
-                ):
-                    with patch("insightbot.smart_brief_runner.time.sleep"):
-                        run_task(config=test_config, logger=silent_logger)
+                result = run_task(config=test_config, logger=silent_logger)
 
-        footer_text = test_config["settings"]["footer_text"]
-        assert any(footer_text in msg for msg in sent_messages)
+        assert ai_output in result["final_markdown"]
+        assert result["ok"] is True
 
     def test_rss_fetch_failure_does_not_crash(self, test_config, silent_logger):
-        with patch("insightbot.smart_brief_runner._parse_feed_url", side_effect=Exception("Connection refused")):
-            with patch("insightbot.smart_brief_runner.send_markdown_to_app", return_value=True):
-                run_task(config=test_config, logger=silent_logger)
+        """RSS 抓取失败时 run_task 不应崩溃"""
+        with patch(
+            "insightbot.smart_brief_runner._parse_feed_url",
+            side_effect=Exception("Connection refused"),
+        ):
+            result = run_task(config=test_config, logger=silent_logger)
+        assert isinstance(result, dict)
 
     def test_url_comment_stripped(self, test_config, silent_logger):
+        """RSS URL 中的注释应被正确剥离"""
         config_with_comment = dict(test_config)
         config_with_comment["feeds"] = {
             "测试板块": {
@@ -506,8 +497,7 @@ class TestRunTaskIntegration:
             return _make_feed([])
 
         with patch("insightbot.smart_brief_runner._parse_feed_url", side_effect=capture_parse):
-            with patch("insightbot.smart_brief_runner.send_markdown_to_app", return_value=True):
-                run_task(config=config_with_comment, logger=silent_logger)
+            run_task(config=config_with_comment, logger=silent_logger)
 
         assert len(parsed_urls) == 1
         assert "#" not in parsed_urls[0]

@@ -6,8 +6,7 @@ import sys
 from datetime import datetime
 
 import streamlit as st
-from crontab import CronTab
-
+from insightbot.channels import init_channels, load_channels, save_channels, test_channel
 from insightbot.config import load_runtime_config
 from insightbot.feed_health import CACHE_TTL_SECONDS, get_feed_health_snapshot, load_health_cache
 from insightbot.paths import (
@@ -15,7 +14,6 @@ from insightbot.paths import (
     config_content_file_path,
     config_file_path,
     config_secrets_file_path,
-    cron_log_file_path,
     default_bot_dir,
     feed_health_cache_file_path,
 )
@@ -27,7 +25,9 @@ from insightbot.prompt_debug_history import (
 )
 from insightbot.discovery.url_resolver import UrlResolver
 from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary, summarize_recent_run
+from insightbot.scheduler import create_scheduler
 from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, get_selection_settings, run_prompt_debug
+from insightbot.task_runner import run_task
 from insightbot.editorial_pipeline import (
     build_global_candidates,
     screen_global_candidates,
@@ -380,6 +380,12 @@ def main() -> None:
 
     config = load_config()
     runtime_config = load_runtime_view()
+
+    # Load tasks and channels; create scheduler (auto-migrates v1 config if needed)
+    channels_data = load_channels(bot_dir)
+    init_channels(channels_data)
+    scheduler = create_scheduler(bot_dir)
+
     overview_health_snapshot = load_health_cache(bot_dir)
     overview_run_summary = parse_recent_run_summary(bot_log_path)
     overview_run_metrics = summarize_recent_run(overview_run_summary)
@@ -408,42 +414,36 @@ def main() -> None:
                 st.success("运行指令已发送，请查看企业微信或日志。")
 
         st.divider()
-        st.header("⏳ 定时推送设置")
-        server_time = subprocess.run(["date", "+%H:%M"], capture_output=True, text=True).stdout.strip()
-        st.caption(f"服务器当前时间: {server_time}")
+        st.header("⏳ 调度器状态")
 
-        current_hour, current_minute = 9, 0
-        try:
-            cron = CronTab(user="root")
-            for job in cron:
-                if job.comment == "marketing_task":
-                    parts = str(job).split()
-                    current_minute, current_hour = int(parts[0]), int(parts[1])
-                    break
-        except Exception:
-            pass
+        tasks_data = load_channels(bot_dir)  # reload to show current
+        from insightbot.config import load_tasks
+        tasks_def = load_tasks(bot_dir)
+        enabled_count = sum(1 for t in tasks_def.get("tasks", {}).values() if t.get("enabled"))
+        total_count = len(tasks_def.get("tasks", {}))
+        st.metric("活跃任务", f"{enabled_count}/{total_count}")
 
-        from datetime import time
+        if st.button("🚀 运行所有已启用任务", use_container_width=True):
+            with st.spinner("正在运行所有已启用任务..."):
+                results = scheduler.run_all_enabled()
+            for r in results:
+                status = "✅" if r.get("ok") else "❌"
+                st.write(f"{status} {r.get('task_id')}")
+            st.success("任务运行完成！")
 
-        new_time = st.time_input("每天自动推送时间", value=time(current_hour, current_minute))
+        st.divider()
+        st.header("📡 Channels")
+        channels_data = load_channels(bot_dir)
+        channel_count = len(channels_data.get("channels", {}))
+        st.metric("已配置频道", str(channel_count))
 
-        if st.button("保存定时设置", use_container_width=True):
-            try:
-                cron = CronTab(user="root")
-                cron.remove_all(comment="marketing_task")
-                python_bin = os.getenv("PYTHON_BIN", sys.executable or "/usr/bin/python3")
-                if smart_brief_mode == "module":
-                    cmd = f'{python_bin} -m insightbot.cli >> "{cron_log_path}" 2>&1'
-                else:
-                    cmd = f'{python_bin} "{smart_brief_path}" >> "{cron_log_path}" 2>&1'
-                job = cron.new(command=cmd, comment="marketing_task")
-                job.setall(f"{new_time.minute} {new_time.hour} * * *")
-                cron.write()
-                st.success("定时已更新！")
-            except Exception:
-                st.error("保存失败，请检查权限。")
+        st.caption("在「📡 Channels」标签页管理频道配置和联通性测试。")
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🏠 概览", "📊 板块与信源管理", "⚙️ 推送版式定制", "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志", "🔍 信源发现", "📡 Editorial Pipeline"])
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "🏠 概览", "📋 任务管理", "📡 Channels",
+        "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志",
+        "🔍 信源发现", "⚙️ 推送版式定制", "🔬 任务调试",
+    ])
 
     with tab0:
         st.subheader("运营概览")
@@ -528,85 +528,207 @@ def main() -> None:
             st.success("当前没有明显异常摘要，系统状态看起来比较稳定。")
         st.markdown("</div>", unsafe_allow_html=True)
 
+    # ── Tab 1: 任务管理 ────────────────────────────────────────────────────────
     with tab1:
-        st.subheader("内容板块控制")
-        st.caption("填入定向 RSS 源。AI 将根据你设定的专属筛选标准进行高标准的过滤清洗。")
+        st.subheader("📋 任务管理")
+        st.caption("管理多任务配置：每个任务有独立的 RSS 源、Pipeline、频道和调度。")
 
-        feeds = config.get("feeds", {})
-        categories_to_delete = []
+        tasks_data = load_tasks(bot_dir)
+        if "tasks" not in tasks_data:
+            tasks_data = {"tasks": {}}
+        tasks = tasks_data["tasks"]
 
-        for category, feed_data in feeds.items():
-            with st.expander(f"📂 {category}", expanded=False):
-                rss_val = "\n".join(feed_data.get("rss", []))
-                new_rss = st.text_area(
-                    "🔗 定向 RSS 源 (主力抓取渠道，每行一个)",
-                    value=rss_val,
-                    height=150,
-                    key=f"rss_{category}",
-                )
+        if not tasks:
+            st.info("暂没有任务，请使用下方表单创建。")
+            task_ids = []
+        else:
+            task_ids = list(tasks.keys())
 
-                new_kw = "\n".join(feed_data.get("keywords", []))
-
-                prompt_val = feed_data.get("prompt", "")
-                new_prompt = st.text_area(
-                    "🧠 本板块专属筛选标准 (必填：决定 AI 的品味)",
-                    value=prompt_val,
-                    height=80,
-                    key=f"prompt_{category}",
-                )
-
-                feeds[category] = {
-                    "rss": [x.strip() for x in new_rss.split("\n") if x.strip()],
-                    "keywords": [x.strip() for x in new_kw.split("\n") if x.strip()],
-                    "prompt": new_prompt.strip(),
-                }
-
-                if st.button(f"🗑️ 删除 [{category}] 板块", key=f"del_{category}"):
-                    categories_to_delete.append(category)
-
-        for cat in categories_to_delete:
-            del feeds[cat]
-            config["feeds"] = feeds
-            save_config(config)
-            st.rerun()
-
-        st.divider()
-        new_cat_name = st.text_input("✨ 新增板块名称 (如：🚗 汽车行业动态)")
-        if st.button("添加板块"):
-            if new_cat_name and new_cat_name not in feeds:
-                feeds[new_cat_name] = {"rss": [], "keywords": [], "prompt": ""}
-                config["feeds"] = feeds
-                save_config(config)
-                st.rerun()
-
-        if st.button("💾 保存所有信源更改", type="primary"):
-            config["feeds"] = feeds
-            save_config(config)
-            st.toast("信源配置已保存！")
-
-    with tab2:
-        st.subheader("推送版式与开关")
-        settings = config["settings"]
-
-        settings["report_title"] = st.text_input(
-            "早报大标题 ({date} 会自动替换为当天日期)",
-            value=settings.get("report_title", "📅 营销情报早报 | {date}"),
-        )
-        settings["empty_message"] = st.text_input(
-            "无更新时的提示语", value=settings.get("empty_message", "📭 今日全网无重要更新。")
-        )
-
-        st.divider()
-        settings["show_footer"] = st.toggle("显示底部控制台链接", value=settings.get("show_footer", True))
-        if settings["show_footer"]:
-            settings["footer_text"] = st.text_input(
-                "底部链接文字及URL", value=settings.get("footer_text", "👀 [前往控制台调整策略](http://你的IP:8501)")
+        # Task list + selector
+        col_list, col_detail = st.columns([1, 2])
+        with col_list:
+            st.markdown("**任务列表**")
+            selected_task_id = st.radio(
+                "选择任务",
+                options=task_ids if task_ids else ["（无任务）"],
+                index=0 if task_ids else 0,
+                label_visibility="collapsed",
             )
 
-        if st.button("💾 保存版式设置"):
-            config["settings"] = settings
-            save_config(config)
-            st.toast("设置已生效！")
+        with col_detail:
+            if tasks:
+                task_def = tasks.get(selected_task_id, {})
+                st.markdown(f"**{task_def.get('name', selected_task_id)}**")
+                col_on, col_name = st.columns([1, 3])
+                with col_on:
+                    new_enabled = st.checkbox("启用", value=task_def.get("enabled", False), key=f"task_enabled_{selected_task_id}")
+                with col_name:
+                    new_name = st.text_input("任务名称", value=task_def.get("name", ""), key=f"task_name_{selected_task_id}")
+
+                st.markdown(f"**Pipeline**: `{task_def.get('pipeline', 'editorial')}`")
+                new_pipeline = st.selectbox(
+                    "Pipeline 类型",
+                    options=["editorial", "classic"],
+                    index=["editorial", "classic"].index(task_def.get("pipeline", "editorial")),
+                    key=f"task_pipeline_{selected_task_id}",
+                )
+
+                # Channels
+                current_channels = task_def.get("channels", [])
+                channels_data = load_channels(bot_dir)
+                all_channel_ids = list(channels_data.get("channels", {}).keys())
+                selected_channels = st.multiselect(
+                    "目标频道",
+                    options=all_channel_ids,
+                    default=current_channels,
+                    key=f"task_channels_{selected_task_id}",
+                )
+
+                # Schedule
+                sched = task_def.get("schedule", {})
+                cur_hour = sched.get("hour", 8)
+                cur_min = sched.get("minute", 0)
+                col_h, col_m = st.columns(2)
+                with col_h:
+                    new_hour = st.number_input("小时", 0, 23, cur_hour, key=f"task_hour_{selected_task_id}")
+                with col_m:
+                    new_min = st.number_input("分钟", 0, 59, cur_min, key=f"task_min_{selected_task_id}")
+
+                # Save button
+                if st.button("💾 保存任务", key=f"save_task_{selected_task_id}"):
+                    tasks[selected_task_id]["name"] = new_name
+                    tasks[selected_task_id]["enabled"] = new_enabled
+                    tasks[selected_task_id]["pipeline"] = new_pipeline
+                    tasks[selected_task_id]["channels"] = selected_channels
+                    tasks[selected_task_id]["schedule"] = {"hour": new_hour, "minute": new_min}
+                    save_tasks(tasks_data, bot_dir)
+                    scheduler.reload()
+                    st.success(f"任务「{new_name}」已保存！")
+                    st.rerun()
+
+                # Delete button
+                if st.button("🗑️ 删除任务", key=f"del_task_{selected_task_id}"):
+                    tasks.pop(selected_task_id, None)
+                    save_tasks(tasks_data, bot_dir)
+                    scheduler.reload()
+                    st.success("任务已删除。")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("**➕ 创建新任务**")
+        new_task_id = st.text_input("任务 ID（英文唯一标识）", placeholder="e.g. weekly_report")
+        col_c1, col_c2, col_c3, col_c4 = st.columns([2, 1, 1, 1])
+        with col_c1:
+            new_task_name = st.text_input("任务名称", placeholder="每周深度报告")
+        with col_c2:
+            new_task_pipeline = st.selectbox("Pipeline", options=["editorial", "classic"], index=0)
+        with col_c3:
+            new_task_hour = st.number_input("小时", 0, 23, 8)
+        with col_c4:
+            new_task_min = st.number_input("分钟", 0, 59, 0)
+
+        if st.button("创建任务", key="create_task_btn"):
+            if new_task_id and new_task_id not in tasks:
+                tasks[new_task_id] = {
+                    "name": new_task_name or new_task_id,
+                    "enabled": False,
+                    "pipeline": new_task_pipeline,
+                    "feeds": {},
+                    "pipeline_config": {},
+                    "channels": [],
+                    "schedule": {"hour": new_task_hour, "minute": new_task_min},
+                }
+                save_tasks(tasks_data, bot_dir)
+                scheduler.reload()
+                st.success(f"任务「{new_task_id}」已创建！")
+                st.rerun()
+            elif new_task_id in tasks:
+                st.error("任务 ID 已存在。")
+
+    # ── Tab 2: Channels ────────────────────────────────────────────────────────
+    with tab2:
+        st.subheader("📡 Channels")
+        st.caption("配置消息推送渠道（企业微信为主），测试联通性。")
+
+        channels_data = load_channels(bot_dir)
+        if "channels" not in channels_data:
+            channels_data = {"channels": {}}
+
+        channel_ids = list(channels_data["channels"].keys())
+        for ch_id in channel_ids:
+            ch = channels_data["channels"][ch_id]
+            with st.expander(f"**{ch.get('name', ch_id)}** (`{ch_id}`)"):
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    new_ch_name = st.text_input("名称", value=ch.get("name", ""), key=f"ch_name_{ch_id}")
+                with col2:
+                    new_ch_type = st.selectbox(
+                        "类型",
+                        options=["wecom"],
+                        index=0,
+                        key=f"ch_type_{ch_id}",
+                    )
+                new_cid = st.text_input("Corp ID (cid)", value=ch.get("cid", ""), key=f"ch_cid_{ch_id}")
+                new_secret = st.text_input("Secret", value=ch.get("secret", ""), type="password", key=f"ch_secret_{ch_id}")
+                new_agent_id = st.text_input("Agent ID", value=ch.get("agent_id", ""), key=f"ch_agent_{ch_id}")
+
+                col_btn1, col_btn2, col_btn3 = st.columns(3)
+                with col_btn1:
+                    if st.button("💾 保存", key=f"ch_save_{ch_id}"):
+                        channels_data["channels"][ch_id] = {
+                            "type": new_ch_type,
+                            "name": new_ch_name,
+                            "cid": new_cid,
+                            "secret": new_secret,
+                            "agent_id": new_agent_id,
+                        }
+                        save_channels(channels_data, bot_dir)
+                        init_channels(channels_data)
+                        st.success("已保存！")
+                        st.rerun()
+                with col_btn2:
+                    if st.button("🧪 测试联通性", key=f"ch_test_{ch_id}"):
+                        try:
+                            ok = test_channel(ch_id)
+                            if ok:
+                                st.success("✅ 频道连通性测试成功！")
+                            else:
+                                st.error("❌ 频道连通性测试失败，请检查配置。")
+                        except Exception as e:
+                            st.error(f"错误: {e}")
+                with col_btn3:
+                    if st.button("🗑️ 删除", key=f"ch_del_{ch_id}"):
+                        channels_data["channels"].pop(ch_id, None)
+                        save_channels(channels_data, bot_dir)
+                        init_channels(channels_data)
+                        st.success("已删除！")
+                        st.rerun()
+
+        st.divider()
+        st.markdown("**➕ 添加新频道**")
+        col_n1, col_n2, col_n3 = st.columns([2, 1, 1])
+        with col_n1:
+            new_ch_id = st.text_input("频道 ID（唯一标识）", placeholder="wecom_test")
+        with col_n2:
+            new_ch_name_input = st.text_input("名称", placeholder="测试频道")
+        with col_n3:
+            new_ch_type_input = st.selectbox("类型", options=["wecom"], index=0)
+
+        if st.button("添加频道", key="add_channel_btn"):
+            if new_ch_id and new_ch_id not in channels_data["channels"]:
+                channels_data["channels"][new_ch_id] = {
+                    "type": new_ch_type_input,
+                    "name": new_ch_name_input or new_ch_id,
+                    "cid": "",
+                    "secret": "",
+                    "agent_id": "",
+                }
+                save_channels(channels_data, bot_dir)
+                init_channels(channels_data)
+                st.success(f"频道「{new_ch_id}」已添加！")
+                st.rerun()
+            elif new_ch_id in channels_data["channels"]:
+                st.error("频道 ID 已存在。")
 
     with tab3:
         ai_conf = config.get("ai", {})
@@ -1382,373 +1504,79 @@ def main() -> None:
         st.divider()
 
     with tab7:
-        st.subheader("📡 Editorial Pipeline 调试面板")
-        st.caption("双阶段编辑流水线：全局初筛 → 板块分配 → 板块精选。用于验证新流程相比老流程的选题质量差异。")
+        st.subheader("推送版式与开关")
+        settings = config["settings"]
 
-        editorial_config = config.setdefault("ai", {}).setdefault("editorial_pipeline", {})
-        pipeline_enabled = editorial_config.get("enabled", False)
-        multiplier = editorial_config.get("global_shortlist_multiplier", 3)
-        assignment_batch_size = editorial_config.get("assignment_batch_size", 20)
+        settings["report_title"] = st.text_input(
+            "早报大标题 ({date} 会自动替换为当天日期)",
+            value=settings.get("report_title", "📅 营销情报早报 | {date}"),
+        )
+        settings["empty_message"] = st.text_input(
+            "无更新时的提示语", value=settings.get("empty_message", "📭 今日全网无重要更新。")
+        )
 
-        # ---- 全局配置区 ----
-        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-        st.markdown("**📡 Editorial Pipeline 全局设置**", unsafe_allow_html=True)
-        st.markdown('<div class="ib-section-copy">控制生产走新流程还是老流程，以及全局初筛参数。</div>', unsafe_allow_html=True)
-
-        col_toggle, col_multiplier, col_batch = st.columns([1, 1, 1])
-        with col_toggle:
-            new_enabled = st.toggle(
-                "启用 Editorial Pipeline",
-                value=pipeline_enabled,
-                help="开启后生产任务走新流程（全局初筛→板块分配→精选），关闭则走老流程。",
-            )
-        with col_multiplier:
-            new_multiplier = st.slider(
-                "全局初筛倍率",
-                min_value=2,
-                max_value=10,
-                value=multiplier,
-                step=1,
-                help="初筛 shortlist = 最终输出目标 × 倍率。如最终每版计划出 10 条，倍率 3x 则初筛约 30 条。",
-            )
-        with col_batch:
-            new_batch = st.slider(
-                "板块分配批大小",
-                min_value=5,
-                max_value=50,
-                value=assignment_batch_size,
-                step=5,
-                help="每批送入板块分配 AI 的候选条数。越大上下文越长，成本越低，但误判风险略升。",
+        st.divider()
+        settings["show_footer"] = st.toggle("显示底部控制台链接", value=settings.get("show_footer", True))
+        if settings["show_footer"]:
+            settings["footer_text"] = st.text_input(
+                "底部链接文字及URL", value=settings.get("footer_text", "👀 [前往控制台调整策略](http://你的IP:8501)")
             )
 
-        if st.button("💾 保存 Editorial Pipeline 设置", use_container_width=True):
-            editorial_config["enabled"] = new_enabled
-            editorial_config["global_shortlist_multiplier"] = new_multiplier
-            editorial_config["assignment_batch_size"] = new_batch
-            config["ai"]["editorial_pipeline"] = editorial_config
+        if st.button("💾 保存版式设置"):
+            config["settings"] = settings
             save_config(config)
-            st.toast("Editorial Pipeline 设置已保存！")
-            st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
+            st.toast("设置已生效！")
 
-        st.divider()
+    with tab8:
+        st.subheader("🔬 任务调试")
+        st.caption("选择任务并运行 Dry Run — 仅在面板展示结果，不发送任何频道消息。")
 
-        # ---- 搜索补充配置 ----
-        search_config = config.setdefault("search", {})
-        if "ep_search_queries" not in st.session_state:
-            st.session_state["ep_search_queries"] = list(search_config.get("queries", []))
+        tasks_data = load_tasks(bot_dir)
+        tasks = tasks_data.get("tasks", {})
+        task_ids = list(tasks.keys())
 
-        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-        st.markdown("**🔍 搜索补充配置**", unsafe_allow_html=True)
-        st.markdown('<div class="ib-section-copy">在 RSS 抓取之外，通过搜索引擎补充候选内容。并入全局候选池后统一初筛。</div>', unsafe_allow_html=True)
+        if not task_ids:
+            st.warning("暂无任务，请先在「📋 任务管理」创建任务。")
+        else:
+            selected = st.selectbox("选择任务", options=task_ids, index=0)
 
-        col_search_toggle, col_provider = st.columns([1, 2])
-        with col_search_toggle:
-            search_enabled = st.toggle(
-                "启用搜索补充",
-                value=search_config.get("enabled", False),
-                help="开启后，搜索结果将并入全局候选池。搜索引擎默认使用百度（腾讯云内可访问）。",
-            )
-        with col_provider:
-            search_provider = st.selectbox(
-                "搜索引擎",
-                options=["baidu", "duckduckgo"],
-                index=["baidu", "duckduckgo"].index(search_config.get("provider", "baidu")),
-                help="百度：适合腾讯云内地节点；DuckDuckGo：适合海外节点或本地开发。",
-            )
+            col_run, col_info = st.columns([1, 3])
+            with col_run:
+                dry_run = st.button("🔬 Dry Run", type="primary", use_container_width=True)
 
-        st.markdown("---")
-        st.markdown("**搜索 Query 管理**")
-        categories = list(config.get("feeds", {}).keys())
-        hint_options = ["（不预设板块）"] + categories
+            task_def = tasks.get(selected, {})
+            st.markdown(f"**Pipeline**: `{task_def.get('pipeline', 'editorial')}`")
+            st.markdown(f"**频道**: `{', '.join(task_def.get('channels', []))}`")
+            sched = task_def.get("schedule", {})
+            st.markdown(f"**调度**: {sched.get('hour', 8):02d}:{sched.get('minute', 0):02d}")
 
-        queries = st.session_state["ep_search_queries"]
-        # 删除标记
-        to_delete = set()
-        for i, q in enumerate(queries):
-            with st.container():
-                col_kw, col_hint, col_mr, col_del = st.columns([4, 2, 1, 1])
-                kw_val = st.text_input(
-                    "关键词",
-                    value=q.get("keywords", ""),
-                    placeholder="品牌 AI 营销 新动作",
-                    key=f"sq_kw_{i}",
-                    label_visibility="collapsed",
-                )
-                current_hint = q.get("category_hint", "")
-                hint_idx = hint_options.index(current_hint) if current_hint in hint_options else 0
-                hint_val = st.selectbox(
-                    "板块 Hint",
-                    options=hint_options,
-                    index=hint_idx,
-                    key=f"sq_hint_{i}",
-                    label_visibility="collapsed",
-                )
-                mr_val = st.number_input(
-                    "最大结果",
-                    min_value=1,
-                    max_value=30,
-                    value=q.get("max_results", 10),
-                    key=f"sq_mr_{i}",
-                    label_visibility="collapsed",
-                )
-                if st.button("🗑️", key=f"sq_del_{i}", help="删除此 Query"):
-                    to_delete.add(i)
-
-        # 过滤掉被删除的
-        remaining = [q for i, q in enumerate(queries) if i not in to_delete]
-        st.session_state["ep_search_queries"] = remaining
-
-        col_add_query, col_auto_gen = st.columns([1, 1])
-        with col_add_query:
-            if st.button("➕ 添加 Query", use_container_width=True):
-                st.session_state["ep_search_queries"].append({
-                    "keywords": "",
-                    "category_hint": "",
-                    "max_results": 10,
-                })
-                st.rerun()
-        with col_auto_gen:
-            if st.button("🔄 从板块 Keywords 自动派生", use_container_width=True):
-                derived = []
-                for cat, feed_data in config.get("feeds", {}).items():
-                    kw_list = feed_data.get("keywords", [])
-                    if kw_list:
-                        derived.append({
-                            "keywords": " ".join(kw_list),
-                            "category_hint": cat,
-                            "max_results": 10,
-                        })
-                st.session_state["ep_search_queries"] = derived
-                st.toast(f"已从 {len(derived)} 个板块派生搜索 Query")
-                st.rerun()
-
-        if st.button("💾 保存搜索配置", use_container_width=True):
-            search_config["enabled"] = search_enabled
-            search_config["provider"] = search_provider
-            search_config["queries"] = st.session_state["ep_search_queries"]
-            config["search"] = search_config
-            save_config(config)
-            st.toast("搜索配置已保存！")
-            st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.divider()
-
-        # ---- Stage 1 & 2: 全局候选池 + 全局初筛 ----
-        st.markdown("### 🔍 Stage 1 & 2：全局候选池 → 全局初筛")
-
-        stage1_col1, stage1_col2 = st.columns([1, 1])
-        with stage1_col1:
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">全局候选池</div>', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-copy">抓取所有板块 RSS 源，汇总后去重。超过 24h 的条目会被过滤。</div>', unsafe_allow_html=True)
-
-            if st.button("📥 抓取全局候选池", use_container_width=True):
+            if dry_run:
                 ui_logger = build_ui_logger()
-                with st.spinner("正在抓取所有 RSS 源..."):
-                    global_candidates = build_global_candidates(config=runtime_config, logger=ui_logger)
-                st.session_state["ep_global_candidates"] = global_candidates
-                if global_candidates:
-                    rss_count = sum(1 for c in global_candidates if c.get("source_type") != "search")
-                    search_count = len(global_candidates) - rss_count
-                    if search_count > 0:
-                        st.success(f"全局候选池：{len(global_candidates)} 条（RSS {rss_count} + 搜索 {search_count}）")
-                    else:
-                        st.success(f"全局候选池：{len(global_candidates)} 条（RSS）")
+                with st.spinner(f"正在 Dry Run 任务「{selected}」..."):
+                    try:
+                        result = scheduler.run_task_by_id(selected, dry_run=True)
+                    except Exception as e:
+                        result = {"ok": False, "error": str(e)}
+
+                st.session_state["task_debug_result"] = result
+
+            if "task_debug_result" in st.session_state:
+                result = st.session_state["task_debug_result"]
+                if result.get("ok"):
+                    st.success(f"✅ Dry Run 完成（pipeline: {result.get('pipeline')}）")
                 else:
-                    st.warning("全局候选池为空，请检查 RSS 源是否正常。")
-            st.markdown("</div>", unsafe_allow_html=True)
+                    st.error(f"❌ Dry Run 失败: {result.get('error', '未知错误')}")
 
-        with stage1_col2:
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">全局初筛</div>', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-copy">站在「总编辑」视角做初筛，筛选出今天最值得进入简报的内容。</div>', unsafe_allow_html=True)
+                if result.get("final_markdown"):
+                    st.markdown("#### 📤 简报预览")
+                    st.markdown(result["final_markdown"])
 
-            if st.button("🧪 运行全局初筛", use_container_width=True):
-                candidates = st.session_state.get("ep_global_candidates", [])
-                if not candidates:
-                    st.warning("请先抓取全局候选池。")
-                else:
-                    ui_logger = build_ui_logger()
-                    with st.spinner("正在进行全局初筛..."):
-                        screened_result = screen_global_candidates(
-                            config=runtime_config,
-                            candidates=candidates,
-                            logger=ui_logger,
-                        )
-                    st.session_state["ep_screened_result"] = screened_result
-                    if screened_result["ok"]:
-                        st.success(
-                            f"全局初筛完成：通过 {screened_result['global_shortlist_size']} 条"
-                            f"（模式：{'全量' if screened_result['selection_mode'] == 'full' else '分片'}）"
-                        )
-                    else:
-                        st.error(f"全局初筛失败：{screened_result.get('error', '未知错误')}")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # 展示全局初筛结果
-        if "ep_screened_result" in st.session_state and st.session_state["ep_screened_result"]["ok"]:
-            screened_result = st.session_state["ep_screened_result"]
-            screened = screened_result.get("screened", [])
-
-            if screened:
-                st.markdown("#### 📋 全局初筛 Shortlist")
-                for i, item in enumerate(screened, start=1):
-                    score = item.get("priority_score", 0)
-                    note = item.get("editorial_note", "")
-                    source_tag = "🔍" if item.get("source_type") == "search" else "📡"
-                    with st.expander(f"{i}. {source_tag} {item.get('title', '')}（优先级：{score:.1f}）"):
-                        st.markdown(f"**链接**：[{item.get('link', '')}]({item.get('link', '')})")
-                        st.markdown(f"**摘要**：{item.get('summary', '')}")
-                        if note:
-                            st.markdown(f"**初筛理由**：{note}")
-            else:
-                st.info("全局初筛未选出任何内容。")
-
-            with st.expander("🔬 全局初筛批次详情", expanded=False):
-                st.json({
-                    "ok": screened_result["ok"],
-                    "global_shortlist_size": screened_result["global_shortlist_size"],
-                    "selection_mode": screened_result["selection_mode"],
-                    "batches": screened_result.get("batches", []),
-                }, expanded=False)
-
-        st.divider()
-
-        # ---- Stage 3: 板块分配 ----
-        st.markdown("### 🔀 Stage 3：板块分配")
-
-        if st.button("🧪 运行板块分配", use_container_width=True):
-            screened_result = st.session_state.get("ep_screened_result")
-            if not screened_result or not screened_result.get("ok"):
-                st.warning("请先完成全局初筛。")
-            else:
-                ui_logger = build_ui_logger()
-                with st.spinner("正在进行板块分配..."):
-                    assignment_result = assign_candidates_to_categories(
-                        config=runtime_config,
-                        screened_candidates=screened_result["screened"],
-                        logger=ui_logger,
-                    )
-                st.session_state["ep_assignment_result"] = assignment_result
-                st.success("板块分配完成。")
-
-        # 展示板块分配结果
-        if "ep_assignment_result" in st.session_state:
-            assignment_result = st.session_state["ep_assignment_result"]
-            cat_map = assignment_result.get("category_candidate_map", {})
-            unassigned = assignment_result.get("unassigned", [])
-
-            st.markdown("#### 📬 板块候选映射")
-            for category, candidates in cat_map.items():
-                st.markdown(f"**{category}**：{len(candidates)} 条")
-                if candidates:
-                    for c in candidates:
-                        reason = c.get("assignment_reason", "")
-                        with st.expander(f"  - {c.get('title', '')}"):
-                            st.markdown(f"**链接**：[{c.get('link', '')}]({c.get('link', '')})")
-                            st.markdown(f"**摘要**：{c.get('summary', '')}")
-                            if reason:
-                                st.markdown(f"**分配理由**：{reason}")
-
-            if unassigned:
-                st.markdown("#### ⚠️ 未分配候选")
-                for c in unassigned:
-                    with st.expander(f"❓ {c.get('title', '')}"):
-                        st.markdown(f"**链接**：[{c.get('link', '')}]({c.get('link', '')})")
-                        st.markdown(f"**摘要**：{c.get('summary', '')}")
-            else:
-                st.success("所有候选都已分配到板块。")
-
-        st.divider()
-
-        # ---- Stage 4: 板块最终精选 ----
-        st.markdown("### ✂️ Stage 4：板块最终精选")
-
-        if st.button("🧪 运行全部板块最终精选", use_container_width=True):
-            assignment_result = st.session_state.get("ep_assignment_result")
-            if not assignment_result:
-                st.warning("请先完成板块分配。")
-            else:
-                ui_logger = build_ui_logger()
-                category_results = {}
-                final_blocks = []
-
-                for category in config.get("feeds", {}).keys():
-                    cat_candidates = assignment_result["category_candidate_map"].get(category, [])
-                    if not cat_candidates:
-                        continue
-
-                    result = select_for_category(
-                        config=runtime_config,
-                        category_name=category,
-                        candidates=cat_candidates,
-                        logger=ui_logger,
-                    )
-                    category_results[category] = result
-
-                    if result.get("status") == "success" and result.get("preview_markdown"):
-                        final_blocks.append(result["preview_markdown"])
-
-                st.session_state["ep_category_results"] = category_results
-                st.session_state["ep_final_markdown"] = "\n\n".join(final_blocks)
-                st.success("板块最终精选完成。")
-
-        # 展示板块最终精选结果
-        if "ep_category_results" in st.session_state:
-            category_results = st.session_state["ep_category_results"]
-
-            for category, result in category_results.items():
-                st.markdown(f"**{category}**")
-                status = result.get("status", "unknown")
-                if status == "success":
-                    selected = result.get("selected_items", [])
-                    st.success(f"命中 {len(selected)} 条")
-                    if result.get("preview_markdown"):
-                        st.markdown(result["preview_markdown"])
-                elif status == "empty":
-                    st.warning("无合格内容被拦截")
-                elif status == "empty_candidates":
-                    st.info("无候选内容")
-                else:
-                    st.error(f"错误：{result.get('error', '未知')}")
-
-            # 完整 Markdown 输出
-            if st.session_state.get("ep_final_markdown"):
-                st.markdown("#### 📤 完整简报预览")
-                st.markdown(st.session_state["ep_final_markdown"])
-
-        st.divider()
-
-        # ---- 完整流水线一键运行 ----
-        st.markdown("### 🚀 完整流水线一键运行")
-
-        if st.button("▶️ 运行完整 Editorial Pipeline", type="primary", use_container_width=True):
-            ui_logger = build_ui_logger()
-            with st.spinner("正在运行完整 Editorial Pipeline..."):
-                pipeline_result = run_editorial_pipeline(config=runtime_config, logger=ui_logger)
-            st.session_state["ep_pipeline_result"] = pipeline_result
-
-            if pipeline_result["ok"]:
-                st.success("Editorial Pipeline 运行完成！")
-                screened = pipeline_result.get("screened_result", {}).get("screened", [])
-                st.info(f"全局初筛通过 {len(screened)} 条")
-            else:
-                st.error(f"流水线运行失败：{pipeline_result.get('error', '未知错误')}")
-
-        if "ep_pipeline_result" in st.session_state:
-            pr = st.session_state["ep_pipeline_result"]
-            with st.expander("🔬 完整流水线中间结果（调试用）", expanded=False):
-                st.json({
-                    "ok": pr["ok"],
-                    "error": pr.get("error"),
-                    "global_candidates_count": len(pr.get("global_candidates", [])),
-                    "screened_count": len(pr.get("screened_result", {}).get("screened", [])),
-                    "assignment_categories": list(pr.get("assignment_result", {}).get("category_candidate_map", {}).keys()),
-                    "category_results_count": len(pr.get("category_results", {})),
-                }, expanded=False)
-
-
-if __name__ == "__main__":
-    main()
+                with st.expander("🔬 完整中间结果"):
+                    st.json({
+                        "ok": result.get("ok"),
+                        "pipeline": result.get("pipeline"),
+                        "dry_run": result.get("dry_run"),
+                        "task_id": result.get("task_id"),
+                        "error": result.get("error"),
+                        "channel_results": result.get("channel_results", []),
+                    }, expanded=False)

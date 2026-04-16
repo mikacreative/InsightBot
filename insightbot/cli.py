@@ -1,24 +1,78 @@
-from .config import load_runtime_config
+"""
+InsightBot CLI entrypoint.
+
+Usage:
+    insightbot              — start scheduler daemon (runs all enabled tasks on schedule)
+    insightbot --task ID    — run a specific task immediately
+    insightbot --dry-run ID — dry run a task (no channel sends, prints result to stdout)
+"""
+
+import argparse
+import json
+import sys
+
+from .channels import init_channels
+from .config import load_channels
 from .logging_setup import build_logger
 from .paths import bot_log_file_path, default_bot_dir
+from .scheduler import create_scheduler
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(prog="insightbot", description="InsightBot CLI")
+    parser.add_argument(
+        "--task",
+        help="Run a specific task by ID immediately (bypasses schedule)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Dry run: execute pipeline but do not send to any channel",
+    )
+    args = parser.parse_args()
+
     bot_dir = default_bot_dir()
     log_path = bot_log_file_path(bot_dir)
+    logger = build_logger("InsightBot", log_path)
 
-    config = load_runtime_config(bot_dir)
-    logger = build_logger("MIABot", log_path)
+    # Initialize channels from channels.json
+    channels_data = load_channels(bot_dir)
+    init_channels(channels_data)
 
-    editorial_config = (config.get("ai", {}) or {}).get("editorial_pipeline", {})
-    if editorial_config.get("enabled", False):
-        from .editorial_pipeline import run_editorial_pipeline
-        logger.info("🚀 走 Editorial Pipeline（新流程）")
-        run_editorial_pipeline(config=config, logger=logger)
+    # Create scheduler (auto-migrates v1 config if needed)
+    scheduler = create_scheduler(bot_dir)
+
+    if args.task:
+        # Run a specific task immediately
+        result = scheduler.run_task_by_id(args.task, dry_run=args.dry_run)
+        logger.info(
+            f"Task '{args.task}' completed: ok={result.get('ok')}, "
+            f"dry_run={args.dry_run}"
+        )
+        if args.dry_run:
+            print(
+                json.dumps(
+                    {
+                        "ok": result.get("ok"),
+                        "task_id": result.get("task_id"),
+                        "pipeline": result.get("pipeline"),
+                        "final_markdown": result.get("final_markdown"),
+                        "stage_results": result.get("stage_results"),
+                        "error": result.get("error"),
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+        sys.exit(0 if result.get("ok") else 1)
     else:
-        from .smart_brief_runner import run_task
-        logger.info("🚀 走传统 Pipeline（老流程）")
-        run_task(config=config, logger=logger)
+        # Run as scheduler daemon
+        logger.info("=" * 50)
+        logger.info("InsightBot scheduler starting...")
+        logger.info("Press Ctrl+C to stop.")
+        logger.info("=" * 50)
+        scheduler.run_loop()
 
 
 if __name__ == "__main__":

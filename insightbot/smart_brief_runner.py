@@ -9,7 +9,6 @@ import feedparser
 import requests
 
 from .ai import chat_completion
-from .wecom import send_markdown_to_app
 
 # ---------- constants ----------
 MAX_RETRIES = 3
@@ -498,23 +497,17 @@ def _ai_process_category(*, config: dict, category_name: str, news_list: List[di
     return debug_result["preview_markdown"]
 
 
-def run_task(*, config: dict, logger) -> None:
+def run_task(*, config: dict, logger) -> dict:
+    """
+    Classic pipeline (per-category fetch → AI filter → return markdown).
+    Does NOT send to any channel. Channel dispatch is owned by task_runner.
+    Returns {"ok": bool, "final_markdown": str, "error": str|None}.
+    """
     logger.info("=" * 40)
     logger.info("🚀 === 营销情报抓取任务开始 ===")
     logger.info("=" * 40)
 
-    settings = config.get("settings", {})
-
-    today_str = datetime.now().strftime("%m-%d")
-    title_template = settings.get("report_title", "📅 营销情报早报 | {date}")
-    header_msg = f"# {title_template.replace('{date}', today_str)}\n> 正在为您通过 AI 融合检索定向信源与全网热词..."
-    send_markdown_to_app(
-        cid=config["wecom"]["cid"],
-        secret=config["wecom"]["secret"],
-        agent_id=str(config["wecom"]["aid"]),
-        content=header_msg,
-    )
-
+    final_blocks = []
     has_any_update = False
 
     for category, feed_data in config.get("feeds", {}).items():
@@ -536,33 +529,21 @@ def run_task(*, config: dict, logger) -> None:
             )
 
             if ai_summary:
-                logger.info(f"📤 推送板块 【{category}】 成功")
-                send_markdown_to_app(
-                    cid=config["wecom"]["cid"],
-                    secret=config["wecom"]["secret"],
-                    agent_id=str(config["wecom"]["aid"]),
-                    content=ai_summary,
-                )
+                logger.info(f"📤 板块 【{category}】 精选完成")
+                final_blocks.append(ai_summary)
                 has_any_update = True
-                time.sleep(2)
         else:
             logger.info(f"📭 板块 【{category}】 今日无更新数据")
 
-    if has_any_update:
-        if settings.get("show_footer", True):
-            send_markdown_to_app(
-                cid=config["wecom"]["cid"],
-                secret=config["wecom"]["secret"],
-                agent_id=str(config["wecom"]["aid"]),
-                content=f"\n{settings.get('footer_text', '')}",
-            )
-        logger.info("✅ 任务圆满完成")
+    final_markdown = "\n\n".join(final_blocks)
+
+    if not has_any_update:
+        logger.info("📭 今日全网无更新内容")
     else:
-        empty_msg = settings.get("empty_message", "📭 今日全网无重要更新。")
-        send_markdown_to_app(
-            cid=config["wecom"]["cid"],
-            secret=config["wecom"]["secret"],
-            agent_id=str(config["wecom"]["aid"]),
-            content=empty_msg,
-        )
-        logger.info("📭 今日全网无更新内容被推送")
+        logger.info("✅ 任务完成")
+
+    return {
+        "ok": True,
+        "final_markdown": final_markdown,
+        "error": None,
+    }
