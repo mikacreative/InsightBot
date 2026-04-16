@@ -396,11 +396,14 @@ def main() -> None:
         task_ids = list(tasks_data.get("tasks", {}).keys())
         if not task_ids:
             st.session_state.pop("selected_task_id", None)
+            st.session_state.pop("current_task_selector", None)
             return None
         current = st.session_state.get("selected_task_id")
         if current not in task_ids:
             current = task_ids[0]
             st.session_state["selected_task_id"] = current
+        if st.session_state.get("current_task_selector") != current:
+            st.session_state["current_task_selector"] = current
         return current
 
     def get_selected_task(tasks_data: dict) -> tuple[str | None, dict]:
@@ -481,9 +484,10 @@ def main() -> None:
                 "当前任务",
                 options=task_ids,
                 index=task_ids.index(selected_task_id) if selected_task_id in task_ids else 0,
-                key="selected_task_id",
+                key="current_task_selector",
             )
             selected_task_id = active_task_id
+            st.session_state["selected_task_id"] = active_task_id
             selected_task = tasks_data["tasks"].get(selected_task_id, {})
             selected_task_runtime_config = build_task_runtime_config(selected_task_id)
             selected_task_feeds = deepcopy(selected_task.get("feeds", {}))
