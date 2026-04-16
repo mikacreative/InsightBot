@@ -6,7 +6,7 @@
 
 - **多任务**：每个任务有独立的 RSS 源、Pipeline、频道和调度时间
 - **多频道**：Channels 抽象层，支持企业微信等多样化推送渠道
-- **内置调度器**：Python 线程循环，无需外部 cron
+- **内置调度器**：前台阻塞循环，只需守护一个进程，无需外部 cron
 - **任务中心控制台**：管理台按“当前任务”组织内容源、搜索补充、诊断、日志与 Dry Run
 - **调试友好**：控制台 Dry Run 永远不发送真实消息，仅在面板展示结果
 
@@ -26,7 +26,7 @@
 
 - **多任务多频道**：每个任务独立配置 feeds、pipeline、channels、schedule
 - **Channels 抽象**：企业微信凭证单独存储在 `channels.json`
-- **内置调度器**：无需外部 cron，支持"运行所有已启用任务"
+- **内置调度器**：无需外部 cron，直接守护 `python -m insightbot.cli` 即可
 - **调试控制台（tab8）**：Dry Run 在面板内展示完整简报预览 + 中间结果，零频道发送
 - **自动迁移**：首次启动 v2.0 自动从 v1 配置生成 `channels.json` + `tasks.json`
 
@@ -138,6 +138,12 @@ python -m insightbot.cli --task daily_brief --dry-run
 ### 日志
 
 - 各 pipeline 日志写入 `./logs/bot.log`（每日轮转）
+
+### 部署建议
+
+- 生产环境推荐把 `python -m insightbot.cli` 作为唯一常驻进程来守护
+- 不建议同时维护系统 `cron`，否则容易与应用内调度重复触发
+- 优先使用 `systemd`、`supervisord` 或容器自动重启策略来保证进程存活
 
 ### 文档
 

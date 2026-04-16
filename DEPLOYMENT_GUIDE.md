@@ -84,6 +84,9 @@ pip install -r requirements.txt
 
 **方式 A：systemd 常驻进程（推荐）**
 
+> v2.0 之后，推荐只守护 `python -m insightbot.cli` 这个进程。
+> 不需要再额外维护系统 `cron`，否则会和内置调度器形成双重触发。
+
 ```ini
 # /etc/systemd/system/insightbot-scheduler.service
 [Unit]
@@ -136,6 +139,10 @@ docker-compose up -d
 ```bash
 # Dry Run 验证（不发送真实消息）
 python -m insightbot.cli --task daily_brief --dry-run
+
+# 生产运行模型
+# 由 systemd 持续守护 python -m insightbot.cli
+# 不再单独配置 cron
 
 # 查看日志
 journalctl -u insightbot-scheduler -f

@@ -2,13 +2,12 @@
 Multi-task scheduler with built-in run loop.
 
 Each task has its own schedule (hour/minute/day_of_week), feeds, pipeline,
-and list of target channels. The scheduler runs as a daemon thread,
+and list of target channels. The scheduler runs in the main process,
 checking every minute whether any enabled task should fire.
 """
 
 import logging
 import os
-import threading
 import time
 from datetime import datetime
 from typing import Callable
@@ -138,29 +137,24 @@ class Scheduler:
                     results.append({"task_id": task.task_id, "ok": False, "error": str(e)})
         return results
 
-    def run_loop(self, check_interval_seconds: int = 60) -> threading.Thread:
+    def run_loop(self, check_interval_seconds: int = 60) -> None:
         """
-        Start the scheduler daemon loop.
-        Returns the thread handle (caller can join it if needed).
+        Start the scheduler loop in the foreground.
+        This method blocks the current process until interrupted.
         """
-        def _loop():
-            self._log.info(
-                f"Scheduler loop started. Watching {len(self.tasks)} tasks, "
-                f"checking every {check_interval_seconds}s."
-            )
-            while True:
-                for task in self.tasks.values():
-                    if task.enabled and task.should_run_now():
-                        try:
-                            self._log.info(f"Firing scheduled task: {task.task_id}")
-                            task.run(dry_run=False)
-                        except Exception as e:
-                            self._log.error(f"Scheduled task '{task.task_id}' failed: {e}")
-                time.sleep(check_interval_seconds)
-
-        thread = threading.Thread(target=_loop, daemon=True, name="SchedulerLoop")
-        thread.start()
-        return thread
+        self._log.info(
+            f"Scheduler loop started. Watching {len(self.tasks)} tasks, "
+            f"checking every {check_interval_seconds}s."
+        )
+        while True:
+            for task in self.tasks.values():
+                if task.enabled and task.should_run_now():
+                    try:
+                        self._log.info(f"Firing scheduled task: {task.task_id}")
+                        task.run(dry_run=False)
+                    except Exception as e:
+                        self._log.error(f"Scheduled task '{task.task_id}' failed: {e}")
+            time.sleep(check_interval_seconds)
 
 
 def create_scheduler(bot_dir: str | None = None) -> Scheduler:
