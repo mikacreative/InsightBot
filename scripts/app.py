@@ -3,11 +3,19 @@ import logging
 import os
 import subprocess
 import sys
+from copy import deepcopy
 from datetime import datetime
 
 import streamlit as st
 from insightbot.channels import init_channels, test_channel
-from insightbot.config import load_channels, save_channels, load_runtime_config, load_tasks, save_tasks
+from insightbot.config import (
+    load_channels,
+    load_runtime_config,
+    load_tasks,
+    load_tasks_config,
+    save_channels,
+    save_tasks,
+)
 from insightbot.feed_health import CACHE_TTL_SECONDS, get_feed_health_snapshot, load_health_cache
 from insightbot.paths import (
     bot_log_file_path,
@@ -326,11 +334,12 @@ def main() -> None:
                     f"🎯 预设到 Prompt Debug：{default_category}",
                     key=f"{key_prefix}_diag_prompt_{default_category}",
                 ):
-                    st.session_state["prompt_debug_category"] = default_category
+                    task_scope = st.session_state.get("selected_task_id", "default")
+                    st.session_state[f"prompt_debug_category::{task_scope}"] = default_category
                     if default_category in prompt_categories:
-                        draft_key = f"draft_prompt::{default_category}"
+                        draft_key = f"draft_prompt::{task_scope}::{default_category}"
                         if draft_key not in st.session_state:
-                            st.session_state[draft_key] = config.get("feeds", {}).get(default_category, {}).get("prompt", "")
+                            st.session_state[draft_key] = selected_task_feeds.get(default_category, {}).get("prompt", "")
                     st.success("已预设 Prompt Debug 板块，请切到“🧠 AI 提示词调优”继续。")
         elif kind == "source_error":
             st.caption("建议先在当前页的 RSS 健康度列表里查看这些异常源。")
@@ -355,28 +364,90 @@ def main() -> None:
         count_text = f" / 命中 {count}" if count is not None else ""
         return f"{label}: {label_map.get(status, status)}{count_text}"
 
-    def add_rss_feed_to_config(feed_url: str, category: str, feed_name: str = "") -> bool:
-        """添加单个 RSS 源到 config.json"""
+    def filter_prompt_history_for_task(items: list[dict], task_id: str | None) -> list[dict]:
+        if not task_id:
+            return items
+        scoped = [item for item in items if item.get("task_id") == task_id]
+        return scoped if scoped else items
+
+    def filter_log_lines_for_task(lines: list[str], task_id: str | None) -> list[str]:
+        if not task_id:
+            return lines
+        needle = task_id.lower()
+        matched = [line for line in lines if needle in line.lower()]
+        return matched if matched else lines
+
+    def get_editorial_defaults() -> dict:
+        editorial_config = (config.get("ai", {}) or {}).get("editorial_pipeline", {})
+        return {
+            "global_shortlist_multiplier": editorial_config.get("global_shortlist_multiplier", 3),
+            "assignment_batch_size": editorial_config.get("assignment_batch_size", 20),
+            "allow_multi_assign": editorial_config.get("allow_multi_assign", False),
+            "inject_publication_scope_into_global": editorial_config.get(
+                "inject_publication_scope_into_global", True
+            ),
+        }
+
+    def get_tasks_data() -> dict:
+        tasks_data = load_tasks(bot_dir)
+        return tasks_data if "tasks" in tasks_data else {"tasks": {}}
+
+    def get_selected_task_id(tasks_data: dict) -> str | None:
+        task_ids = list(tasks_data.get("tasks", {}).keys())
+        if not task_ids:
+            st.session_state.pop("selected_task_id", None)
+            return None
+        current = st.session_state.get("selected_task_id")
+        if current not in task_ids:
+            current = task_ids[0]
+            st.session_state["selected_task_id"] = current
+        return current
+
+    def get_selected_task(tasks_data: dict) -> tuple[str | None, dict]:
+        task_id = get_selected_task_id(tasks_data)
+        if not task_id:
+            return None, {}
+        return task_id, tasks_data["tasks"].get(task_id, {})
+
+    def save_task_definition(task_id: str, task_def: dict) -> None:
+        tasks_data = get_tasks_data()
+        tasks_data.setdefault("tasks", {})
+        tasks_data["tasks"][task_id] = task_def
+        save_tasks(tasks_data, bot_dir)
+        scheduler.reload()
+
+    def build_task_runtime_config(task_id: str | None) -> dict:
+        if not task_id:
+            return runtime_config
         try:
-            cfg = load_config()
-            if "feeds" not in cfg:
-                cfg["feeds"] = {}
-            if category not in cfg["feeds"]:
-                cfg["feeds"][category] = {"rss": [], "keywords": [], "prompt": ""}
-            
-            # 去重检查
-            existing_urls = [item.split(" # ")[0].strip() if isinstance(item, str) else item.get("feed_url", "") 
-                           for item in cfg["feeds"][category].get("rss", [])]
+            return load_tasks_config(task_id, bot_dir)
+        except Exception:
+            return runtime_config
+
+    def add_rss_feed_to_task(task_id: str, category: str, feed_url: str, feed_name: str = "") -> bool:
+        """Add a single RSS feed into a task category."""
+        try:
+            tasks_data = get_tasks_data()
+            task_def = deepcopy(tasks_data["tasks"].get(task_id, {}))
+            task_feeds = task_def.setdefault("feeds", {})
+            if category not in task_feeds:
+                task_feeds[category] = {"rss": [], "keywords": [], "prompt": ""}
+
+            existing_urls = [
+                item.split(" # ")[0].strip() if isinstance(item, str) else item.get("feed_url", "")
+                for item in task_feeds[category].get("rss", [])
+            ]
             if feed_url in existing_urls:
-                return False  # 已存在
-            
-            # 格式化: "url # name" 或纯 url
+                return False
+
             entry = f"{feed_url} # {feed_name}" if feed_name else feed_url
-            cfg["feeds"][category]["rss"].append(entry)
-            save_config(cfg)
+            task_feeds[category].setdefault("rss", []).append(entry)
+            tasks_data["tasks"][task_id] = task_def
+            save_tasks(tasks_data, bot_dir)
+            scheduler.reload()
             return True
         except Exception as e:
-            st.error(f"保存失败: {e}")
+            st.error(f"淇濆瓨澶辫触: {e}")
             return False
 
     config = load_config()
@@ -386,16 +457,11 @@ def main() -> None:
     channels_data = load_channels(bot_dir)
     init_channels(channels_data)
     scheduler = create_scheduler(bot_dir)
-
-    overview_health_snapshot = load_health_cache(bot_dir)
-    overview_run_summary = parse_recent_run_summary(bot_log_path)
-    overview_run_metrics = summarize_recent_run(overview_run_summary)
-    overview_diagnosis_cards = build_no_push_diagnosis(
-        health_snapshot=overview_health_snapshot,
-        run_summary=overview_run_summary,
-        configured_categories=list(config.get("feeds", {}).keys()),
-    )
-    overview_prompt_history = load_prompt_debug_history(bot_dir)
+    tasks_data = get_tasks_data()
+    selected_task_id, selected_task = get_selected_task(tasks_data)
+    selected_task_runtime_config = build_task_runtime_config(selected_task_id)
+    selected_task_feeds = deepcopy(selected_task.get("feeds", {})) if selected_task else {}
+    selected_task_categories = list(selected_task_feeds.keys())
 
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
     render_prompt_debug_styles()
@@ -409,6 +475,27 @@ def main() -> None:
 
     with st.sidebar:
         st.header("⚡ 快捷操作")
+        task_ids = list(tasks_data.get("tasks", {}).keys())
+        if task_ids:
+            active_task_id = st.selectbox(
+                "当前任务",
+                options=task_ids,
+                index=task_ids.index(selected_task_id) if selected_task_id in task_ids else 0,
+                key="selected_task_id",
+            )
+            selected_task_id = active_task_id
+            selected_task = tasks_data["tasks"].get(selected_task_id, {})
+            selected_task_runtime_config = build_task_runtime_config(selected_task_id)
+            selected_task_feeds = deepcopy(selected_task.get("feeds", {}))
+            selected_task_categories = list(selected_task_feeds.keys())
+            st.caption(
+                f"Pipeline: `{selected_task.get('pipeline', 'editorial')}` | "
+                f"Channels: {len(selected_task.get('channels', []))} | "
+                f"Categories: {len(selected_task_categories)}"
+            )
+        else:
+            st.info("暂无任务，请先在任务管理页面创建。")
+
         if st.button("▶️ 立即手动运行", type="primary", use_container_width=True):
             with st.spinner("AI 正在全网检索并撰写简报..."):
                 subprocess.run([sys.executable, "-m", "insightbot.cli"])
@@ -438,6 +525,16 @@ def main() -> None:
 
         st.caption("在「📡 Channels」标签页管理频道配置和联通性测试。")
 
+    overview_health_snapshot = st.session_state.get(f"task_health_snapshot::{selected_task_id or 'default'}")
+    overview_run_summary = parse_recent_run_summary(bot_log_path)
+    overview_run_metrics = summarize_recent_run(overview_run_summary)
+    overview_diagnosis_cards = build_no_push_diagnosis(
+        health_snapshot=overview_health_snapshot,
+        run_summary=overview_run_summary,
+        configured_categories=selected_task_categories,
+    )
+    overview_prompt_history = filter_prompt_history_for_task(load_prompt_debug_history(bot_dir), selected_task_id)
+
     tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "🏠 概览", "📋 任务管理", "📡 Channels",
         "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志",
@@ -446,7 +543,14 @@ def main() -> None:
 
     with tab0:
         st.subheader("运营概览")
-        st.caption("这里不是实时计算中心，而是最近状态总览。优先看最近一次任务、异常摘要和最近调试动作。")
+        active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
+        st.caption(f"当前聚焦任务：{active_task_name}。优先看最近一次运行、异常摘要和最近调试动作。")
+        if selected_task_id:
+            st.markdown(
+                f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">任务 ID: {selected_task_id}</span>'
+                f'<span class="ib-chip ib-chip-neutral">任务名: {active_task_name}</span></div>',
+                unsafe_allow_html=True,
+            )
 
         health_counts = (overview_health_snapshot or {}).get("counts", {})
         st.markdown(
@@ -454,7 +558,7 @@ def main() -> None:
             <div class="ib-kpi-grid">
               <div class="ib-kpi-card">
                 <div class="ib-kpi-label">今日板块数</div>
-                <div class="ib-kpi-value">{len(config.get('feeds', {}))}</div>
+                <div class="ib-kpi-value">{len(selected_task_categories)}</div>
               </div>
               <div class="ib-kpi-card">
                 <div class="ib-kpi-label">异常 RSS 源</div>
@@ -503,8 +607,9 @@ def main() -> None:
             if overview_prompt_history:
                 for item in overview_prompt_history[:3]:
                     mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
+                    item_task = item.get("task_name") or item.get("task_id") or active_task_name
                     st.markdown(
-                        f"- {item.get('created_at', '')} | {item.get('category', '未命名板块')} | {mode_label} | 草稿状态：{item.get('draft_status', '未知')}"
+                        f"- {item.get('created_at', '')} | {item_task} | {item.get('category', '未命名板块')} | {mode_label} | 草稿状态：{item.get('draft_status', '未知')}"
                     )
             else:
                 st.info("还没有 Prompt 调试记录。")
@@ -520,7 +625,7 @@ def main() -> None:
             for card in overview_diagnosis_cards[:3]:
                 render_diagnosis_card(
                     card,
-                    prompt_categories=list(config.get("feeds", {}).keys()),
+                    prompt_categories=selected_task_categories,
                     key_prefix="overview",
                 )
         else:
@@ -530,116 +635,325 @@ def main() -> None:
     # ── Tab 1: 任务管理 ────────────────────────────────────────────────────────
     with tab1:
         st.subheader("📋 任务管理")
-        st.caption("管理多任务配置：每个任务有独立的 RSS 源、Pipeline、频道和调度。")
+        st.caption("把任务当成真正的产品单元来配置：内容源、搜索补充、筛选策略、频道与调度都在这里。")
 
-        tasks_data = load_tasks(bot_dir)
-        if "tasks" not in tasks_data:
-            tasks_data = {"tasks": {}}
-        tasks = tasks_data["tasks"]
-
-        if not tasks:
-            st.info("暂没有任务，请使用下方表单创建。")
-            task_ids = []
+        tasks = tasks_data.get("tasks", {})
+        if not tasks or not selected_task_id:
+            st.info("暂没有任务，请先在下方创建。")
         else:
-            task_ids = list(tasks.keys())
+            task_def = deepcopy(tasks.get(selected_task_id, {}))
+            st.markdown(f"**当前任务：{task_def.get('name', selected_task_id)}**")
 
-        # Task list + selector
-        col_list, col_detail = st.columns([1, 2])
-        with col_list:
-            st.markdown("**任务列表**")
-            selected_task_id = st.radio(
-                "选择任务",
-                options=task_ids if task_ids else ["（无任务）"],
-                index=0 if task_ids else 0,
-                label_visibility="collapsed",
-            )
+            basic_col1, basic_col2 = st.columns([1, 2])
+            with basic_col1:
+                new_enabled = st.checkbox("启用任务", value=task_def.get("enabled", False), key=f"task_enabled_{selected_task_id}")
+            with basic_col2:
+                new_name = st.text_input("任务名称", value=task_def.get("name", ""), key=f"task_name_{selected_task_id}")
 
-        with col_detail:
-            if tasks:
-                task_def = tasks.get(selected_task_id, {})
-                st.markdown(f"**{task_def.get('name', selected_task_id)}**")
-                col_on, col_name = st.columns([1, 3])
-                with col_on:
-                    new_enabled = st.checkbox("启用", value=task_def.get("enabled", False), key=f"task_enabled_{selected_task_id}")
-                with col_name:
-                    new_name = st.text_input("任务名称", value=task_def.get("name", ""), key=f"task_name_{selected_task_id}")
-
-                st.markdown(f"**Pipeline**: `{task_def.get('pipeline', 'editorial')}`")
+            meta_col1, meta_col2, meta_col3, meta_col4 = st.columns([1.2, 1, 1, 1.3])
+            with meta_col1:
+                pipeline_options = ["editorial", "classic"]
+                pipeline_value = task_def.get("pipeline", "editorial")
+                if pipeline_value not in pipeline_options:
+                    pipeline_value = "editorial"
                 new_pipeline = st.selectbox(
-                    "Pipeline 类型",
-                    options=["editorial", "classic"],
-                    index=["editorial", "classic"].index(task_def.get("pipeline", "editorial")),
+                    "Pipeline",
+                    options=pipeline_options,
+                    index=pipeline_options.index(pipeline_value),
                     key=f"task_pipeline_{selected_task_id}",
                 )
-
-                # Channels
-                current_channels = task_def.get("channels", [])
-                channels_data = load_channels(bot_dir)
-                all_channel_ids = list(channels_data.get("channels", {}).keys())
-                selected_channels = st.multiselect(
-                    "目标频道",
-                    options=all_channel_ids,
-                    default=current_channels,
-                    key=f"task_channels_{selected_task_id}",
+            with meta_col2:
+                new_hour = st.number_input(
+                    "小时",
+                    min_value=0,
+                    max_value=23,
+                    value=int(task_def.get("schedule", {}).get("hour", 8)),
+                    key=f"task_hour_{selected_task_id}",
+                )
+            with meta_col3:
+                new_min = st.number_input(
+                    "分钟",
+                    min_value=0,
+                    max_value=59,
+                    value=int(task_def.get("schedule", {}).get("minute", 0)),
+                    key=f"task_min_{selected_task_id}",
+                )
+            with meta_col4:
+                day_options = [
+                    ("每天", None),
+                    ("周一", 0),
+                    ("周二", 1),
+                    ("周三", 2),
+                    ("周四", 3),
+                    ("周五", 4),
+                    ("周六", 5),
+                    ("周日", 6),
+                ]
+                current_day = task_def.get("schedule", {}).get("day_of_week")
+                day_index = next((i for i, item in enumerate(day_options) if item[1] == current_day), 0)
+                selected_day_label = st.selectbox(
+                    "执行日",
+                    options=[item[0] for item in day_options],
+                    index=day_index,
+                    key=f"task_day_{selected_task_id}",
                 )
 
-                # Schedule
-                sched = task_def.get("schedule", {})
-                cur_hour = sched.get("hour", 8)
-                cur_min = sched.get("minute", 0)
-                col_h, col_m = st.columns(2)
-                with col_h:
-                    new_hour = st.number_input("小时", 0, 23, cur_hour, key=f"task_hour_{selected_task_id}")
-                with col_m:
-                    new_min = st.number_input("分钟", 0, 59, cur_min, key=f"task_min_{selected_task_id}")
+            channels_data = load_channels(bot_dir)
+            all_channel_ids = list(channels_data.get("channels", {}).keys())
+            selected_channels = st.multiselect(
+                "目标频道",
+                options=all_channel_ids,
+                default=task_def.get("channels", []),
+                key=f"task_channels_{selected_task_id}",
+            )
 
-                # Save button
-                if st.button("💾 保存任务", key=f"save_task_{selected_task_id}"):
-                    tasks[selected_task_id]["name"] = new_name
-                    tasks[selected_task_id]["enabled"] = new_enabled
-                    tasks[selected_task_id]["pipeline"] = new_pipeline
-                    tasks[selected_task_id]["channels"] = selected_channels
-                    tasks[selected_task_id]["schedule"] = {"hour": new_hour, "minute": new_min}
-                    save_tasks(tasks_data, bot_dir)
-                    scheduler.reload()
-                    st.success(f"任务「{new_name}」已保存！")
+            st.markdown("**内容板块与 RSS**")
+            feeds_editor = deepcopy(task_def.get("feeds", {}))
+            category_to_delete = None
+            for category, feed_data in feeds_editor.items():
+                with st.expander(f"📂 {category}", expanded=False):
+                    rss_val = "\n".join(feed_data.get("rss", []))
+                    feeds_editor[category]["rss"] = [
+                        x.strip()
+                        for x in st.text_area(
+                            "RSS 源（每行一个）",
+                            value=rss_val,
+                            height=120,
+                            key=f"task_rss_{selected_task_id}_{category}",
+                        ).split("\n")
+                        if x.strip()
+                    ]
+                    kw_val = "\n".join(feed_data.get("keywords", []))
+                    feeds_editor[category]["keywords"] = [
+                        x.strip()
+                        for x in st.text_area(
+                            "关键词（每行一个）",
+                            value=kw_val,
+                            height=90,
+                            key=f"task_kw_{selected_task_id}_{category}",
+                        ).split("\n")
+                        if x.strip()
+                    ]
+                    feeds_editor[category]["prompt"] = st.text_area(
+                        "板块筛选 Prompt",
+                        value=feed_data.get("prompt", ""),
+                        height=110,
+                        key=f"task_prompt_{selected_task_id}_{category}",
+                    ).strip()
+                    if st.button("删除板块", key=f"del_task_cat_{selected_task_id}_{category}"):
+                        category_to_delete = category
+
+            if category_to_delete:
+                feeds_editor.pop(category_to_delete, None)
+                task_def["feeds"] = feeds_editor
+                save_task_definition(selected_task_id, task_def)
+                st.success(f"已删除板块：{category_to_delete}")
+                st.rerun()
+
+            add_cat_col1, add_cat_col2 = st.columns([3, 1])
+            with add_cat_col1:
+                new_category_name = st.text_input(
+                    "新增板块名称",
+                    placeholder="例如：品牌营销动态",
+                    key=f"new_task_category_{selected_task_id}",
+                )
+            with add_cat_col2:
+                if st.button("添加板块", key=f"add_task_category_{selected_task_id}", use_container_width=True):
+                    if new_category_name.strip():
+                        feeds_editor.setdefault(
+                            new_category_name.strip(),
+                            {"rss": [], "keywords": [], "prompt": ""},
+                        )
+                        task_def["feeds"] = feeds_editor
+                        save_task_definition(selected_task_id, task_def)
+                        st.success(f"已添加板块：{new_category_name.strip()}")
+                        st.rerun()
+
+            st.divider()
+            st.markdown("**搜索补充**")
+            search_config = deepcopy(task_def.get("search", {}))
+            search_enabled = st.toggle(
+                "启用搜索补充",
+                value=search_config.get("enabled", False),
+                key=f"task_search_enabled_{selected_task_id}",
+            )
+            search_provider_options = ["baidu", "duckduckgo"]
+            search_provider = search_config.get("provider", "baidu")
+            if search_provider not in search_provider_options:
+                search_provider = "baidu"
+            search_provider = st.selectbox(
+                "搜索引擎",
+                options=search_provider_options,
+                index=search_provider_options.index(search_provider),
+                key=f"task_search_provider_{selected_task_id}",
+            )
+
+            query_state_key = f"task_search_queries::{selected_task_id}"
+            if query_state_key not in st.session_state:
+                st.session_state[query_state_key] = deepcopy(search_config.get("queries", []))
+
+            search_queries = st.session_state[query_state_key]
+            query_to_delete = None
+            for idx, query in enumerate(search_queries):
+                q_col1, q_col2, q_col3, q_col4 = st.columns([4, 2, 1, 1])
+                with q_col1:
+                    query["keywords"] = st.text_input(
+                        "关键词",
+                        value=query.get("keywords", ""),
+                        key=f"task_search_keywords_{selected_task_id}_{idx}",
+                        label_visibility="collapsed",
+                        placeholder="品牌 AI 营销 新动作",
+                    )
+                with q_col2:
+                    query["category_hint"] = st.selectbox(
+                        "板块 hint",
+                        options=[""] + list(feeds_editor.keys()),
+                        index=([""] + list(feeds_editor.keys())).index(query.get("category_hint", ""))
+                        if query.get("category_hint", "") in [""] + list(feeds_editor.keys())
+                        else 0,
+                        key=f"task_search_hint_{selected_task_id}_{idx}",
+                        label_visibility="collapsed",
+                    )
+                with q_col3:
+                    query["max_results"] = st.number_input(
+                        "最大结果",
+                        min_value=1,
+                        max_value=30,
+                        value=int(query.get("max_results", 10)),
+                        key=f"task_search_max_{selected_task_id}_{idx}",
+                        label_visibility="collapsed",
+                    )
+                with q_col4:
+                    if st.button("🗑️", key=f"task_search_del_{selected_task_id}_{idx}"):
+                        query_to_delete = idx
+
+            if query_to_delete is not None:
+                del search_queries[query_to_delete]
+                st.session_state[query_state_key] = search_queries
+                st.rerun()
+
+            q_action1, q_action2 = st.columns([1, 1])
+            with q_action1:
+                if st.button("添加 Query", key=f"task_search_add_{selected_task_id}", use_container_width=True):
+                    search_queries.append({"keywords": "", "category_hint": "", "max_results": 10})
+                    st.session_state[query_state_key] = search_queries
+                    st.rerun()
+            with q_action2:
+                if st.button("从板块关键词派生", key=f"task_search_derive_{selected_task_id}", use_container_width=True):
+                    derived_queries = []
+                    for category, feed_data in feeds_editor.items():
+                        keywords = [kw.strip() for kw in feed_data.get("keywords", []) if kw.strip()]
+                        if keywords:
+                            derived_queries.append(
+                                {"keywords": " ".join(keywords), "category_hint": category, "max_results": 10}
+                            )
+                    st.session_state[query_state_key] = derived_queries
                     st.rerun()
 
-                # Delete button
-                if st.button("🗑️ 删除任务", key=f"del_task_{selected_task_id}"):
-                    tasks.pop(selected_task_id, None)
+            st.divider()
+            st.markdown("**Editorial Pipeline 策略**")
+            pipeline_config = deepcopy(task_def.get("pipeline_config", {}))
+            editorial_defaults = get_editorial_defaults()
+            pipe_col1, pipe_col2, pipe_col3, pipe_col4 = st.columns(4)
+            with pipe_col1:
+                pipeline_config["global_shortlist_multiplier"] = st.slider(
+                    "初筛倍率",
+                    min_value=1,
+                    max_value=8,
+                    value=int(pipeline_config.get("global_shortlist_multiplier", editorial_defaults["global_shortlist_multiplier"])),
+                    key=f"task_pipe_multiplier_{selected_task_id}",
+                )
+            with pipe_col2:
+                pipeline_config["assignment_batch_size"] = st.slider(
+                    "分配批大小",
+                    min_value=5,
+                    max_value=40,
+                    value=int(pipeline_config.get("assignment_batch_size", editorial_defaults["assignment_batch_size"])),
+                    key=f"task_pipe_batch_{selected_task_id}",
+                )
+            with pipe_col3:
+                pipeline_config["allow_multi_assign"] = st.toggle(
+                    "允许多板块分配",
+                    value=bool(pipeline_config.get("allow_multi_assign", editorial_defaults["allow_multi_assign"])),
+                    key=f"task_pipe_multi_{selected_task_id}",
+                )
+            with pipe_col4:
+                pipeline_config["inject_publication_scope_into_global"] = st.toggle(
+                    "注入发布范围",
+                    value=bool(
+                        pipeline_config.get(
+                            "inject_publication_scope_into_global",
+                            editorial_defaults["inject_publication_scope_into_global"],
+                        )
+                    ),
+                    key=f"task_pipe_scope_{selected_task_id}",
+                )
+
+            save_col1, save_col2 = st.columns([1, 1])
+            with save_col1:
+                if st.button("💾 保存当前任务配置", key=f"save_task_all_{selected_task_id}", use_container_width=True):
+                    selected_day_value = next(
+                        item[1] for item in day_options if item[0] == selected_day_label
+                    )
+                    task_def["name"] = new_name
+                    task_def["enabled"] = new_enabled
+                    task_def["pipeline"] = new_pipeline
+                    task_def["channels"] = selected_channels
+                    task_def["feeds"] = feeds_editor
+                    task_def["pipeline_config"] = pipeline_config
+                    task_def["search"] = {
+                        "enabled": search_enabled,
+                        "provider": search_provider,
+                        "queries": [q for q in search_queries if q.get("keywords", "").strip()],
+                    }
+                    task_def["schedule"] = {"hour": int(new_hour), "minute": int(new_min)}
+                    if selected_day_value is not None:
+                        task_def["schedule"]["day_of_week"] = selected_day_value
+                    save_task_definition(selected_task_id, task_def)
+                    st.success(f"任务「{task_def['name']}」已保存。")
+                    st.rerun()
+            with save_col2:
+                if st.button("🗑️ 删除当前任务", key=f"del_task_{selected_task_id}", use_container_width=True):
+                    tasks_data = get_tasks_data()
+                    tasks_data.get("tasks", {}).pop(selected_task_id, None)
                     save_tasks(tasks_data, bot_dir)
                     scheduler.reload()
+                    st.session_state.pop(f"task_search_queries::{selected_task_id}", None)
+                    st.session_state["selected_task_id"] = next(iter(tasks_data.get("tasks", {})), None)
                     st.success("任务已删除。")
                     st.rerun()
 
         st.divider()
         st.markdown("**➕ 创建新任务**")
         new_task_id = st.text_input("任务 ID（英文唯一标识）", placeholder="e.g. weekly_report")
-        col_c1, col_c2, col_c3, col_c4 = st.columns([2, 1, 1, 1])
-        with col_c1:
+        create_col1, create_col2, create_col3, create_col4 = st.columns([2, 1, 1, 1])
+        with create_col1:
             new_task_name = st.text_input("任务名称", placeholder="每周深度报告")
-        with col_c2:
+        with create_col2:
             new_task_pipeline = st.selectbox("Pipeline", options=["editorial", "classic"], index=0)
-        with col_c3:
-            new_task_hour = st.number_input("小时", 0, 23, 8)
-        with col_c4:
-            new_task_min = st.number_input("分钟", 0, 59, 0)
+        with create_col3:
+            new_task_hour = st.number_input("小时", 0, 23, 8, key="create_task_hour")
+        with create_col4:
+            new_task_min = st.number_input("分钟", 0, 59, 0, key="create_task_min")
 
         if st.button("创建任务", key="create_task_btn"):
+            tasks_data = get_tasks_data()
+            tasks = tasks_data.get("tasks", {})
             if new_task_id and new_task_id not in tasks:
                 tasks[new_task_id] = {
                     "name": new_task_name or new_task_id,
                     "enabled": False,
                     "pipeline": new_task_pipeline,
-                    "feeds": {},
-                    "pipeline_config": {},
-                    "channels": [],
-                    "schedule": {"hour": new_task_hour, "minute": new_task_min},
+                    "feeds": deepcopy(selected_task_feeds or config.get("feeds", {})),
+                    "pipeline_config": deepcopy(get_editorial_defaults()),
+                    "search": deepcopy((selected_task or {}).get("search", config.get("search", {}))),
+                    "channels": deepcopy((selected_task or {}).get("channels", [])),
+                    "schedule": {"hour": int(new_task_hour), "minute": int(new_task_min)},
                 }
                 save_tasks(tasks_data, bot_dir)
                 scheduler.reload()
-                st.success(f"任务「{new_task_id}」已创建！")
+                st.session_state["selected_task_id"] = new_task_id
+                st.success(f"任务「{new_task_id}」已创建。")
                 st.rerun()
             elif new_task_id in tasks:
                 st.error("任务 ID 已存在。")
@@ -731,12 +1045,13 @@ def main() -> None:
 
     with tab3:
         ai_conf = config.get("ai", {})
-        ai_selection = get_selection_settings(config)
-        runtime_ai = runtime_config.get("ai", {})
-        feeds = config.get("feeds", {})
+        ai_selection = get_selection_settings(selected_task_runtime_config)
+        runtime_ai = selected_task_runtime_config.get("ai", {})
+        feeds = selected_task_feeds
         categories = list(feeds.keys())
-        if "prompt_debug_category" not in st.session_state and categories:
-            st.session_state["prompt_debug_category"] = categories[0]
+        prompt_debug_category_key = f"prompt_debug_category::{selected_task_id or 'default'}"
+        if prompt_debug_category_key not in st.session_state and categories:
+            st.session_state[prompt_debug_category_key] = categories[0]
 
         st.markdown(
             """
@@ -881,18 +1196,18 @@ def main() -> None:
 
         st.divider()
         if not categories:
-            st.info("当前还没有板块。请先在“板块与信源管理”里创建板块。")
+            st.info("当前任务还没有板块，请先在「📋 任务管理」里补充内容板块。")
         else:
             selected_category = st.selectbox(
                 "调试板块",
                 options=categories,
-                index=categories.index(st.session_state["prompt_debug_category"])
-                if st.session_state["prompt_debug_category"] in categories else 0,
-                key="prompt_debug_category",
+                index=categories.index(st.session_state[prompt_debug_category_key])
+                if st.session_state[prompt_debug_category_key] in categories else 0,
+                key=prompt_debug_category_key,
             )
             current_prompt = feeds.get(selected_category, {}).get("prompt", "")
-            draft_key = f"draft_prompt::{selected_category}"
-            saved_prompt_key = f"saved_prompt_{selected_category}"
+            draft_key = f"draft_prompt::{selected_task_id}::{selected_category}"
+            saved_prompt_key = f"saved_prompt::{selected_task_id}::{selected_category}"
             if draft_key not in st.session_state:
                 st.session_state[draft_key] = current_prompt
             st.session_state[saved_prompt_key] = current_prompt
@@ -971,7 +1286,7 @@ def main() -> None:
                     else:
                         ui_logger = build_ui_logger()
                         debug_result = run_prompt_debug(
-                            config=runtime_config,
+                            config=selected_task_runtime_config,
                             category_name=selected_category,
                             news_list=candidates,
                             category_prompt=st.session_state[draft_key],
@@ -980,6 +1295,8 @@ def main() -> None:
                         append_prompt_debug_history(
                             bot_dir,
                             make_draft_run_record(
+                                task_id=selected_task_id,
+                                task_name=selected_task.get("name", selected_task_id) if selected_task_id else None,
                                 category=selected_category,
                                 candidate_count=len(candidates),
                                 result=debug_result,
@@ -1000,14 +1317,14 @@ def main() -> None:
                     else:
                         ui_logger = build_ui_logger()
                         current_result = run_prompt_debug(
-                            config=runtime_config,
+                            config=selected_task_runtime_config,
                             category_name=selected_category,
                             news_list=candidates,
                             category_prompt=current_prompt,
                             logger=ui_logger,
                         )
                         draft_result = run_prompt_debug(
-                            config=runtime_config,
+                            config=selected_task_runtime_config,
                             category_name=selected_category,
                             news_list=candidates,
                             category_prompt=st.session_state[draft_key],
@@ -1021,6 +1338,8 @@ def main() -> None:
                         append_prompt_debug_history(
                             bot_dir,
                             make_compare_record(
+                                task_id=selected_task_id,
+                                task_name=selected_task.get("name", selected_task_id) if selected_task_id else None,
                                 category=selected_category,
                                 candidate_count=len(candidates),
                                 saved_result=current_result,
@@ -1035,9 +1354,10 @@ def main() -> None:
                 if st.button("↩️ 草稿覆盖到编辑区", use_container_width=True):
                     updated_prompt = st.session_state[draft_key].strip()
                     feeds[selected_category]["prompt"] = updated_prompt
-                    config["feeds"] = feeds
                     st.session_state[saved_prompt_key] = updated_prompt
-                    save_config(config)
+                    task_def = deepcopy(selected_task)
+                    task_def["feeds"] = feeds
+                    save_task_definition(selected_task_id, task_def)
                     st.toast(f"已将草稿 Prompt 写回 [{selected_category}]。")
                     st.rerun()
 
@@ -1045,7 +1365,7 @@ def main() -> None:
             meta = st.session_state.get("prompt_debug_meta", {})
             debug_result = st.session_state.get("prompt_debug_result")
             compare_result = st.session_state.get("prompt_debug_compare")
-            prompt_debug_history = load_prompt_debug_history(bot_dir)
+            prompt_debug_history = filter_prompt_history_for_task(load_prompt_debug_history(bot_dir), selected_task_id)
             result_matches_category = debug_result and st.session_state.get("prompt_debug_result_category") == selected_category
             compare_matches_category = compare_result and compare_result.get("category") == selected_category
             if candidates and meta.get("category") == selected_category:
@@ -1181,7 +1501,8 @@ def main() -> None:
         st.subheader("RSS 源健康度")
         st.caption("缓存优先、手动刷新。优先帮助管理员判断：源是坏了、没更新，还是只是今天没有候选。")
 
-        health_snapshot = load_health_cache(bot_dir)
+        health_state_key = f"task_health_snapshot::{selected_task_id or 'default'}"
+        health_snapshot = st.session_state.get(health_state_key)
         run_summary = parse_recent_run_summary(bot_log_path)
 
         header_col1, header_col2, header_col3 = st.columns([1.3, 1.0, 1.2])
@@ -1189,11 +1510,12 @@ def main() -> None:
             if st.button("🔄 立即刷新健康度", type="primary", use_container_width=True):
                 with st.spinner("正在全量检查 RSS 源，请稍候..."):
                     health_snapshot = get_feed_health_snapshot(
-                        config.get("feeds", {}),
+                        selected_task_feeds,
                         bot_dir=bot_dir,
                         use_cache=False,
                         force_refresh=True,
                     )
+                st.session_state[health_state_key] = health_snapshot
                 st.success("RSS 健康度已刷新。")
         with header_col2:
             only_problem_feeds = st.toggle("仅看异常/无更新", value=False)
@@ -1206,7 +1528,7 @@ def main() -> None:
             diagnosis_cards = build_no_push_diagnosis(
                 health_snapshot=health_snapshot,
                 run_summary=run_summary,
-                configured_categories=list(config.get("feeds", {}).keys()),
+                configured_categories=selected_task_categories,
             )
             if diagnosis_cards:
                 st.markdown('<div class="ib-hero">', unsafe_allow_html=True)
@@ -1215,14 +1537,14 @@ def main() -> None:
                 task_started = run_summary.get("task_started_at")
                 task_copy = f"最近一次任务开始于 {task_started}。" if task_started else "已根据最近一次任务日志和当前健康度缓存生成诊断。"
                 st.markdown(
-                    f'<div class="ib-subtitle">{task_copy} 以下卡片按优先级排序，先处理靠前问题。</div>',
+                    f'<div class="ib-subtitle">当前查看任务：{active_task_name}（{selected_task_id or "未选择"}）<br/>{task_copy} 以下卡片按优先级排序，先处理靠前问题。</div>',
                     unsafe_allow_html=True,
                 )
                 st.markdown("</div>", unsafe_allow_html=True)
                 for card in diagnosis_cards:
                     render_diagnosis_card(
                         card,
-                        prompt_categories=list(config.get("feeds", {}).keys()),
+                        prompt_categories=selected_task_categories,
                         key_prefix="health",
                     )
 
@@ -1320,7 +1642,13 @@ def main() -> None:
 
     with tab5:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
-        st.caption("日志已开启企业级轮转模式（自动保留 30 天，每日切割）。在这里，你能看到AI到底看了哪些原文链接。")
+        st.caption("日志已开启企业级轮转模式（自动保留 30 天，每日切割）。默认优先展示当前任务相关日志，便于快速排查。")
+        active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
+        st.markdown(
+            f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">当前任务: {active_task_name}</span>'
+            f'<span class="ib-chip ib-chip-neutral">任务 ID: {selected_task_id or "未选择"}</span></div>',
+            unsafe_allow_html=True,
+        )
 
         col_1, col_2, col_3 = st.columns([6, 1.5, 1.5])
         with col_2:
@@ -1341,7 +1669,13 @@ def main() -> None:
             try:
                 with open(bot_log_path, "r", encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
+                    filtered_lines = filter_log_lines_for_task(lines, selected_task_id)
                     last_lines = "".join(lines[-300:])
+                    last_filtered_lines = "".join(filtered_lines[-180:])
+                if selected_task_id:
+                    st.markdown("**当前任务相关日志**")
+                    st.code(last_filtered_lines or "当前日志中还没有匹配该任务 ID 的记录。", language="bash")
+                    st.markdown("**最近全量日志**")
                 st.code(last_lines, language="bash")
             except Exception as e:
                 st.error(f"读取日志出错: {e}")
@@ -1411,7 +1745,7 @@ def main() -> None:
         # ---- 批量检测结果展示 ----
         if "batch_results" in st.session_state and st.session_state["batch_results"]:
             results = st.session_state["batch_results"]
-            all_cats = list(load_config().get("feeds", {}).keys())
+            all_cats = list(selected_task_feeds.keys())
 
             st.markdown(f"#### 📋 检测结果（{len(results)} 个）")
 
@@ -1474,7 +1808,12 @@ def main() -> None:
                         for r in results:
                             if r["status"] == "success":
                                 cat = st.session_state["batch_cats"].get(r["original"], all_cats[0])
-                                ok = add_rss_feed_to_config(r["feed_url"], cat, r["domain"])
+                                ok = bool(selected_task_id) and add_rss_feed_to_task(
+                                    selected_task_id,
+                                    cat,
+                                    r["feed_url"],
+                                    r["domain"],
+                                )
                                 if ok:
                                     added += 1
                                 else:
@@ -1537,7 +1876,11 @@ def main() -> None:
         if not task_ids:
             st.warning("暂无任务，请先在「📋 任务管理」创建任务。")
         else:
-            selected = st.selectbox("选择任务", options=task_ids, index=0)
+            selected = st.selectbox(
+                "选择任务",
+                options=task_ids,
+                index=task_ids.index(selected_task_id) if selected_task_id in task_ids else 0,
+            )
 
             col_run, col_info = st.columns([1, 3])
             with col_run:
@@ -1557,28 +1900,43 @@ def main() -> None:
                     except Exception as e:
                         result = {"ok": False, "error": str(e)}
 
-                st.session_state["task_debug_result"] = result
+                st.session_state["task_debug_result"] = {
+                    **result,
+                    "_selected_task_id": selected,
+                    "_selected_task_name": task_def.get("name", selected),
+                }
 
             if "task_debug_result" in st.session_state:
                 result = st.session_state["task_debug_result"]
-                if result.get("ok"):
-                    st.success(f"✅ Dry Run 完成（pipeline: {result.get('pipeline')}）")
+                result_task_id = result.get("_selected_task_id")
+                result_task_name = result.get("_selected_task_name", result_task_id)
+                if result_task_id == selected:
+                    st.markdown(
+                        f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">Dry Run 任务: {result_task_name}</span>'
+                        f'<span class="ib-chip ib-chip-neutral">任务 ID: {result_task_id}</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                    if result.get("ok"):
+                        st.success(f"✅ Dry Run 完成（pipeline: {result.get('pipeline')}）")
+                    else:
+                        st.error(f"❌ Dry Run 失败: {result.get('error', '未知错误')}")
+
+                    if result.get("final_markdown"):
+                        st.markdown("#### 📤 简报预览")
+                        st.markdown(result["final_markdown"])
+
+                    with st.expander("🔬 完整中间结果"):
+                        st.json({
+                            "ok": result.get("ok"),
+                            "pipeline": result.get("pipeline"),
+                            "dry_run": result.get("dry_run"),
+                            "task_id": result.get("task_id"),
+                            "task_name": result_task_name,
+                            "error": result.get("error"),
+                            "channel_results": result.get("channel_results", []),
+                        }, expanded=False)
                 else:
-                    st.error(f"❌ Dry Run 失败: {result.get('error', '未知错误')}")
-
-                if result.get("final_markdown"):
-                    st.markdown("#### 📤 简报预览")
-                    st.markdown(result["final_markdown"])
-
-                with st.expander("🔬 完整中间结果"):
-                    st.json({
-                        "ok": result.get("ok"),
-                        "pipeline": result.get("pipeline"),
-                        "dry_run": result.get("dry_run"),
-                        "task_id": result.get("task_id"),
-                        "error": result.get("error"),
-                        "channel_results": result.get("channel_results", []),
-                    }, expanded=False)
+                    st.info(f"当前保存的是任务「{result_task_name}」的 Dry Run 结果；切回对应任务可查看详情。")
 
 
 if __name__ == "__main__":

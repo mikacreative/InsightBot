@@ -45,6 +45,8 @@ def append_prompt_debug_history(bot_dir: str, record: dict[str, Any]) -> list[di
 
 def make_draft_run_record(
     *,
+    task_id: str | None = None,
+    task_name: str | None = None,
     category: str,
     candidate_count: int,
     result: dict[str, Any],
@@ -54,6 +56,8 @@ def make_draft_run_record(
     return {
         "id": str(uuid.uuid4()),
         "created_at": _now_iso(),
+        "task_id": task_id,
+        "task_name": task_name,
         "category": category,
         "mode": "draft_run",
         "candidate_count": candidate_count,
@@ -68,6 +72,8 @@ def make_draft_run_record(
 
 def make_compare_record(
     *,
+    task_id: str | None = None,
+    task_name: str | None = None,
     category: str,
     candidate_count: int,
     saved_result: dict[str, Any],
@@ -78,6 +84,8 @@ def make_compare_record(
     return {
         "id": str(uuid.uuid4()),
         "created_at": _now_iso(),
+        "task_id": task_id,
+        "task_name": task_name,
         "category": category,
         "mode": "compare",
         "candidate_count": candidate_count,

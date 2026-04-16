@@ -2,6 +2,12 @@
 
 ## v2.0.0 (2026-04-16)
 
+### 管理台修正
+
+- **任务中心控制台**：`scripts/app.py` 改为以“当前任务”为主视角，任务详情页可直接编辑 feeds、search、pipeline_config、channels、schedule
+- **任务归属增强**：概览、No Push Diagnosis、运行日志、Dry Run 结果都补充当前任务上下文显示
+- **任务级信源操作**：信源发现页新增的 RSS 会写回当前任务，不再误写全局旧配置
+
 ### 架构升级
 
 - **多任务系统**：每个任务独立配置 feeds、pipeline、channels、schedule，不再共享单一 RSS 池
