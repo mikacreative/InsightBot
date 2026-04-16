@@ -1579,3 +1579,7 @@ def main() -> None:
                         "error": result.get("error"),
                         "channel_results": result.get("channel_results", []),
                     }, expanded=False)
+
+
+if __name__ == "__main__":
+    main()
