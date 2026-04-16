@@ -398,12 +398,15 @@ def main() -> None:
             st.session_state.pop("selected_task_id", None)
             st.session_state.pop("current_task_selector", None)
             return None
-        current = st.session_state.get("selected_task_id")
-        if current not in task_ids:
-            current = task_ids[0]
-            st.session_state["selected_task_id"] = current
-        if st.session_state.get("current_task_selector") != current:
-            st.session_state["current_task_selector"] = current
+        selector_value = st.session_state.get("current_task_selector")
+        if selector_value in task_ids:
+            current = selector_value
+        else:
+            current = st.session_state.get("selected_task_id")
+            if current not in task_ids:
+                current = task_ids[0]
+        st.session_state["selected_task_id"] = current
+        st.session_state["current_task_selector"] = current
         return current
 
     def get_selected_task(tasks_data: dict) -> tuple[str | None, dict]:
@@ -499,6 +502,53 @@ def main() -> None:
             )
         else:
             st.info("暂无任务，请先在任务管理页面创建。")
+
+        st.markdown("**➕ 创建新任务**")
+        quick_new_task_id = st.text_input(
+            "任务 ID",
+            placeholder="e.g. weekly_report",
+            key="quick_create_task_id",
+        )
+        quick_new_task_name = st.text_input(
+            "任务名称",
+            placeholder="每周深度报告",
+            key="quick_create_task_name",
+        )
+        quick_col1, quick_col2, quick_col3 = st.columns([1.2, 1, 1])
+        with quick_col1:
+            quick_new_task_pipeline = st.selectbox(
+                "Pipeline",
+                options=["editorial", "classic"],
+                index=0,
+                key="quick_create_task_pipeline",
+            )
+        with quick_col2:
+            quick_new_task_hour = st.number_input("小时", 0, 23, 8, key="quick_create_task_hour")
+        with quick_col3:
+            quick_new_task_min = st.number_input("分钟", 0, 59, 0, key="quick_create_task_min")
+
+        if st.button("创建任务", key="quick_create_task_btn", use_container_width=True):
+            tasks_data = get_tasks_data()
+            tasks = tasks_data.get("tasks", {})
+            if quick_new_task_id and quick_new_task_id not in tasks:
+                tasks[quick_new_task_id] = {
+                    "name": quick_new_task_name or quick_new_task_id,
+                    "enabled": False,
+                    "pipeline": quick_new_task_pipeline,
+                    "feeds": deepcopy(selected_task_feeds or config.get("feeds", {})),
+                    "pipeline_config": deepcopy(get_editorial_defaults()),
+                    "search": deepcopy((selected_task or {}).get("search", config.get("search", {}))),
+                    "channels": deepcopy((selected_task or {}).get("channels", [])),
+                    "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
+                }
+                save_tasks(tasks_data, bot_dir)
+                scheduler.reload()
+                st.session_state["selected_task_id"] = quick_new_task_id
+                st.session_state["current_task_selector"] = quick_new_task_id
+                st.success(f"任务「{quick_new_task_id}」已创建。")
+                st.rerun()
+            elif quick_new_task_id in tasks:
+                st.error("任务 ID 已存在。")
 
         if st.button("▶️ 立即手动运行", type="primary", use_container_width=True):
             with st.spinner("AI 正在全网检索并撰写简报..."):
@@ -923,44 +973,11 @@ def main() -> None:
                     save_tasks(tasks_data, bot_dir)
                     scheduler.reload()
                     st.session_state.pop(f"task_search_queries::{selected_task_id}", None)
-                    st.session_state["selected_task_id"] = next(iter(tasks_data.get("tasks", {})), None)
+                    next_task_id = next(iter(tasks_data.get("tasks", {})), None)
+                    st.session_state["selected_task_id"] = next_task_id
+                    st.session_state["current_task_selector"] = next_task_id
                     st.success("任务已删除。")
                     st.rerun()
-
-        st.divider()
-        st.markdown("**➕ 创建新任务**")
-        new_task_id = st.text_input("任务 ID（英文唯一标识）", placeholder="e.g. weekly_report")
-        create_col1, create_col2, create_col3, create_col4 = st.columns([2, 1, 1, 1])
-        with create_col1:
-            new_task_name = st.text_input("任务名称", placeholder="每周深度报告")
-        with create_col2:
-            new_task_pipeline = st.selectbox("Pipeline", options=["editorial", "classic"], index=0)
-        with create_col3:
-            new_task_hour = st.number_input("小时", 0, 23, 8, key="create_task_hour")
-        with create_col4:
-            new_task_min = st.number_input("分钟", 0, 59, 0, key="create_task_min")
-
-        if st.button("创建任务", key="create_task_btn"):
-            tasks_data = get_tasks_data()
-            tasks = tasks_data.get("tasks", {})
-            if new_task_id and new_task_id not in tasks:
-                tasks[new_task_id] = {
-                    "name": new_task_name or new_task_id,
-                    "enabled": False,
-                    "pipeline": new_task_pipeline,
-                    "feeds": deepcopy(selected_task_feeds or config.get("feeds", {})),
-                    "pipeline_config": deepcopy(get_editorial_defaults()),
-                    "search": deepcopy((selected_task or {}).get("search", config.get("search", {}))),
-                    "channels": deepcopy((selected_task or {}).get("channels", [])),
-                    "schedule": {"hour": int(new_task_hour), "minute": int(new_task_min)},
-                }
-                save_tasks(tasks_data, bot_dir)
-                scheduler.reload()
-                st.session_state["selected_task_id"] = new_task_id
-                st.success(f"任务「{new_task_id}」已创建。")
-                st.rerun()
-            elif new_task_id in tasks:
-                st.error("任务 ID 已存在。")
 
     # ── Tab 2: Channels ────────────────────────────────────────────────────────
     with tab2:
