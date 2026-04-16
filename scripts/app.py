@@ -7,13 +7,14 @@ from datetime import datetime
 
 import streamlit as st
 from insightbot.channels import init_channels, test_channel
-from insightbot.config import load_channels, save_channels, load_runtime_config
+from insightbot.config import load_channels, save_channels, load_runtime_config, load_tasks, save_tasks
 from insightbot.feed_health import CACHE_TTL_SECONDS, get_feed_health_snapshot, load_health_cache
 from insightbot.paths import (
     bot_log_file_path,
     config_content_file_path,
     config_file_path,
     config_secrets_file_path,
+    cron_log_file_path,
     default_bot_dir,
     feed_health_cache_file_path,
 )
@@ -416,9 +417,7 @@ def main() -> None:
         st.divider()
         st.header("⏳ 调度器状态")
 
-        tasks_data = load_channels(bot_dir)  # reload to show current
-        from insightbot.config import load_tasks
-        tasks_def = load_tasks(bot_dir)
+        tasks_def = load_tasks(bot_dir)  # reload to show current
         enabled_count = sum(1 for t in tasks_def.get("tasks", {}).values() if t.get("enabled"))
         total_count = len(tasks_def.get("tasks", {}))
         st.metric("活跃任务", f"{enabled_count}/{total_count}")
