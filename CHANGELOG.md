@@ -31,6 +31,13 @@
 - `insightbot/__init__.py` — `__version__ = "2.0.0"`
 - `scripts/app.py` — 重构为 9 tab（新增 tab1 任务管理、tab2 Channels、tab8 任务调试）
 
+### Bug Fixes
+
+- **import 错误**：`load_channels` / `save_channels` 实际在 `config.py` 而非 `channels.py`
+- **缺失导入**：`cron_log_file_path` / `load_tasks` / `save_tasks` 未导入导致运行时错误
+- **sidebar 错误**：`load_channels(bot_dir)` 在调度器状态处应为 `load_tasks(bot_dir)`
+- **入口缺失**：`main()` 定义后无 `if __name__ == "__main__"` 调用，导致空白页面
+
 ### 管理台变更
 
 | 旧标签 | 新标签 | 说明 |
@@ -39,6 +46,13 @@
 | — | tab2 📡 Channels | **新增**：频道 CRUD + 联通性测试 |
 | tab2 ⚙️ 推送版式定制 | tab7 ⚙️ 推送版式定制 | 位置迁移 |
 | tab7 📡 Editorial Pipeline | tab8 🔬 任务调试 | 改为 Dry Run 调试界面 |
+
+### 清理
+
+- 删除废弃入口：`app.py`、`smart_brief.py`、`daily_brief.py`（v1 遗留）
+- 删除废弃调试脚本：`debug_prompt.py`、`debug_rss_check.py`、`debug_run.py`
+- 删除孤立文件：`insightbot/daily_brief_runner.py`、`insightbot/discovery_service.py`
+- 删除根目录重复 `pyproject.toml`
 
 ---
 

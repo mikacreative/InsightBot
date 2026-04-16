@@ -24,7 +24,7 @@
 ### v2.0 新能力
 
 - **多任务多频道**：每个任务独立配置 feeds、pipeline、channels、schedule
-- **Channels 抽象**：企业微信credentials 单独存储在 `channels.json`
+- **Channels 抽象**：企业微信凭证单独存储在 `channels.json`
 - **内置调度器**：无需外部 cron，支持"运行所有已启用任务"
 - **调试控制台（tab8）**：Dry Run 在面板内展示完整简报预览 + 中间结果，零频道发送
 - **自动迁移**：首次启动 v2.0 自动从 v1 配置生成 `channels.json` + `tasks.json`
@@ -69,6 +69,7 @@
       "enabled": true,
       "pipeline": "editorial",
       "feeds": { "💡 营销行业": { "rss": [...], "keywords": [], "prompt": "" } },
+      "pipeline_config": {},
       "channels": ["wecom_main"],
       "schedule": { "hour": 8, "minute": 0 }
     }
@@ -76,7 +77,7 @@
 }
 ```
 
-### Quick Start
+### 快速启动
 
 1) 安装依赖
 
@@ -84,6 +85,7 @@
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e ./insightbot        # 将 insightbot 包安装为可编辑模式
 ```
 
 2) 准备配置
@@ -96,8 +98,14 @@ cp config.secrets.example.json config.secrets.json
 3) 启动（首次自动迁移）
 
 ```bash
-streamlit run scripts/app.py
-# 或命令行模式
+streamlit run scripts/app.py \
+  --server.address 0.0.0.0 \
+  --server.port 8501
+```
+
+或命令行模式：
+
+```bash
 python -m insightbot.cli
 ```
 
@@ -118,6 +126,9 @@ python -m insightbot.cli --task daily_brief --dry-run
 
 | 变量 | 说明 |
 |------|------|
+| `MARKETING_BOT_DIR` | 工作目录，默认 `/root/marketing_bot` 或当前目录 |
+| `CONFIG_CONTENT_FILE` | 覆盖 config.content.json 路径 |
+| `CONFIG_SECRETS_FILE` | 覆盖 config.secrets.json 路径 |
 | `CHANNELS_FILE` | 覆盖 channels.json 路径 |
 | `TASKS_FILE` | 覆盖 tasks.json 路径 |
 | `INSIGHTBOT_DRY_RUN` | 测试模式，频道发送不真实投递 |
@@ -125,11 +136,12 @@ python -m insightbot.cli --task daily_brief --dry-run
 
 ### 日志
 
-- 调度日志写入 `./logs/scheduler.log`（每日轮转）
-- 各 pipeline 日志写入 `./logs/bot.log`
+- 各 pipeline 日志写入 `./logs/bot.log`（每日轮转）
 
 ### 文档
 
 - [Editorial Pipeline 设计文档](./docs/editorial_pipeline_design.md)
 - [Search 集成设计文档](./docs/search_integration_design.md)
 - [v2.0 架构变更说明](./docs/v2.0_architecture.md)
+- [本地测试指南](./LOCAL_TESTING_GUIDE.md)
+- [部署指南](./DEPLOYMENT_GUIDE.md)
