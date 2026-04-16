@@ -544,7 +544,6 @@ def main() -> None:
                 save_tasks(tasks_data, bot_dir)
                 scheduler.reload()
                 st.session_state["selected_task_id"] = quick_new_task_id
-                st.session_state["current_task_selector"] = quick_new_task_id
                 st.success(f"任务「{quick_new_task_id}」已创建。")
                 st.rerun()
             elif quick_new_task_id in tasks:
@@ -975,7 +974,6 @@ def main() -> None:
                     st.session_state.pop(f"task_search_queries::{selected_task_id}", None)
                     next_task_id = next(iter(tasks_data.get("tasks", {})), None)
                     st.session_state["selected_task_id"] = next_task_id
-                    st.session_state["current_task_selector"] = next_task_id
                     st.success("任务已删除。")
                     st.rerun()
 
