@@ -1,9 +1,6 @@
 # InsightBot 本地测试环境搭建与开发指南
 
-**作者**：Manus AI
-**日期**：2026年3月19日
-
-为了在本地对 InsightBot 进行持续优化（如调整 AI Prompt、增加新信源解析逻辑）而不影响生产环境，我们设计了一套完整的本地测试框架。本指南将指导你如何快速搭建并使用这套环境。
+**更新日期**：2026-04-16（适配 v2.0）
 
 ---
 
@@ -12,29 +9,31 @@
 本地测试环境的核心原则是**与生产环境完全隔离**：
 - **配置隔离**：使用 `.env.local`、`config.local.content.json` 和 `config.local.secrets.json`，不读取生产配置。
 - **日志隔离**：所有本地运行日志输出到 `logs_local/` 目录。
-- **推送隔离**：提供 `DRY_RUN` 模式（仅输出到本地文件），或配置专用的测试企业微信 Agent ID。
+- **推送隔离**：提供 `INSIGHTBOT_DRY_RUN=1` 模式（强制所有频道发送进入测试模式），或配置专用的测试企业微信 Agent ID。
 
 ---
 
 ## 2. 快速搭建步骤
 
 ### 2.1 准备 Python 虚拟环境
+
 建议使用 Python 3.10+，并在项目根目录创建虚拟环境：
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
-*(注：`requirements.txt` 中已补充 `pytest` 和 `pytest-mock` 等测试依赖)*
 
 ### 2.2 初始化本地配置
+
 项目根目录已提供模板文件，直接复制并修改：
 
 1. **环境变量配置**：
    ```bash
    cp .env.local.example .env.local
    ```
-   打开 `.env.local`，填入你的测试用 API Key 和企业微信凭证（如果开启了 `DRY_RUN=1`，企业微信凭证可以随便填）。
+   打开 `.env.local`，填入测试用 API Key 和企业微信凭证（如果开启了 `INSIGHTBOT_DRY_RUN=1`，企业微信凭证可以随便填）。
 
 2. **内容配置**：
    ```bash
@@ -46,95 +45,90 @@ pip install -r requirements.txt
    ```bash
    cp config.secrets.example.json config.local.secrets.json
    ```
-   打开 `config.local.secrets.json`，填入测试用 API Key 和企业微信凭证；或完全通过 `.env.local` 提供。
+   打开 `config.local.secrets.json`，填入测试用 API Key 和企业微信凭证；或完全通过 `.env.local` 中的环境变量提供。
 
 ---
 
 ## 3. 调试工具与工作流
 
-我们为你编写了三个强大的本地调试脚本，覆盖了日常开发的各种场景。
+v2.0 所有调试功能都已集成到管理台，**无需任何命令行调试脚本**。
 
-### 3.1 场景一：完整流程调试 (`debug_run.py`)
-用于测试"抓取 -> AI 筛选 -> 生成报告"的完整链路。
+### 3.1 场景一：任务 Dry Run（tab8 🔬 任务调试）
 
-默认开启了 `DRY_RUN` 模式，**不会向企业微信发送消息**，而是将最终的 Markdown 报告输出到 `logs_local/dry_run_report.md`。
+用于测试"抓取 → AI 筛选 → 生成简报"的完整链路。
 
-**运行方式**：
-```bash
-# 加载本地环境变量并运行
-set -a; source .env.local; set +a
-export CONFIG_CONTENT_FILE=./config.local.content.json
-export CONFIG_SECRETS_FILE=./config.local.secrets.json
-python debug_run.py
-```
-运行结束后，直接使用 Markdown 编辑器打开 `logs_local/dry_run_report.md` 即可预览推送效果。
+**运行方式**：在管理台 tab8 选择任务 → 点击「🔬 Dry Run」。
 
-### 3.2 场景二：AI Prompt 调优 (`debug_prompt.py`)
-当发现 AI 筛选不准、或者总是返回 `NONE` 时，使用此脚本可以**针对单个板块**快速测试 Prompt。
+- 完整 pipeline 执行，但**零频道发送**，结果直接在面板展示
+- 显示最终简报 Markdown 预览
+- 可展开查看完整中间结果（stage_results）
 
-**运行方式**：
-```bash
-set -a; source .env.local; set +a
-export CONFIG_CONTENT_FILE=./config.local.content.json
-export CONFIG_SECRETS_FILE=./config.local.secrets.json
+### 3.2 场景二：Prompt 调优（tab3 🧠 AI 提示词调优）
 
-# 1. 使用本地内容配置中的 RSS 源实时抓取，测试指定板块
-python debug_prompt.py --category "📢 测试板块-营销行业"
+当发现 AI 筛选不准时，在此调优 Prompt 并草稿试跑。
 
-# 2. 如果 RSS 源暂时没更新，可以使用内置的模拟新闻列表强制测试
-python debug_prompt.py --category "📢 测试板块-营销行业" --mock-news
+- 草稿 Prompt 试跑，不影响生产配置
+- 当前版 vs 草稿版对比
+- 候选池预览
+- 最近 20 条调试记录留痕
 
-# 3. 临时覆盖 Prompt 进行对比测试（不修改配置文件）
-python debug_prompt.py --category "📢 测试板块-营销行业" --mock-news --prompt "只保留有具体数据支撑的营销案例"
-```
-该脚本会打印出喂给 AI 的完整新闻列表，以及 AI 的**原始响应内容**，极大地提升了 Prompt 调优效率。
+### 3.3 场景三：RSS 信源健康度（tab4 🩺 RSS 健康度）
 
-### 3.3 场景三：RSS 信源健康度检查 (`debug_rss_check.py`)
-用于排查"为什么今天没有推送"的问题。它会并发检查配置文件中所有 RSS 源的可达性，并统计近 24 小时的文章更新数量。
+用于排查"为什么今天没有推送"的问题。
 
-**运行方式**：
-```bash
-set -a; source .env.local; set +a
-export CONFIG_CONTENT_FILE=./config.local.content.json
-export CONFIG_SECRETS_FILE=./config.local.secrets.json
-python debug_rss_check.py
-```
+- 并发检查所有 RSS 源可达性
+- 统计近 24 小时文章更新数量
+- 区分「正常 / 无更新 / 错误」三态
 
 ---
 
 ## 4. 自动化测试套件 (Pytest)
 
-为了保障核心逻辑在重构或修改后不被破坏，我们在 `tests/` 目录下建立了自动化测试套件。
+在 `tests/` 目录下建立了自动化测试套件，保障核心逻辑在重构或修改后不被破坏。
 
 ### 4.1 测试覆盖范围
-- `test_ai.py`：AI 模块的请求组装、异常处理。
-- `test_wecom.py`：企业微信 Token 获取与 Markdown 推送逻辑。
-- `test_smart_brief_runner.py`：核心业务逻辑，包括：
-  - **时效性过滤**：准确拦截 24 小时前的文章。
-  - **链接去重**：准确过滤重复链接。
-  - **NONE 拦截**：AI 返回 NONE 时正确阻断推送。
-- `test_config_paths.py`：路径优先级与配置加载逻辑。
+
+| 文件 | 测试范围 |
+|------|----------|
+| `test_ai.py` | AI 模块的请求组装、异常处理 |
+| `test_wecom.py` | 企业微信 Token 获取与 Markdown 推送逻辑 |
+| `test_smart_brief_runner.py` | 经典简报流程，run_task() 返回 final_markdown |
+| `test_editorial_pipeline.py` | Editorial Pipeline 各阶段正确返回 |
+| `test_config_paths.py` | 路径优先级与配置加载逻辑 |
+| `test_channels.py` | Channel 抽象层、send/test/dry_run 逻辑 |
+| `test_scheduler.py` | 调度器时间/idempotency/.reload |
+| `test_task_runner.py` | dry_run vs 真实发送、pipeline dispatch |
+| `test_migrate.py` | v1 → v2 自动迁移逻辑 |
 
 ### 4.2 运行测试
+
 在项目根目录执行：
+
 ```bash
 # 运行所有测试
 pytest tests/ -v
 
 # 运行特定模块的测试
-pytest tests/test_smart_brief_runner.py -v
+pytest tests/test_scheduler.py -v
 ```
-测试套件使用了 `pytest-mock` 拦截了所有外部网络请求，并使用了 `tests/fixtures/` 下的静态 XML 文件模拟 RSS 源，因此**运行测试不需要真实的 API Key，也不会产生任何网络费用**。
+
+测试套件使用 `tests/fixtures/` 下的静态 XML 文件模拟 RSS 源，并 mock 了所有 AI API 调用，**运行测试不需要真实的 API Key，也不会产生任何网络费用**。
 
 ---
 
 ## 5. 本地启动控制台 (Streamlit)
 
-如果你想在本地测试 Streamlit UI 的交互逻辑：
 ```bash
 set -a; source .env.local; set +a
-streamlit run scripts/app.py
+streamlit run scripts/app.py --server.address 0.0.0.0 --server.port 8501
 ```
-此时控制台读取和修改的都是 `config.local.content.json`，敏感信息来自 `config.local.secrets.json` 或环境变量；点击"立即手动运行"触发 `python -m insightbot.cli`（统一入口），受 `editorial_pipeline.enabled` 控制，本地配置不影响生产环境。
 
-> **Editorial Pipeline 本地测试**：控制台 tab7 提供了完整的流水线调试面板，可分阶段（全局候选池 → 全局初筛 → 板块分配 → 板块精选）逐步验证新流程效果，无需推送即可预览最终 Markdown 输出。
+管理台读取 `config.local.content.json`，敏感信息来自 `config.local.secrets.json` 或环境变量，不影响生产配置。
+
+**v2.0 管理台新增功能**：
+
+| Tab | 新增功能 |
+|-----|----------|
+| tab1 📋 任务管理 | 任务 CRUD、调度时间、频道分配 |
+| tab2 📡 Channels | 频道 CRUD + 联通性测试 |
+| tab8 🔬 任务调试 | Dry Run 面板（替代旧的 debug_run.py） |
