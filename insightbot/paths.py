@@ -63,3 +63,18 @@ def channels_file_path(bot_dir: str | None = None) -> str:
 def tasks_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("TASKS_FILE", os.path.join(bot_dir, "tasks.json"))
+
+
+def task_runs_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("TASK_RUNS_FILE", os.path.join(data_dir(bot_dir), "task_runs.jsonl"))
+
+
+def task_health_cache_file_path(task_id: str, bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("TASK_HEALTH_CACHE_FILE", os.path.join(data_dir(bot_dir), "task_health", f"{task_id}.json"))
+
+
+def task_state_file_path(task_id: str, bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("TASK_STATE_FILE", os.path.join(data_dir(bot_dir), "task_state", f"{task_id}.json"))

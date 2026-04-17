@@ -25,6 +25,7 @@ from insightbot.paths import (
     cron_log_file_path,
     default_bot_dir,
     feed_health_cache_file_path,
+    task_health_cache_file_path,
 )
 from insightbot.prompt_debug_history import (
     append_prompt_debug_history,
@@ -33,10 +34,14 @@ from insightbot.prompt_debug_history import (
     make_draft_run_record,
 )
 from insightbot.discovery.url_resolver import UrlResolver
+from insightbot.run_history import get_latest_run, get_latest_successful_send
 from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary, summarize_recent_run
 from insightbot.scheduler import create_scheduler
 from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, get_selection_settings, run_prompt_debug
+from insightbot.task_health_store import clear_task_health, load_task_health, save_task_health
 from insightbot.task_runner import run_task
+from insightbot.task_state import build_task_revision, load_task_state, touch_revalidation_state
+from insightbot.task_validation import validate_task_definition
 from insightbot.editorial_pipeline import (
     build_global_candidates,
     screen_global_candidates,
@@ -307,6 +312,20 @@ def main() -> None:
         except ValueError:
             return value
 
+    def is_today(value: str | None) -> bool:
+        if not value:
+            return False
+        try:
+            return datetime.fromisoformat(value).date() == datetime.now().date()
+        except ValueError:
+            return False
+
+    def render_operating_chip(label: str, css_class: str) -> None:
+        st.markdown(
+            f'<div class="ib-chip-row"><span class="ib-chip {css_class}">{label}</span></div>',
+            unsafe_allow_html=True,
+        )
+
     def summarize_cache_age(seconds: int | None) -> str:
         if seconds is None:
             return "未知"
@@ -317,6 +336,100 @@ def main() -> None:
             return f"{minutes} 分钟"
         hours = minutes // 60
         return f"{hours} 小时"
+
+    def derive_task_state(validation_result: dict, latest_run: dict | None, latest_success: dict | None, task_state: dict | None) -> tuple[str, str, str]:
+        if not validation_result.get("is_runnable"):
+            return ("未配置完成", "ib-chip-error", "当前任务还有关键配置缺失，先补齐后再运行。")
+        if task_state and task_state.get("needs_revalidation"):
+            return ("待重新验证", "ib-chip-warning", "最近配置发生变更，建议重新跑 Dry Run 并刷新健康度。")
+        if latest_run and latest_run.get("ok") is False:
+            return ("运行失败", "ib-chip-error", "最近一次任务执行失败，建议先看日志和诊断卡片。")
+        if latest_success and is_today(latest_success.get("started_at")):
+            return ("今日已发送", "ib-chip-success", "今天已经成功发出内容。")
+        if latest_run and is_today(latest_run.get("started_at")):
+            return ("今日已运行", "ib-chip-warning", "今天跑过任务，但还没有确认成功发送。")
+        if validation_result.get("status") == "needs_attention":
+            return ("待关注", "ib-chip-warning", "任务可运行，但仍有风险项需要关注。")
+        return ("可运行", "ib-chip-success", "当前配置完整，可以进入稳定运行。")
+
+    def render_validation_result(validation_result: dict, *, task_state: dict | None = None) -> None:
+        status_map = {
+            "ready": ("可运行", "ib-chip-success"),
+            "needs_attention": ("待关注", "ib-chip-warning"),
+            "not_ready": ("不可运行", "ib-chip-error"),
+        }
+        label, css_class = status_map.get(validation_result.get("status"), ("状态未知", "ib-chip-neutral"))
+        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="ib-section-title">任务配置校验</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ib-section-copy">保存后会基于当前任务检查板块、RSS、频道和调度是否完整。</div>',
+            unsafe_allow_html=True,
+        )
+        render_operating_chip(label, css_class)
+        summary = validation_result.get("summary", {})
+        st.caption(
+            f"板块 {summary.get('category_count', 0)} 个 | RSS {summary.get('feed_count', 0)} 个 | "
+            f"频道 {summary.get('channel_count', 0)} 个 | 调度 {'已配置' if summary.get('has_schedule') else '未配置'}"
+        )
+        if task_state and task_state.get("needs_revalidation"):
+            st.warning("当前任务最近配置已变更，建议重新 Dry Run 并刷新健康度。")
+        issues = validation_result.get("issues", [])
+        if not issues:
+            st.success("当前没有发现配置缺口。")
+        else:
+            for item in issues:
+                line = f"{item.get('message', '未知问题')}（{item.get('field_path', 'unknown')}）"
+                if item.get("level") == "error":
+                    st.error(line)
+                else:
+                    st.warning(line)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    def render_verification_summary(
+        *,
+        latest_run: dict | None,
+        latest_success: dict | None,
+        health_snapshot: dict | None,
+        task_state: dict | None,
+        prompt_history: list[dict],
+    ) -> None:
+        last_debug_at = prompt_history[0].get("created_at") if prompt_history else None
+        st.markdown(
+            f"""
+            <div class="ib-kpi-grid">
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">最近运行</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((latest_run or {}).get('started_at'))}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">最后成功发送</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((latest_success or {}).get('started_at'))}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">最近健康检查</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((health_snapshot or {}).get('checked_at'))}</div>
+              </div>
+              <div class="ib-kpi-card">
+                <div class="ib-kpi-label">最近调试</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp(last_debug_at)}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if task_state and task_state.get("needs_revalidation"):
+            st.warning("当前任务最近有配置变更，建议按顺序执行：刷新健康度 -> Dry Run/Prompt Debug -> 正式运行。")
+
+    def load_recent_log_excerpt(limit: int = 120) -> str:
+        if not os.path.exists(bot_log_path):
+            return ""
+        try:
+            with open(bot_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+        except OSError:
+            return ""
+        filtered = filter_log_lines_for_task(lines, selected_task_id)
+        return "".join((filtered or lines)[-limit:])
 
     def render_diagnosis_card(card: dict, *, prompt_categories: list[str], key_prefix: str) -> None:
         st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
@@ -415,12 +528,30 @@ def main() -> None:
             return None, {}
         return task_id, tasks_data["tasks"].get(task_id, {})
 
+    def mark_task_changed(task_id: str) -> dict:
+        runtime_view = build_task_runtime_config(task_id)
+        revision = build_task_revision(runtime_view)
+        clear_task_health(task_id, bot_dir)
+        state = touch_revalidation_state(
+            task_id=task_id,
+            config_revision=revision,
+            needs_revalidation=True,
+            bot_dir=bot_dir,
+        )
+        st.session_state[f"task_state::{task_id}"] = state
+        return state
+
+    def mark_tasks_changed(task_ids: list[str]) -> None:
+        for task_id in task_ids:
+            mark_task_changed(task_id)
+
     def save_task_definition(task_id: str, task_def: dict) -> None:
         tasks_data = get_tasks_data()
         tasks_data.setdefault("tasks", {})
         tasks_data["tasks"][task_id] = task_def
         save_tasks(tasks_data, bot_dir)
         scheduler.reload()
+        mark_task_changed(task_id)
 
     def build_task_runtime_config(task_id: str | None) -> dict:
         if not task_id:
@@ -451,6 +582,7 @@ def main() -> None:
             tasks_data["tasks"][task_id] = task_def
             save_tasks(tasks_data, bot_dir)
             scheduler.reload()
+            mark_task_changed(task_id)
             return True
         except Exception as e:
             st.error(f"淇濆瓨澶辫触: {e}")
@@ -468,6 +600,24 @@ def main() -> None:
     selected_task_runtime_config = build_task_runtime_config(selected_task_id)
     selected_task_feeds = deepcopy(selected_task.get("feeds", {})) if selected_task else {}
     selected_task_categories = list(selected_task_feeds.keys())
+    selected_task_state = load_task_state(selected_task_id, bot_dir) if selected_task_id else {}
+    if selected_task_id:
+        current_revision = build_task_revision(selected_task_runtime_config)
+        if selected_task_state.get("config_revision") != current_revision:
+            selected_task_state = touch_revalidation_state(
+                task_id=selected_task_id,
+                config_revision=current_revision,
+                needs_revalidation=True,
+                bot_dir=bot_dir,
+                last_validated_revision=selected_task_state.get("last_validated_revision"),
+            )
+    else:
+        current_revision = ""
+    selected_task_validation = (
+        validate_task_definition(selected_task_id, selected_task, channels_data)
+        if selected_task_id and selected_task
+        else {"status": "not_ready", "is_runnable": False, "issues": [], "summary": {}}
+    )
 
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
     render_prompt_debug_styles()
@@ -495,6 +645,17 @@ def main() -> None:
             selected_task_runtime_config = build_task_runtime_config(selected_task_id)
             selected_task_feeds = deepcopy(selected_task.get("feeds", {}))
             selected_task_categories = list(selected_task_feeds.keys())
+            selected_task_state = load_task_state(selected_task_id, bot_dir)
+            current_revision = build_task_revision(selected_task_runtime_config)
+            if selected_task_state.get("config_revision") != current_revision:
+                selected_task_state = touch_revalidation_state(
+                    task_id=selected_task_id,
+                    config_revision=current_revision,
+                    needs_revalidation=True,
+                    bot_dir=bot_dir,
+                    last_validated_revision=selected_task_state.get("last_validated_revision"),
+                )
+            selected_task_validation = validate_task_definition(selected_task_id, selected_task, channels_data)
             st.caption(
                 f"Pipeline: `{selected_task.get('pipeline', 'editorial')}` | "
                 f"Channels: {len(selected_task.get('channels', []))} | "
@@ -543,6 +704,7 @@ def main() -> None:
                 }
                 save_tasks(tasks_data, bot_dir)
                 scheduler.reload()
+                mark_task_changed(quick_new_task_id)
                 st.session_state["selected_task_id"] = quick_new_task_id
                 st.success(f"任务「{quick_new_task_id}」已创建。")
                 st.rerun()
@@ -578,7 +740,7 @@ def main() -> None:
 
         st.caption("在「📡 Channels」标签页管理频道配置和联通性测试。")
 
-    overview_health_snapshot = st.session_state.get(f"task_health_snapshot::{selected_task_id or 'default'}")
+    overview_health_snapshot = load_task_health(selected_task_id, bot_dir) if selected_task_id else None
     overview_run_summary = parse_recent_run_summary(bot_log_path)
     overview_run_metrics = summarize_recent_run(overview_run_summary)
     overview_diagnosis_cards = build_no_push_diagnosis(
@@ -587,10 +749,18 @@ def main() -> None:
         configured_categories=selected_task_categories,
     )
     overview_prompt_history = filter_prompt_history_for_task(load_prompt_debug_history(bot_dir), selected_task_id)
+    latest_run_record = get_latest_run(selected_task_id, bot_dir) if selected_task_id else None
+    latest_success_record = get_latest_successful_send(selected_task_id, bot_dir) if selected_task_id else None
+    task_state_label, task_state_class, task_state_copy = derive_task_state(
+        selected_task_validation,
+        latest_run_record,
+        latest_success_record,
+        selected_task_state,
+    )
 
     tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "🏠 概览", "📋 任务管理", "📡 Channels",
-        "🧠 AI 提示词调优", "🩺 RSS 健康度", "📝 运行日志",
+        "🧠 AI 提示词调优", "🧪 验证与诊断", "📝 运行日志",
         "🔍 信源发现", "⚙️ 推送版式定制", "🔬 任务调试",
     ])
 
@@ -610,20 +780,20 @@ def main() -> None:
             f"""
             <div class="ib-kpi-grid">
               <div class="ib-kpi-card">
-                <div class="ib-kpi-label">今日板块数</div>
-                <div class="ib-kpi-value">{len(selected_task_categories)}</div>
+                <div class="ib-kpi-label">任务状态</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{task_state_label}</div>
               </div>
               <div class="ib-kpi-card">
-                <div class="ib-kpi-label">异常 RSS 源</div>
-                <div class="ib-kpi-value">{health_counts.get('error', 0)}</div>
+                <div class="ib-kpi-label">可运行性</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{'需重验' if selected_task_state.get('needs_revalidation') else ('可运行' if selected_task_validation.get('is_runnable') else '不可运行')}</div>
               </div>
               <div class="ib-kpi-card">
-                <div class="ib-kpi-label">最近运行结果</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{overview_run_metrics.get('result_label', '未知')}</div>
+                <div class="ib-kpi-label">最近一次运行</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((latest_run_record or {}).get('started_at'))}</div>
               </div>
               <div class="ib-kpi-card">
-                <div class="ib-kpi-label">今日候选总条数</div>
-                <div class="ib-kpi-value">{overview_run_metrics.get('candidate_total', 0)}</div>
+                <div class="ib-kpi-label">最后成功发送</div>
+                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((latest_success_record or {}).get('started_at'))}</div>
               </div>
             </div>
             """,
@@ -633,17 +803,16 @@ def main() -> None:
         top_col1, top_col2 = st.columns([1.35, 1.0])
         with top_col1:
             st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">最近一次任务</div>', unsafe_allow_html=True)
-            task_started_at = overview_run_metrics.get("task_started_at")
-            started_copy = format_timestamp(task_started_at) if task_started_at else "暂无记录"
+            st.markdown('<div class="ib-section-title">任务状态</div>', unsafe_allow_html=True)
+            render_operating_chip(task_state_label, task_state_class)
             st.markdown(
                 f"""
                 <div class="ib-section-copy">
-                  最近开始时间：{started_copy}<br/>
-                  已推送板块：{overview_run_metrics.get('pushed_count', 0)}<br/>
-                  Prompt 全拦截：{overview_run_metrics.get('blocked_count', 0)}<br/>
-                  无候选板块：{overview_run_metrics.get('no_candidate_count', 0)}<br/>
-                  AI 异常板块：{overview_run_metrics.get('ai_error_count', 0)}
+                  {task_state_copy}<br/>
+                  板块数：{selected_task_validation.get('summary', {}).get('category_count', 0)}<br/>
+                  RSS 源数：{selected_task_validation.get('summary', {}).get('feed_count', 0)}<br/>
+                  异常 RSS 源：{health_counts.get('error', 0)}<br/>
+                  最近运行结果：{overview_run_metrics.get('result_label', '未知')}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -963,8 +1132,13 @@ def main() -> None:
                     if selected_day_value is not None:
                         task_def["schedule"]["day_of_week"] = selected_day_value
                     save_task_definition(selected_task_id, task_def)
+                    selected_task_state = load_task_state(selected_task_id, bot_dir)
+                    selected_task_validation = validate_task_definition(
+                        selected_task_id,
+                        task_def,
+                        load_channels(bot_dir),
+                    )
                     st.success(f"任务「{task_def['name']}」已保存。")
-                    st.rerun()
             with save_col2:
                 if st.button("🗑️ 删除当前任务", key=f"del_task_{selected_task_id}", use_container_width=True):
                     tasks_data = get_tasks_data()
@@ -976,6 +1150,8 @@ def main() -> None:
                     st.session_state["selected_task_id"] = next_task_id
                     st.success("任务已删除。")
                     st.rerun()
+
+            render_validation_result(selected_task_validation, task_state=selected_task_state)
 
     # ── Tab 2: Channels ────────────────────────────────────────────────────────
     with tab2:
@@ -1016,6 +1192,7 @@ def main() -> None:
                         }
                         save_channels(channels_data, bot_dir)
                         init_channels(channels_data)
+                        mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
                         st.success("已保存！")
                         st.rerun()
                 with col_btn2:
@@ -1033,6 +1210,7 @@ def main() -> None:
                         channels_data["channels"].pop(ch_id, None)
                         save_channels(channels_data, bot_dir)
                         init_channels(channels_data)
+                        mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
                         st.success("已删除！")
                         st.rerun()
 
@@ -1057,6 +1235,7 @@ def main() -> None:
                 }
                 save_channels(channels_data, bot_dir)
                 init_channels(channels_data)
+                mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
                 st.success(f"频道「{new_ch_id}」已添加！")
                 st.rerun()
             elif new_ch_id in channels_data["channels"]:
@@ -1104,6 +1283,7 @@ def main() -> None:
             if st.button("💾 保存 System Prompt", use_container_width=True):
                 config["ai"]["system_prompt"] = st.session_state.sys_prompt
                 save_config(config)
+                mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
                 st.toast("System Prompt 更新成功。")
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1159,6 +1339,7 @@ def main() -> None:
                     "batch_size": batch_size,
                 }
                 save_config(config)
+                mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
                 st.toast("输出规则已保存。")
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
@@ -1517,12 +1698,26 @@ def main() -> None:
             st.markdown("</div>", unsafe_allow_html=True)
 
     with tab4:
-        st.subheader("RSS 源健康度")
-        st.caption("缓存优先、手动刷新。优先帮助管理员判断：源是坏了、没更新，还是只是今天没有候选。")
+        st.subheader("验证与诊断")
+        st.caption("把最近运行、成功发送、健康检查、No Push Diagnosis 和相关日志放在一页里，减少来回切页排查。")
 
-        health_state_key = f"task_health_snapshot::{selected_task_id or 'default'}"
-        health_snapshot = st.session_state.get(health_state_key)
+        health_snapshot = load_task_health(selected_task_id, bot_dir) if selected_task_id else None
         run_summary = parse_recent_run_summary(bot_log_path)
+
+        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="ib-section-title">验证状态总览</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ib-section-copy">先确认最近有没有运行、有没有成功发送、当前健康快照是不是最新，再决定是否继续调试。</div>',
+            unsafe_allow_html=True,
+        )
+        render_verification_summary(
+            latest_run=latest_run_record,
+            latest_success=latest_success_record,
+            health_snapshot=health_snapshot,
+            task_state=selected_task_state,
+            prompt_history=overview_prompt_history,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
         header_col1, header_col2, header_col3 = st.columns([1.3, 1.0, 1.2])
         with header_col1:
@@ -1534,7 +1729,14 @@ def main() -> None:
                         use_cache=False,
                         force_refresh=True,
                     )
-                st.session_state[health_state_key] = health_snapshot
+                    save_task_health(health_snapshot, selected_task_id, bot_dir)
+                    selected_task_state = touch_revalidation_state(
+                        task_id=selected_task_id,
+                        config_revision=selected_task_state.get("config_revision", current_revision),
+                        needs_revalidation=False,
+                        bot_dir=bot_dir,
+                        last_validated_revision=selected_task_state.get("config_revision", current_revision),
+                    )
                 st.success("RSS 健康度已刷新。")
         with header_col2:
             only_problem_feeds = st.toggle("仅看异常/无更新", value=False)
@@ -1544,6 +1746,8 @@ def main() -> None:
         if health_snapshot is None:
             st.info("当前还没有健康度缓存。点击“立即刷新健康度”后，控制台会生成第一份检查结果。")
         else:
+            if selected_task_state.get("needs_revalidation"):
+                st.warning("当前健康快照可能与最新配置不一致，建议先点“立即刷新健康度”。")
             diagnosis_cards = build_no_push_diagnosis(
                 health_snapshot=health_snapshot,
                 run_summary=run_summary,
@@ -1576,7 +1780,7 @@ def main() -> None:
                 )
             else:
                 st.caption(
-                    f"检查时间：{format_timestamp(checked_at)} | 数据来源：{source_label} | 缓存年龄：{age_text} | 缓存文件：{feed_health_cache_file_path(bot_dir)}"
+                    f"检查时间：{format_timestamp(checked_at)} | 数据来源：{source_label} | 缓存年龄：{age_text} | 缓存文件：{task_health_cache_file_path(selected_task_id, bot_dir)}"
                 )
 
             counts = health_snapshot.get("counts", {})
@@ -1658,6 +1862,19 @@ def main() -> None:
                         if elapsed is not None:
                             st.caption(f"响应耗时：{elapsed}s")
                 st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="ib-section-title">最近相关日志</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ib-section-copy">这里保留当前任务最近一段相关日志作为补充证据；如果还不够，再去完整日志页深挖。</div>',
+            unsafe_allow_html=True,
+        )
+        recent_log_excerpt = load_recent_log_excerpt()
+        if recent_log_excerpt:
+            st.code(recent_log_excerpt, language="bash")
+        else:
+            st.info("当前还没有相关日志。")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with tab5:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
@@ -1882,6 +2099,7 @@ def main() -> None:
         if st.button("💾 保存版式设置"):
             config["settings"] = settings
             save_config(config)
+            mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
             st.toast("设置已生效！")
 
     with tab8:

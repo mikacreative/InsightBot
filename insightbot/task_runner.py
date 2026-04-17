@@ -12,8 +12,73 @@ from datetime import datetime
 from typing import Callable
 
 from .channels import send_to_channel
+from .run_history import append_run_record
 
 logger = logging.getLogger("TaskRunner")
+
+
+def _estimate_counts(stage_results: dict) -> tuple[int, int]:
+    candidate_count = 0
+    selected_count = 0
+
+    if isinstance(stage_results.get("global_candidates"), list):
+        candidate_count = len(stage_results["global_candidates"])
+    elif isinstance(stage_results.get("screened_result"), dict):
+        candidate_count = len(stage_results.get("screened_result", {}).get("input_candidates", []))
+    elif isinstance(stage_results.get("candidate_count"), int):
+        candidate_count = stage_results["candidate_count"]
+
+    if isinstance(stage_results.get("category_results"), dict):
+        selected_count = sum(
+            len((item or {}).get("selected_items", []))
+            for item in stage_results["category_results"].values()
+            if isinstance(item, dict)
+        )
+    elif isinstance(stage_results.get("selected_items"), list):
+        selected_count = len(stage_results["selected_items"])
+
+    return candidate_count, selected_count
+
+
+def _build_run_record(
+    *,
+    task_id: str,
+    config: dict,
+    task_pipeline: str,
+    started_at: datetime,
+    ended_at: datetime,
+    dry_run: bool,
+    ok: bool,
+    stage_results: dict,
+    channel_results: list[dict],
+    error: str | None,
+) -> dict:
+    candidate_count, selected_count = _estimate_counts(stage_results)
+    return {
+        "task_id": task_id,
+        "task_name": config.get("_task_name", task_id),
+        "started_at": started_at.isoformat(),
+        "ended_at": ended_at.isoformat(),
+        "ok": ok,
+        "dry_run": dry_run,
+        "pipeline": task_pipeline,
+        "candidate_count": candidate_count,
+        "selected_count": selected_count,
+        "channel_results": channel_results,
+        "error": error,
+    }
+
+
+def _run_editorial_pipeline(*, config: dict, logger) -> dict:
+    from .editorial_pipeline import run_editorial_pipeline
+
+    return run_editorial_pipeline(config=config, logger=logger)
+
+
+def _run_classic_pipeline(*, config: dict, logger):
+    from .smart_brief_runner import run_task as run_classic_task
+
+    return run_classic_task(config=config, logger=logger)
 
 
 def run_task(
@@ -44,6 +109,7 @@ def run_task(
     config = config_loader_fn()
     task_pipeline = config.get("_task_pipeline", "editorial")
     task_channels = config.get("_task_channels", [])
+    started_at = datetime.now()
 
     logger.info(
         f"TaskRunner: task_id={task_id}, pipeline={task_pipeline}, "
@@ -58,18 +124,14 @@ def run_task(
 
     try:
         if task_pipeline == "editorial":
-            from .editorial_pipeline import run_editorial_pipeline
-
-            result = run_editorial_pipeline(config=config, logger=logger)
+            result = _run_editorial_pipeline(config=config, logger=logger)
             pipeline_ok = result.get("ok", False)
             pipeline_error = result.get("error")
             final_markdown = result.get("final_markdown", "")
             # Forward everything useful from editorial result
             stage_results = {k: v for k, v in result.items() if k != "final_markdown"}
         else:
-            from .smart_brief_runner import run_task as run_classic_task
-
-            result = run_classic_task(config=config, logger=logger)
+            result = _run_classic_pipeline(config=config, logger=logger)
             pipeline_ok = result.get("ok", False) if isinstance(result, dict) else (result is not None)
             if isinstance(result, dict):
                 pipeline_error = result.get("error")
@@ -92,7 +154,7 @@ def run_task(
 
     # Dry run — return without any channel sends
     if dry_run:
-        return {
+        payload = {
             "ok": pipeline_ok,
             "task_id": task_id,
             "pipeline": task_pipeline,
@@ -102,6 +164,25 @@ def run_task(
             "stage_results": stage_results,
             "error": pipeline_error,
         }
+        try:
+            append_run_record(
+                None,
+                _build_run_record(
+                    task_id=task_id,
+                    config=config,
+                    task_pipeline=task_pipeline,
+                    started_at=started_at,
+                    ended_at=datetime.now(),
+                    dry_run=True,
+                    ok=pipeline_ok,
+                    stage_results=stage_results,
+                    channel_results=[],
+                    error=pipeline_error,
+                ),
+            )
+        except Exception as exc:
+            logger.warning(f"TaskRunner: failed to write run history: {exc}")
+        return payload
 
     # Real run — send to all configured channels
     channel_results: list[dict] = []
@@ -114,7 +195,7 @@ def run_task(
             logger.error(f"TaskRunner: failed to send to '{channel_id}': {e}")
             channel_results.append({"channel_id": channel_id, "ok": False, "error": str(e)})
 
-    return {
+    payload = {
         "ok": pipeline_ok,
         "task_id": task_id,
         "pipeline": task_pipeline,
@@ -124,6 +205,25 @@ def run_task(
         "stage_results": stage_results,
         "error": pipeline_error,
     }
+    try:
+        append_run_record(
+            None,
+            _build_run_record(
+                task_id=task_id,
+                config=config,
+                task_pipeline=task_pipeline,
+                started_at=started_at,
+                ended_at=datetime.now(),
+                dry_run=False,
+                ok=pipeline_ok,
+                stage_results=stage_results,
+                channel_results=channel_results,
+                error=pipeline_error,
+            ),
+        )
+    except Exception as exc:
+        logger.warning(f"TaskRunner: failed to write run history: {exc}")
+    return payload
 
 
 def _send_content_to_channel(channel_id: str, content: str, config: dict) -> bool:

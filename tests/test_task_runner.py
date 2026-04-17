@@ -35,14 +35,15 @@ class TestRunTaskDryRun:
         }
         fake_loader = lambda: fake_config
 
-        with patch("insightbot.editorial_pipeline.run_editorial_pipeline") as mock_ep:
+        with patch("insightbot.task_runner._run_editorial_pipeline") as mock_ep:
             mock_ep.return_value = {
                 "ok": True,
                 "final_markdown": "## 报告内容",
                 "screened_result": {},
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_to_channel") as mock_send:
+            with patch("insightbot.task_runner.send_to_channel") as mock_send, \
+                 patch("insightbot.task_runner.append_run_record") as mock_history:
                 result = run_task("daily_brief", fake_loader, dry_run=True)
 
                 assert result["dry_run"] is True
@@ -50,6 +51,7 @@ class TestRunTaskDryRun:
                 assert result["final_markdown"] == "## 报告内容"
                 assert "stage_results" in result
                 mock_send.assert_not_called()
+                mock_history.assert_called_once()
 
     def test_dry_run_with_classic_pipeline(self):
         from insightbot.task_runner import run_task
@@ -62,18 +64,20 @@ class TestRunTaskDryRun:
         }
         fake_loader = lambda: fake_config
 
-        with patch("insightbot.smart_brief_runner.run_task") as mock_classic:
+        with patch("insightbot.task_runner._run_classic_pipeline") as mock_classic:
             mock_classic.return_value = {
                 "ok": True,
                 "final_markdown": "## 经典报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_to_channel") as mock_send:
+            with patch("insightbot.task_runner.send_to_channel") as mock_send, \
+                 patch("insightbot.task_runner.append_run_record") as mock_history:
                 result = run_task("weekly_report", fake_loader, dry_run=True)
 
                 assert result["dry_run"] is True
                 assert result["pipeline"] == "classic"
                 mock_send.assert_not_called()
+                mock_history.assert_called_once()
 
 
 class TestRunTaskReal:
@@ -91,13 +95,14 @@ class TestRunTaskReal:
         }
         fake_loader = lambda: fake_config
 
-        with patch("insightbot.editorial_pipeline.run_editorial_pipeline") as mock_ep:
+        with patch("insightbot.task_runner._run_editorial_pipeline") as mock_ep:
             mock_ep.return_value = {
                 "ok": True,
                 "final_markdown": "## 报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_to_channel") as mock_send:
+            with patch("insightbot.task_runner.send_to_channel") as mock_send, \
+                 patch("insightbot.task_runner.append_run_record") as mock_history:
                 mock_send.return_value = True
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
@@ -105,6 +110,7 @@ class TestRunTaskReal:
                 assert len(result["channel_results"]) == 2
                 assert result["channel_results"][0]["channel_id"] == "ch1"
                 assert result["channel_results"][1]["channel_id"] == "ch2"
+                mock_history.assert_called_once()
 
     def test_pipeline_dispatch_editorial(self):
         from insightbot.task_runner import run_task
@@ -117,7 +123,7 @@ class TestRunTaskReal:
         }
         fake_loader = lambda: fake_config
 
-        with patch("insightbot.editorial_pipeline.run_editorial_pipeline") as mock_ep:
+        with patch("insightbot.task_runner._run_editorial_pipeline") as mock_ep:
             mock_ep.return_value = {
                 "ok": True,
                 "final_markdown": " editorial ",
@@ -138,7 +144,7 @@ class TestRunTaskReal:
         }
         fake_loader = lambda: fake_config
 
-        with patch("insightbot.smart_brief_runner.run_task") as mock_classic:
+        with patch("insightbot.task_runner._run_classic_pipeline") as mock_classic:
             mock_classic.return_value = {
                 "ok": True,
                 "final_markdown": " classic ",
@@ -159,12 +165,14 @@ class TestRunTaskReal:
         }
         fake_loader = lambda: fake_config
 
-        with patch("insightbot.editorial_pipeline.run_editorial_pipeline") as mock_ep:
+        with patch("insightbot.task_runner._run_editorial_pipeline") as mock_ep:
             mock_ep.side_effect = Exception("AI API failed")
-            result = run_task("t1", fake_loader, dry_run=True)
+            with patch("insightbot.task_runner.append_run_record") as mock_history:
+                result = run_task("t1", fake_loader, dry_run=True)
 
             assert result["ok"] is False
             assert "AI API failed" in result["error"]
+            mock_history.assert_called_once()
 
     def test_send_to_channel_called_with_content(self):
         from insightbot.task_runner import run_task
@@ -178,7 +186,7 @@ class TestRunTaskReal:
         }
         fake_loader = lambda: fake_config
 
-        with patch("insightbot.editorial_pipeline.run_editorial_pipeline") as mock_ep:
+        with patch("insightbot.task_runner._run_editorial_pipeline") as mock_ep:
             mock_ep.return_value = {
                 "ok": True,
                 "final_markdown": "## 报告",

@@ -199,4 +199,7 @@ def load_tasks_config(task_id: str, bot_dir: str | None = None) -> dict:
     # Inject pipeline type
     config["_task_pipeline"] = task_def.get("pipeline", "editorial")
 
+    # Inject task metadata for status/history layers
+    config["_task_name"] = task_def.get("name", task_id)
+
     return config

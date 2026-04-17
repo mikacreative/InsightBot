@@ -30,6 +30,9 @@ dry_run_report*.md
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+data/*.jsonl
+data/task_health/*.json
+data/task_state/*.json
 
 # OS/editor
 .DS_Store

@@ -22,6 +22,9 @@ from insightbot.paths import (
     bot_log_file_path,
     feed_health_cache_file_path,
     logs_dir,
+    task_health_cache_file_path,
+    task_runs_file_path,
+    task_state_file_path,
 )
 from insightbot.config import load_json_config, load_runtime_config
 
@@ -103,6 +106,33 @@ class TestSplitConfigPaths:
         with patch.dict(os.environ, env_without, clear=True):
             result = feed_health_cache_file_path(str(tmp_path))
         assert result == str(tmp_path / "data" / "feed_health_cache.json")
+
+    def test_task_runs_path_defaults_to_data_dir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("TASK_RUNS_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = task_runs_file_path(str(tmp_path))
+        assert result == str(tmp_path / "data" / "task_runs.jsonl")
+
+    def test_task_health_cache_path_defaults_to_task_health_subdir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("TASK_HEALTH_CACHE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = task_health_cache_file_path("daily_brief", str(tmp_path))
+        assert result == str(tmp_path / "data" / "task_health" / "daily_brief.json")
+
+    def test_task_state_path_defaults_to_task_state_subdir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("TASK_STATE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = task_state_file_path("daily_brief", str(tmp_path))
+        assert result == str(tmp_path / "data" / "task_state" / "daily_brief.json")
 
 
 # ── bot_log_file_path 测试 ────────────────────────────────────────────────────
