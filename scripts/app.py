@@ -92,6 +92,47 @@ def main() -> None:
         logger.propagate = False
         return logger
 
+    def set_prompt_debug_category(task_id: str | None, category: str) -> None:
+        task_scope = task_id or "default"
+        st.session_state[f"prompt_debug_category::{task_scope}"] = category
+        draft_key = f"draft_prompt::{task_scope}::{category}"
+        if draft_key not in st.session_state:
+            st.session_state[draft_key] = selected_task_feeds.get(category, {}).get("prompt", "")
+
+    def seed_prompt_debug_candidates(task_id: str | None, category: str) -> tuple[int, bool]:
+        ui_logger = build_ui_logger()
+        candidates = fetch_recent_candidates(feed_data=selected_task_feeds.get(category, {}), logger=ui_logger)
+        using_fallback = False
+        if not candidates:
+            candidates = list(DEBUG_SAMPLE_NEWS)
+            using_fallback = True
+        st.session_state["prompt_debug_candidates"] = candidates
+        st.session_state["prompt_debug_meta"] = {
+            "category": category,
+            "using_fallback": using_fallback,
+            "task_id": task_id,
+        }
+        st.session_state.pop("prompt_debug_result", None)
+        st.session_state.pop("prompt_debug_compare", None)
+        return len(candidates), using_fallback
+
+    def set_verification_focus(task_id: str | None, category: str | None) -> None:
+        task_scope = task_id or "default"
+        key = f"verification_focus::{task_scope}"
+        if category:
+            st.session_state[key] = category
+        else:
+            st.session_state.pop(key, None)
+
+    def get_verification_focus(task_id: str | None) -> str | None:
+        return st.session_state.get(f"verification_focus::{task_id or 'default'}")
+
+    def filter_prompt_history_for_category(items: list[dict], category: str | None) -> list[dict]:
+        if not category:
+            return items
+        scoped = [item for item in items if item.get("category") == category]
+        return scoped if scoped else items
+
     def render_prompt_debug_styles() -> None:
         st.markdown(
             """
@@ -439,23 +480,35 @@ def main() -> None:
             unsafe_allow_html=True,
         )
         kind = card.get("kind")
-        if kind == "prompt_block":
-            blocked = [item.get("category") for item in card.get("details", []) if item.get("category")]
-            if blocked:
-                default_category = blocked[0]
+        detail_categories = [item.get("category") for item in card.get("details", []) if item.get("category")]
+        default_category = detail_categories[0] if detail_categories else None
+        if default_category:
+            action_col1, action_col2 = st.columns(2)
+            with action_col1:
                 if st.button(
-                    f"🎯 预设到 Prompt Debug：{default_category}",
-                    key=f"{key_prefix}_diag_prompt_{default_category}",
+                    f"🎯 聚焦板块：{default_category}",
+                    key=f"{key_prefix}_diag_focus_{default_category}",
+                    use_container_width=True,
                 ):
-                    task_scope = st.session_state.get("selected_task_id", "default")
-                    st.session_state[f"prompt_debug_category::{task_scope}"] = default_category
-                    if default_category in prompt_categories:
-                        draft_key = f"draft_prompt::{task_scope}::{default_category}"
-                        if draft_key not in st.session_state:
-                            st.session_state[draft_key] = selected_task_feeds.get(default_category, {}).get("prompt", "")
-                    st.success("已预设 Prompt Debug 板块，请切到“🧠 AI 提示词调优”继续。")
+                    set_verification_focus(selected_task_id, default_category)
+                    st.rerun()
+            with action_col2:
+                if kind == "prompt_block" and st.button(
+                    f"🧠 预设到 Prompt Debug：{default_category}",
+                    key=f"{key_prefix}_diag_prompt_{default_category}",
+                    use_container_width=True,
+                ):
+                    set_prompt_debug_category(selected_task_id, default_category)
+                    candidate_count, using_fallback = seed_prompt_debug_candidates(selected_task_id, default_category)
+                    status_text = "内置样例" if using_fallback else "真实 RSS"
+                    st.success(f"已为 [{default_category}] 预设 Prompt Debug，并准备 {candidate_count} 条候选（{status_text}）。")
+        if kind == "prompt_block":
+            if default_category is None:
+                st.caption("建议切到“🧠 AI 提示词调优”，优先排查被拦截的板块。")
         elif kind == "source_error":
             st.caption("建议先在当前页的 RSS 健康度列表里查看这些异常源。")
+        elif kind == "no_candidates":
+            st.caption("建议先聚焦该板块看 RSS 健康度；如果源本身长期无更新，再考虑补源或改抓取范围。")
         elif kind == "runtime_error":
             st.caption("建议切到“📝 运行日志”查看完整错误上下文。")
 
@@ -1703,6 +1756,8 @@ def main() -> None:
 
         health_snapshot = load_task_health(selected_task_id, bot_dir) if selected_task_id else None
         run_summary = parse_recent_run_summary(bot_log_path)
+        task_prompt_history = filter_prompt_history_for_task(load_prompt_debug_history(bot_dir), selected_task_id)
+        focused_category = get_verification_focus(selected_task_id)
 
         st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
         st.markdown('<div class="ib-section-title">验证状态总览</div>', unsafe_allow_html=True)
@@ -1718,6 +1773,51 @@ def main() -> None:
             prompt_history=overview_prompt_history,
         )
         st.markdown("</div>", unsafe_allow_html=True)
+
+        if focused_category:
+            focus_col1, focus_col2 = st.columns([4, 1.2])
+            with focus_col1:
+                st.markdown(
+                    f'<div class="ib-chip-row"><span class="ib-chip ib-chip-warning">当前聚焦板块：{focused_category}</span></div>',
+                    unsafe_allow_html=True,
+                )
+            with focus_col2:
+                if st.button("清除聚焦", use_container_width=True):
+                    set_verification_focus(selected_task_id, None)
+                    st.rerun()
+
+            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+            st.markdown('<div class="ib-section-title">聚焦板块下一步</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="ib-section-copy">把验证页和 Prompt Debug 串起来：先确认源健康，再准备候选并去调试当前板块。</div>',
+                unsafe_allow_html=True,
+            )
+            action_col1, action_col2 = st.columns(2)
+            with action_col1:
+                if st.button("🧠 预设到 Prompt Debug", key=f"verification_prompt_debug::{focused_category}", use_container_width=True):
+                    set_prompt_debug_category(selected_task_id, focused_category)
+                    st.success(f"已把 [{focused_category}] 设为 Prompt Debug 当前板块。")
+            with action_col2:
+                if st.button("📥 抓候选到调试台", key=f"verification_fetch_candidates::{focused_category}", use_container_width=True):
+                    candidate_count, using_fallback = seed_prompt_debug_candidates(selected_task_id, focused_category)
+                    set_prompt_debug_category(selected_task_id, focused_category)
+                    status_text = "内置样例" if using_fallback else "真实 RSS"
+                    st.success(f"已为 [{focused_category}] 准备 {candidate_count} 条候选（{status_text}）。")
+
+            category_history = filter_prompt_history_for_category(task_prompt_history, focused_category)
+            recent_debug = category_history[0] if category_history else None
+            if recent_debug:
+                mode_label = "草稿试跑" if recent_debug.get("mode") == "draft_run" else "当前 vs 草稿"
+                st.caption(
+                    f"最近调试：{recent_debug.get('created_at', '')} | {mode_label} | 候选 {recent_debug.get('candidate_count', 0)} 条 | "
+                    f"{render_history_status('草稿', recent_debug.get('draft_status'), recent_debug.get('draft_selected_count'))}"
+                )
+                excerpt = recent_debug.get("draft_prompt_excerpt", "").strip()
+                if excerpt:
+                    st.caption(f"最近草稿摘要：{excerpt}")
+            else:
+                st.info("这个板块最近还没有 Prompt Debug 记录，可以先抓候选再试跑。")
+            st.markdown("</div>", unsafe_allow_html=True)
 
         header_col1, header_col2, header_col3 = st.columns([1.3, 1.0, 1.2])
         with header_col1:
@@ -1753,6 +1853,11 @@ def main() -> None:
                 run_summary=run_summary,
                 configured_categories=selected_task_categories,
             )
+            if focused_category:
+                diagnosis_cards = [
+                    card for card in diagnosis_cards
+                    if any(item.get("category") == focused_category for item in card.get("details", []) if isinstance(item, dict))
+                ]
             if diagnosis_cards:
                 st.markdown('<div class="ib-hero">', unsafe_allow_html=True)
                 st.markdown('<div class="ib-eyebrow">No Push Diagnosis</div>', unsafe_allow_html=True)
@@ -1810,6 +1915,8 @@ def main() -> None:
             )
 
             for category_result in health_snapshot.get("categories", []):
+                if focused_category and category_result.get("category") != focused_category:
+                    continue
                 visible_feeds = []
                 for feed in category_result.get("feeds", []):
                     latest_pub = feed.get("latest_pub")
