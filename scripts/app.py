@@ -92,6 +92,26 @@ def main() -> None:
         logger.propagate = False
         return logger
 
+    def summarize_task_debug_result(result: dict) -> dict:
+        stage_results = result.get("stage_results", {}) if isinstance(result, dict) else {}
+        assignment_map = stage_results.get("assignment_result", {}).get("category_candidate_map", {})
+        category_results = stage_results.get("category_results", {})
+
+        return {
+            "global_candidates": len(stage_results.get("global_candidates", []) or []),
+            "screened_candidates": len(stage_results.get("screened_result", {}).get("screened", []) or []),
+            "unassigned_candidates": len(stage_results.get("assignment_result", {}).get("unassigned", []) or []),
+            "assigned_by_category": {
+                key: len(value or [])
+                for key, value in assignment_map.items()
+            },
+            "selected_by_category": {
+                key: len((value or {}).get("selected_items", []) or [])
+                for key, value in category_results.items()
+                if isinstance(value, dict)
+            },
+        }
+
     def set_prompt_debug_category(task_id: str | None, category: str) -> None:
         task_scope = task_id or "default"
         st.session_state[f"prompt_debug_category::{task_scope}"] = category
@@ -2279,6 +2299,23 @@ def main() -> None:
                             "error": result.get("error"),
                             "channel_results": result.get("channel_results", []),
                         }, expanded=False)
+                        stage_summary = summarize_task_debug_result(result)
+                        st.markdown("#### 流程摘要")
+                        metric_col1, metric_col2, metric_col3 = st.columns(3)
+                        metric_col1.metric("全局候选", stage_summary["global_candidates"])
+                        metric_col2.metric("全局初筛通过", stage_summary["screened_candidates"])
+                        metric_col3.metric("未分配", stage_summary["unassigned_candidates"])
+
+                        if stage_summary["assigned_by_category"]:
+                            st.markdown("#### 板块分配")
+                            st.json(stage_summary["assigned_by_category"], expanded=False)
+
+                        if stage_summary["selected_by_category"]:
+                            st.markdown("#### 最终产出")
+                            st.json(stage_summary["selected_by_category"], expanded=False)
+
+                        st.markdown("#### stage_results")
+                        st.json(result.get("stage_results", {}), expanded=False)
                 else:
                     st.info(f"当前保存的是任务「{result_task_name}」的 Dry Run 结果；切回对应任务可查看详情。")
 
