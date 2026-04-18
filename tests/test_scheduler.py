@@ -160,7 +160,6 @@ class TestSchedulerReload:
             sched.bot_dir = "/tmp"
             sched.tasks = {}
             sched._log = MagicMock()
-            sched._config_loader_fn = FakeConfigLoader()
 
             sched._load_tasks()
             assert "task_x" in sched.tasks
@@ -173,3 +172,19 @@ class TestSchedulerReload:
             sched.reload()
             assert "task_y" in sched.tasks
             assert "task_x" not in sched.tasks
+
+
+class TestSchedulerTaskConfigLoading:
+    def test_loads_full_task_config_per_task(self):
+        from insightbot.scheduler import Scheduler
+
+        sched = Scheduler.__new__(Scheduler)
+        sched.bot_dir = "/tmp/insightbot"
+        loader = sched._make_task_config_loader("daily_brief")
+
+        with patch("insightbot.scheduler.load_tasks_config") as mock_load_task_config:
+            mock_load_task_config.return_value = {"feeds": {"A": {}}, "_task_name": "Daily"}
+            result = loader()
+
+        mock_load_task_config.assert_called_once_with("daily_brief", "/tmp/insightbot")
+        assert result == {"feeds": {"A": {}}, "_task_name": "Daily"}

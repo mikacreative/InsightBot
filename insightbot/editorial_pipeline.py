@@ -81,6 +81,34 @@ DEFAULT_GLOBAL_SYSTEM_PROMPT = """你是一个资深营销情报官，站在"总
 """
 
 
+def _normalize_category_token(value: str) -> str:
+    """Normalize category labels so AI responses can omit emoji/punctuation."""
+    text = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(value or ""))
+    return text.lower()
+
+
+def _resolve_category_name(raw_category: str, category_list: list[str]) -> str:
+    """Map AI-returned category names to the configured category key."""
+    normalized_raw = _normalize_category_token(raw_category)
+    if not normalized_raw:
+        return ""
+
+    normalized_map = {
+        category: _normalize_category_token(category)
+        for category in category_list
+    }
+
+    for category, normalized_category in normalized_map.items():
+        if normalized_raw == normalized_category:
+            return category
+
+    for category, normalized_category in normalized_map.items():
+        if normalized_raw in normalized_category or normalized_category in normalized_raw:
+            return category
+
+    return ""
+
+
 # ---------- Search: Global Candidate Supplementation ----------
 
 
@@ -786,7 +814,7 @@ def _assign_batch_once(
 
     for assignment in assignments_raw:
         idx = assignment.get("candidate_index", 0) - 1
-        cat = assignment.get("assigned_category", "")
+        cat = _resolve_category_name(assignment.get("assigned_category", ""), category_list)
         if 0 <= idx < len(candidates) and cat in result_map:
             candidate = dict(candidates[idx])
             candidate["assignment_reason"] = assignment.get("reason", "")

@@ -24,6 +24,7 @@ sys.modules['requests'] = _mock_requests
 
 from insightbot.editorial_pipeline import (
     _build_publication_scope_summary,
+    _resolve_category_name,
     _normalize_global_items,
     _validate_global_screen,
     assign_candidates_to_categories,
@@ -401,6 +402,36 @@ class TestAssignCandidatesToCategories:
 
         assert len(result["unassigned"]) == 1
         assert result["unassigned"][0]["link"] == "https://example.com/irrelevant"
+
+    def test_resolves_category_without_emoji(self):
+        category_list = ["💡 营销行业", "🤖 数智前沿"]
+        assert _resolve_category_name("营销行业", category_list) == "💡 营销行业"
+        assert _resolve_category_name("数智前沿", category_list) == "🤖 数智前沿"
+
+    def test_assign_batch_accepts_normalized_category_name(self, silent_logger):
+        candidates = [
+            {"title": "文章1", "link": "https://example.com/1", "summary": "摘要"},
+        ]
+        config = _editorial_config()
+
+        raw_response = json.dumps({
+            "assignments": [
+                {
+                    "candidate_index": 1,
+                    "assigned_category": "营销行业",
+                    "reason": "匹配营销案例",
+                }
+            ]
+        }, ensure_ascii=False)
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw_response):
+            result = assign_candidates_to_categories(
+                config=config, screened_candidates=candidates, logger=silent_logger
+            )
+
+        assert len(result["category_candidate_map"]["💡 营销行业"]) == 1
+        assert result["category_candidate_map"]["💡 营销行业"][0]["assignment_reason"] == "匹配营销案例"
+        assert result["unassigned"] == []
 
 
 class TestBuildPublicationScopeSummary:
