@@ -1,6 +1,6 @@
 ## InsightBot (营销情报站)
 
-> 当前版本：`v2.0.0`
+> 当前版本：`v0.4.0`
 
 一个"RSS + AI + 多频道推送"的多任务营销情报简报机器人：
 
@@ -22,13 +22,13 @@
 | `insightbot/smart_brief_runner.py` | 经典简报流程 |
 | `scripts/app.py` | Streamlit 管理台（9 个标签页） |
 
-### v2.0 新能力
+### v0.4.0 新能力
 
 - **多任务多频道**：每个任务独立配置 feeds、pipeline、channels、schedule
 - **Channels 抽象**：企业微信凭证单独存储在 `channels.json`
 - **内置调度器**：无需外部 cron，直接守护 `python -m insightbot.cli` 即可
 - **调试控制台（tab8）**：Dry Run 在面板内展示完整简报预览 + 中间结果，零频道发送
-- **自动迁移**：首次启动 v2.0 自动从 v1 配置生成 `channels.json` + `tasks.json`
+- **自动迁移**：首次启动会自动从旧版单任务配置生成 `channels.json` + `tasks.json`
 
 ### 管理台标签页
 
@@ -187,6 +187,6 @@ python -m insightbot.cli --task daily_brief --dry-run
 
 - [Editorial Pipeline 设计文档](./docs/editorial_pipeline_design.md)
 - [Search 集成设计文档](./docs/search_integration_design.md)
-- [v2.0 架构变更说明](./docs/v2.0_architecture.md)
+- [多任务架构说明](./docs/v2.0_architecture.md)
 - [本地测试指南](./LOCAL_TESTING_GUIDE.md)
 - [部署指南](./DEPLOYMENT_GUIDE.md)

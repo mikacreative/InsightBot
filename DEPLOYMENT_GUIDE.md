@@ -1,6 +1,6 @@
 # InsightBot 部署指南
 
-**更新日期**：2026-04-18（适配 v2.0 / Channels 扩展）
+**更新日期**：2026-04-18（适配 v0.4.0 / Channels 扩展）
 
 ---
 
@@ -93,7 +93,7 @@ pip install -r requirements.txt
 
 **方式 A：systemd 常驻进程（推荐）**
 
-> v2.0 之后，推荐只守护 `python -m insightbot.cli` 这个进程。
+> 当前正式版本开始，推荐只守护 `python -m insightbot.cli` 这个进程。
 > 不需要再额外维护系统 `cron`，否则会和内置调度器形成双重触发。
 
 ```ini
@@ -136,7 +136,7 @@ docker-compose up -d
 ### 4. 环境变量管理
 
 *   **推荐**：将敏感信息作为腾讯云 CVM 的环境变量配置，不写入代码。
-*   v2.0 新增 `CHANNELS_FILE` / `TASKS_FILE` 路径变量，生产环境建议显式指定：
+*   当前版本支持 `CHANNELS_FILE` / `TASKS_FILE` 路径变量，生产环境建议显式指定：
   ```bash
   CHANNELS_FILE=/root/marketing_bot/channels.json
   TASKS_FILE=/root/marketing_bot/tasks.json

@@ -8,6 +8,13 @@ config.secrets.json
 config.local.json
 config.local.content.json
 config.local.secrets.json
+config*.bak*
+config*.back*
+config*.prod
+channels*.bak*
+tasks*.bak*
+back-up/
+backup/
 
 # Python
 venv/
