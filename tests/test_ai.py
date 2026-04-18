@@ -115,12 +115,43 @@ class TestChatCompletionErrorPath:
     def test_raises_on_malformed_response(self):
         """API 返回格式异常时应抛出 KeyError（由调用方的 retry 逻辑处理）。"""
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {"error": "invalid_api_key"}
         with patch("insightbot.ai.requests.post", return_value=mock_resp):
             with pytest.raises(KeyError):
                 chat_completion(
                     api_url="https://api.test.com/v1/chat/completions",
                     api_key="bad-key",
+                    model="model",
+                    system_prompt="sys",
+                    user_text="user",
+                )
+
+    def test_raises_runtime_error_on_http_error_payload(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.json.return_value = {"error": {"message": "model not found"}}
+        with patch("insightbot.ai.requests.post", return_value=mock_resp):
+            with pytest.raises(RuntimeError, match="model not found"):
+                chat_completion(
+                    api_url="https://api.test.com/v1/chat/completions",
+                    api_key="bad-key",
+                    model="model",
+                    system_prompt="sys",
+                    user_text="user",
+                )
+
+    def test_non_json_error_includes_response_preview(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.text = "<html><title>Bad Gateway</title></html>"
+        mock_resp.json.side_effect = ValueError("not json")
+        with patch("insightbot.ai.requests.post", return_value=mock_resp):
+            with pytest.raises(ValueError, match="text/html"):
+                chat_completion(
+                    api_url="https://api.test.com/v1/chat/completions",
+                    api_key="key",
                     model="model",
                     system_prompt="sys",
                     user_text="user",

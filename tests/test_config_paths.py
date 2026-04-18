@@ -15,11 +15,18 @@ import pytest
 
 from insightbot.paths import (
     default_bot_dir,
+    data_dir,
+    config_content_file_path,
     config_file_path,
+    config_secrets_file_path,
     bot_log_file_path,
+    feed_health_cache_file_path,
     logs_dir,
+    task_health_cache_file_path,
+    task_runs_file_path,
+    task_state_file_path,
 )
-from insightbot.config import load_json_config
+from insightbot.config import load_json_config, load_runtime_config
 
 
 # ── default_bot_dir 测试 ──────────────────────────────────────────────────────
@@ -60,6 +67,72 @@ class TestConfigFilePath:
             with patch("insightbot.paths.default_bot_dir", return_value=str(tmp_path)):
                 result = config_file_path(str(tmp_path))
         assert result == str(tmp_path / "config.json")
+
+
+class TestSplitConfigPaths:
+
+    def test_content_path_defaults_to_config_content_json(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("CONFIG_CONTENT_FILE", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = config_content_file_path(str(tmp_path))
+        assert result == str(tmp_path / "config.content.json")
+
+    def test_secrets_path_defaults_to_config_secrets_json(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("CONFIG_SECRETS_FILE", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = config_secrets_file_path(str(tmp_path))
+        assert result == str(tmp_path / "config.secrets.json")
+
+    def test_data_dir_defaults_to_data_subdir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = data_dir(str(tmp_path))
+        assert result == str(tmp_path / "data")
+
+    def test_feed_health_cache_path_defaults_to_data_dir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("FEED_HEALTH_CACHE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = feed_health_cache_file_path(str(tmp_path))
+        assert result == str(tmp_path / "data" / "feed_health_cache.json")
+
+    def test_task_runs_path_defaults_to_data_dir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("TASK_RUNS_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = task_runs_file_path(str(tmp_path))
+        assert result == str(tmp_path / "data" / "task_runs.jsonl")
+
+    def test_task_health_cache_path_defaults_to_task_health_subdir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("TASK_HEALTH_CACHE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = task_health_cache_file_path("daily_brief", str(tmp_path))
+        assert result == str(tmp_path / "data" / "task_health" / "daily_brief.json")
+
+    def test_task_state_path_defaults_to_task_state_subdir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("TASK_STATE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = task_state_file_path("daily_brief", str(tmp_path))
+        assert result == str(tmp_path / "data" / "task_state" / "daily_brief.json")
 
 
 # ── bot_log_file_path 测试 ────────────────────────────────────────────────────
@@ -119,3 +192,69 @@ class TestLoadJsonConfig:
 
         result = load_json_config(str(config_file))
         assert result["settings"]["report_title"] == "📅 营销情报早报 | {date}"
+
+
+class TestLoadRuntimeConfig:
+
+    def test_prefers_split_config_and_merges_secrets(self, tmp_path):
+        content = {
+            "ai": {"system_prompt": "sys"},
+            "feeds": {"营销": {"rss": ["https://example.com/feed"], "keywords": [], "prompt": "筛选"}},
+            "settings": {"report_title": "日报"},
+        }
+        secrets = {
+            "wecom": {"cid": "cid", "secret": "secret", "aid": "10001"},
+            "ai": {"api_key": "secret-key", "api_url": "https://api.example.com", "model": "kimi"},
+        }
+        (tmp_path / "config.content.json").write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8")
+        (tmp_path / "config.secrets.json").write_text(json.dumps(secrets, ensure_ascii=False), encoding="utf-8")
+
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("CONFIG_FILE", "CONFIG_CONTENT_FILE", "CONFIG_SECRETS_FILE", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = load_runtime_config(str(tmp_path))
+
+        assert result["ai"]["model"] == "kimi"
+        assert result["ai"]["api_key"] == "secret-key"
+        assert result["wecom"]["cid"] == "cid"
+        assert "营销" in result["feeds"]
+
+    def test_falls_back_to_legacy_single_file(self, tmp_path):
+        legacy = {
+            "wecom": {"cid": "cid"},
+            "ai": {"api_key": "key", "model": "legacy-model"},
+            "feeds": {},
+            "settings": {},
+        }
+        (tmp_path / "config.json").write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("CONFIG_FILE", "CONFIG_CONTENT_FILE", "CONFIG_SECRETS_FILE", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = load_runtime_config(str(tmp_path))
+
+        assert result["ai"]["model"] == "legacy-model"
+        assert result["ai"]["api_key"] == "key"
+
+    def test_env_vars_override_split_files(self, tmp_path):
+        content = {"ai": {"model": "kimi"}, "feeds": {}, "settings": {}}
+        secrets = {"ai": {"api_key": "file-key"}}
+        (tmp_path / "config.content.json").write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8")
+        (tmp_path / "config.secrets.json").write_text(json.dumps(secrets, ensure_ascii=False), encoding="utf-8")
+
+        with patch.dict(
+            os.environ,
+            {
+                "AI_API_KEY": "env-key",
+                "AI_API_URL": "https://env.example.com",
+            },
+            clear=False,
+        ):
+            result = load_runtime_config(str(tmp_path))
+
+        assert result["ai"]["api_key"] == "env-key"
+        assert result["ai"]["api_url"] == "https://env.example.com"

@@ -15,9 +15,24 @@ def logs_dir(bot_dir: str | None = None) -> str:
     return os.getenv("LOGS_DIR", os.path.join(bot_dir, "logs"))
 
 
+def data_dir(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("DATA_DIR", os.path.join(bot_dir, "data"))
+
+
 def config_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("CONFIG_FILE", os.path.join(bot_dir, "config.json"))
+
+
+def config_content_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("CONFIG_CONTENT_FILE", os.path.join(bot_dir, "config.content.json"))
+
+
+def config_secrets_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("CONFIG_SECRETS_FILE", os.path.join(bot_dir, "config.secrets.json"))
 
 
 def bot_log_file_path(bot_dir: str | None = None) -> str:
@@ -29,3 +44,37 @@ def cron_log_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("LOG_FILE", os.path.join(logs_dir(bot_dir), "cron.log"))
 
+
+def feed_health_cache_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("FEED_HEALTH_CACHE_FILE", os.path.join(data_dir(bot_dir), "feed_health_cache.json"))
+
+
+def prompt_debug_history_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("PROMPT_DEBUG_HISTORY_FILE", os.path.join(data_dir(bot_dir), "prompt_debug_history.json"))
+
+
+def channels_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("CHANNELS_FILE", os.path.join(bot_dir, "channels.json"))
+
+
+def tasks_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("TASKS_FILE", os.path.join(bot_dir, "tasks.json"))
+
+
+def task_runs_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("TASK_RUNS_FILE", os.path.join(data_dir(bot_dir), "task_runs.jsonl"))
+
+
+def task_health_cache_file_path(task_id: str, bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("TASK_HEALTH_CACHE_FILE", os.path.join(data_dir(bot_dir), "task_health", f"{task_id}.json"))
+
+
+def task_state_file_path(task_id: str, bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("TASK_STATE_FILE", os.path.join(data_dir(bot_dir), "task_state", f"{task_id}.json"))

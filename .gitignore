@@ -1,10 +1,20 @@
 # Local config / secrets
 config.json
+config.secrets.json
 .env
 .env.*
 !.env.example
 !.env.local.example
 config.local.json
+config.local.content.json
+config.local.secrets.json
+config*.bak*
+config*.back*
+config*.prod
+channels*.bak*
+tasks*.bak*
+back-up/
+backup/
 
 # Python
 venv/
@@ -27,6 +37,14 @@ dry_run_report*.md
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+data/*.jsonl
+data/task_health/*.json
+data/task_state/*.json
 
 # OS/editor
 .DS_Store
+
+# Build / packaging / test artifacts
+insightbot.egg-info/
+marketing_bot.egg-info/
+pytest-of-mikawang/

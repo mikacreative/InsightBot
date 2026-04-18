@@ -1,0 +1,81 @@
+{
+    "ai": {
+        "system_prompt": "你是一个拥有 10 年经验的资深营销情报官。你擅长从宏观政策、媒体动向、优质案例及行业变革中，提炼出对于中国市场极具落地性的策略参考。你的目标是为专业营销咨询师筛选情报，辅助其提供前瞻性的传播策略。\n\n【任务】\n从输入的新闻列表中，挑选出与中国市场营销、公关传播最具参考价值的资讯或案例。\n\n【输出标准 - 必须严格遵守】\n1. 格式：\n### [重构后的标题](原文链接)\n> 💡 *摘要内容*\n\n2. 标题重写（中英双语逻辑）：\n   - 必须去除\"震惊\"、\"重磅\"、\"突发\"等虚假修饰词。\n   - 结构固定为：[主体/品牌] + [核心动作/事件]。\n   - 语言规则：若来源是中文，标题必须使用简体中文；若来源是英文，标题必须保留为英文（但需按结构重构）。\n\n3. 摘要重写：\n   - 字数：严格控制在 30 字以内。\n   - 语言：必须使用简体中文输出。\n   - 语气：平实、老练、一针见血，禁止翻译腔。\n   - 内容：仅包含\"[发生了什么] + [对营销人的具体启示/影响]\"。\n\n不要输出任何开场白，直接列出内容。",
+        "editorial_pipeline": {
+            "enabled": true,
+            "global_shortlist_multiplier": 3,
+            "allow_multi_assign": false,
+            "inject_publication_scope_into_global": true,
+            "assignment_batch_size": 20
+        },
+        "selection": {
+            "max_selected_items": 5,
+            "title_max_len": 30,
+            "summary_max_len": 50,
+            "full_context_threshold_chars": 40000,
+            "batch_size": 15
+        }
+    },
+    "feeds": {
+        "💡 营销行业": {
+            "rss": [
+                "http://localhost:1200/sohu/mp/MTliNDU3ZmMtZTc1Ni00Yjk1LTk4M2MtMWNiNGViZGVjNTYy # 刀法研究所",
+                "https://www.digitaling.com/rss # 数英网",
+                "http://111.229.166.6:1200/topys # TOPYS",
+                "https://www.marketingdive.com/feeds/news/ # MarketingDive",
+                "https://walkthechat.com/feed/ # WalktheChat Blog",
+                "https://www.adweek.com/feed/ # AdWeek",
+                "https://blog.hubspot.com/marketing/rss.xml # HubSpot",
+                "https://daoinsights.com/feed/ # DaoInsights",
+                "https://www.meihua.info/feed # 梅花网",
+                "https://www.motive.com.tw/feed # Motive 台湾营销行业网站",
+                "https://madbrief.com/feed # madbrief.com",
+                "https://www.opp2.com/feed # www.opp2.com"
+            ],
+            "keywords": [
+                "广告公司",
+                "公关公司",
+                "营销",
+                "案例"
+            ],
+            "prompt": "仅保留：对于中国大陆的营销传播、公关传播具有参考意义的案例、行业变化、趋势解读等。在摘要中，必须一针见血地指出该案例的\"核心锚点\"与\"背后的商业/传播策略\"\n拒绝收录：其他国家或者地区的内容"
+        },
+        "🤖 数智前沿": {
+            "rss": [
+                "http://localhost:1200/36kr/hot-list # 36kr资讯热榜",
+                "http://localhost:1200/mittrchina/index # 麻省理工科技评论",
+                "http://localhost:1200/latepost # 晚点新闻",
+                "http://localhost:1200/sohu/mp/YzYxNGM1NDUtN2Y5ZC00Y2JiLTk1Y2MtZWM3OTMzN2M0Mjk3 # 数字生命卡兹克",
+                "http://localhost:1200/woshipm/popular/daily # 人人都是产品经理-日榜",
+                "http://localhost:1200/huxiu/tag/103 # 虎嗅-社交网络标签",
+                "https://technode.com/feed/ # TechNode",
+                "https://www.199it.com/feed # 199IT互联网数据咨询"
+            ],
+            "keywords": [
+                "AI",
+                "数字营销"
+            ],
+            "prompt": "仅保留：社交平台机制变化、重要媒介产品更新等前沿技术在创意内容或营销行业的应用。\n拒绝收录：学术论文、硬件、科技行业动态、投融资、基础设施、数码产品、手机、电脑等与营销或公关无关的内容。"
+        },
+        "📢 政策导向": {
+            "rss": [
+                "http://localhost:1200/gov/miit/zcjd # 政策解读",
+                "http://localhost:1200/caixinglobal/latest # 财新全球",
+                "http://localhost:1200/guancha/headline # 观察者网-头条"
+            ],
+            "keywords": [],
+            "prompt": "仅保留：中国大陆官方机构或者党央媒体发布，对企业经营、广告营销、数据安全有直接影响的政策或意见。重点提取对公关传播导向、危机防范，品牌声誉管理有重大指导意义的内容。\n拒绝收录：一般的宏观经济指标、国际政治摩擦、军事、社会治安案件。"
+        }
+    },
+    "search": {
+        "enabled": false,
+        "provider": "baidu",
+        "queries": []
+    },
+    "settings": {
+        "report_title": "📅 营销早报 | {date}",
+        "empty_message": "📭 今日全网无重要更新。",
+        "show_footer": false,
+        "footer_text": "👀 [前往控制台调整策略](http://你的IP:8501)"
+    }
+}
