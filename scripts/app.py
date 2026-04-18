@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import datetime
 
 import streamlit as st
-from insightbot.channels import init_channels, test_channel
+from insightbot.channels import init_channels, test_channel_config, validate_channel_definition
 from insightbot.config import (
     load_channels,
     load_runtime_config,
@@ -111,6 +111,30 @@ def main() -> None:
                 if isinstance(value, dict)
             },
         }
+
+    def get_channel_reference_tasks(channel_id: str) -> list[str]:
+        tasks_data = get_tasks_data()
+        referenced = []
+        for task_id, task_def in tasks_data.get("tasks", {}).items():
+            if channel_id in (task_def.get("channels", []) or []):
+                referenced.append(task_def.get("name", task_id))
+        return referenced
+
+    def render_channel_validation(channel_id: str, channel_payload: dict) -> None:
+        validation = validate_channel_definition(channel_id, channel_payload)
+        referenced_tasks = get_channel_reference_tasks(channel_id)
+
+        if validation["is_ready"]:
+            st.success("✅ 当前频道配置完整，可用于真实发送。")
+        else:
+            st.warning("⚠️ 当前频道配置未完成，真实发送或测试可能失败。")
+            for issue in validation["issues"]:
+                st.caption(f"- {issue['message']}")
+
+        if referenced_tasks:
+            st.caption("当前引用任务：" + "、".join(referenced_tasks))
+        else:
+            st.caption("当前没有任务引用这个频道。")
 
     def set_prompt_debug_category(task_id: str | None, category: str) -> None:
         task_scope = task_id or "default"
@@ -1242,27 +1266,94 @@ def main() -> None:
                 col1, col2 = st.columns([1, 1])
                 with col1:
                     new_ch_name = st.text_input("名称", value=ch.get("name", ""), key=f"ch_name_{ch_id}")
+                channel_type_options = ["wecom", "feishu_app", "feishu_bot"]
+                current_type = ch.get("type", "wecom")
+                if current_type not in channel_type_options:
+                    current_type = "wecom"
                 with col2:
                     new_ch_type = st.selectbox(
                         "类型",
-                        options=["wecom"],
-                        index=0,
+                        options=channel_type_options,
+                        index=channel_type_options.index(current_type),
                         key=f"ch_type_{ch_id}",
                     )
-                new_cid = st.text_input("Corp ID (cid)", value=ch.get("cid", ""), key=f"ch_cid_{ch_id}")
-                new_secret = st.text_input("Secret", value=ch.get("secret", ""), type="password", key=f"ch_secret_{ch_id}")
-                new_agent_id = st.text_input("Agent ID", value=ch.get("agent_id", ""), key=f"ch_agent_{ch_id}")
+
+                channel_payload = {
+                    "type": new_ch_type,
+                    "name": new_ch_name,
+                }
+                if new_ch_type == "wecom":
+                    new_cid = st.text_input("Corp ID (cid)", value=ch.get("cid", ""), key=f"ch_cid_{ch_id}")
+                    new_secret = st.text_input("Secret", value=ch.get("secret", ""), type="password", key=f"ch_secret_{ch_id}")
+                    new_agent_id = st.text_input("Agent ID", value=ch.get("agent_id", ""), key=f"ch_agent_{ch_id}")
+                    channel_payload.update({
+                        "cid": new_cid,
+                        "secret": new_secret,
+                        "agent_id": new_agent_id,
+                    })
+                elif new_ch_type == "feishu_app":
+                    st.caption("推荐方式：飞书应用鉴权后走官方消息 API；消息发送支持 richer message 卡片。")
+                    new_app_id = st.text_input("App ID", value=ch.get("app_id", ""), key=f"ch_feishu_app_id_{ch_id}")
+                    new_app_secret = st.text_input(
+                        "App Secret",
+                        value=ch.get("app_secret", ""),
+                        type="password",
+                        key=f"ch_feishu_app_secret_{ch_id}",
+                    )
+                    new_receive_id = st.text_input(
+                        "接收对象 ID",
+                        value=ch.get("receive_id", ""),
+                        key=f"ch_feishu_receive_id_{ch_id}",
+                    )
+                    receive_id_type_options = ["chat_id", "open_id", "user_id", "union_id", "email"]
+                    current_receive_id_type = ch.get("receive_id_type", "chat_id")
+                    if current_receive_id_type not in receive_id_type_options:
+                        current_receive_id_type = "chat_id"
+                    new_receive_id_type = st.selectbox(
+                        "接收对象类型",
+                        options=receive_id_type_options,
+                        index=receive_id_type_options.index(current_receive_id_type),
+                        key=f"ch_feishu_receive_id_type_{ch_id}",
+                    )
+                    message_template_options = ["interactive", "text"]
+                    current_message_template = ch.get("message_template", "interactive")
+                    if current_message_template not in message_template_options:
+                        current_message_template = "interactive"
+                    new_message_template = st.selectbox(
+                        "消息模板",
+                        options=message_template_options,
+                        index=message_template_options.index(current_message_template),
+                        key=f"ch_feishu_message_template_{ch_id}",
+                    )
+                    channel_payload.update({
+                        "app_id": new_app_id,
+                        "app_secret": new_app_secret,
+                        "receive_id": new_receive_id,
+                        "receive_id_type": new_receive_id_type,
+                        "message_template": new_message_template,
+                    })
+                else:
+                    new_webhook_url = st.text_input(
+                        "Webhook URL",
+                        value=ch.get("webhook_url", ""),
+                        key=f"ch_webhook_{ch_id}",
+                    )
+                    new_mention_all = st.toggle(
+                        "测试和发送时 @所有人",
+                        value=bool(ch.get("mention_all", False)),
+                        key=f"ch_mention_all_{ch_id}",
+                    )
+                    channel_payload.update({
+                        "webhook_url": new_webhook_url,
+                        "mention_all": new_mention_all,
+                    })
+
+                render_channel_validation(ch_id, channel_payload)
 
                 col_btn1, col_btn2, col_btn3 = st.columns(3)
                 with col_btn1:
                     if st.button("💾 保存", key=f"ch_save_{ch_id}"):
-                        channels_data["channels"][ch_id] = {
-                            "type": new_ch_type,
-                            "name": new_ch_name,
-                            "cid": new_cid,
-                            "secret": new_secret,
-                            "agent_id": new_agent_id,
-                        }
+                        channels_data["channels"][ch_id] = channel_payload
                         save_channels(channels_data, bot_dir)
                         init_channels(channels_data)
                         mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
@@ -1271,7 +1362,7 @@ def main() -> None:
                 with col_btn2:
                     if st.button("🧪 测试联通性", key=f"ch_test_{ch_id}"):
                         try:
-                            ok = test_channel(ch_id)
+                            ok = test_channel_config(ch_id, channel_payload)
                             if ok:
                                 st.success("✅ 频道连通性测试成功！")
                             else:
@@ -1280,12 +1371,19 @@ def main() -> None:
                             st.error(f"错误: {e}")
                 with col_btn3:
                     if st.button("🗑️ 删除", key=f"ch_del_{ch_id}"):
-                        channels_data["channels"].pop(ch_id, None)
-                        save_channels(channels_data, bot_dir)
-                        init_channels(channels_data)
-                        mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
-                        st.success("已删除！")
-                        st.rerun()
+                        referenced_tasks = get_channel_reference_tasks(ch_id)
+                        if referenced_tasks:
+                            st.error(
+                                "该频道仍被以下任务引用，不能直接删除："
+                                + "、".join(referenced_tasks)
+                            )
+                        else:
+                            channels_data["channels"].pop(ch_id, None)
+                            save_channels(channels_data, bot_dir)
+                            init_channels(channels_data)
+                            mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
+                            st.success("已删除！")
+                            st.rerun()
 
         st.divider()
         st.markdown("**➕ 添加新频道**")
@@ -1295,17 +1393,33 @@ def main() -> None:
         with col_n2:
             new_ch_name_input = st.text_input("名称", placeholder="测试频道")
         with col_n3:
-            new_ch_type_input = st.selectbox("类型", options=["wecom"], index=0)
+            new_ch_type_input = st.selectbox("类型", options=["wecom", "feishu_app", "feishu_bot"], index=0)
 
         if st.button("添加频道", key="add_channel_btn"):
             if new_ch_id and new_ch_id not in channels_data["channels"]:
                 channels_data["channels"][new_ch_id] = {
                     "type": new_ch_type_input,
                     "name": new_ch_name_input or new_ch_id,
-                    "cid": "",
-                    "secret": "",
-                    "agent_id": "",
                 }
+                if new_ch_type_input == "wecom":
+                    channels_data["channels"][new_ch_id].update({
+                        "cid": "",
+                        "secret": "",
+                        "agent_id": "",
+                    })
+                elif new_ch_type_input == "feishu_app":
+                    channels_data["channels"][new_ch_id].update({
+                        "app_id": "",
+                        "app_secret": "",
+                        "receive_id": "",
+                        "receive_id_type": "chat_id",
+                        "message_template": "interactive",
+                    })
+                else:
+                    channels_data["channels"][new_ch_id].update({
+                        "webhook_url": "",
+                        "mention_all": False,
+                    })
                 save_channels(channels_data, bot_dir)
                 init_channels(channels_data)
                 mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))

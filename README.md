@@ -2,10 +2,10 @@
 
 > 当前版本：`v2.0.0`
 
-一个"RSS + AI + 企业微信"的多任务营销情报简报机器人：
+一个"RSS + AI + 多频道推送"的多任务营销情报简报机器人：
 
 - **多任务**：每个任务有独立的 RSS 源、Pipeline、频道和调度时间
-- **多频道**：Channels 抽象层，支持企业微信等多样化推送渠道
+- **多频道**：Channels 抽象层，支持企业微信、飞书应用、飞书机器人等多样化推送渠道
 - **内置调度器**：前台阻塞循环，只需守护一个进程，无需外部 cron
 - **任务中心控制台**：管理台按“当前任务”组织内容源、搜索补充、诊断、日志与 Dry Run
 - **调试友好**：控制台 Dry Run 永远不发送真实消息，仅在面板展示结果
@@ -46,7 +46,7 @@
 
 ### 数据模型
 
-**`channels.json`** — 频道凭证（可配置多个企业微信）
+**`channels.json`** — 频道凭证（可配置多个企业微信 / 飞书通道）
 ```json
 {
   "channels": {
@@ -56,10 +56,36 @@
       "cid": "...",
       "secret": "...",
       "agent_id": "..."
+    },
+    "feishu_app_main": {
+      "type": "feishu_app",
+      "name": "飞书应用频道",
+      "app_id": "cli_xxx",
+      "app_secret": "xxx",
+      "receive_id": "oc_xxx / chat_xxx",
+      "receive_id_type": "chat_id",
+      "message_template": "interactive"
+    },
+    "feishu_bot_fallback": {
+      "type": "feishu_bot",
+      "name": "飞书机器人兜底",
+      "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+      "mention_all": false
     }
   }
 }
 ```
+
+### 当前支持的频道类型
+
+| 类型 | 用途 | 推荐程度 |
+|------|------|------|
+| `wecom` | 企业微信应用推送 | 推荐 |
+| `feishu_app` | 飞书应用鉴权后通过 OpenAPI 发送，支持 richer message 卡片 | 推荐 |
+| `feishu_bot` | 飞书群机器人 webhook，适合作为轻量 fallback | 可选 |
+
+> 对飞书来说，**推荐默认接入 `feishu_app`**。  
+> 它通过飞书应用鉴权后走官方消息 API，支持 `interactive` 卡片；`feishu_bot` 仍可用，但更适合作为 webhook 兜底通道。
 
 **`tasks.json`** — 任务定义（替代原来的内联配置）
 ```json
@@ -95,6 +121,12 @@ pip install -e ./insightbot        # 将 insightbot 包安装为可编辑模式
 cp config.secrets.example.json config.secrets.json
 # 编辑 config.secrets.json 填写企业微信和 AI 凭证
 ```
+
+然后在控制台的 `📡 Channels` 页面创建并填写频道：
+
+- `wecom`：`cid` / `secret` / `agent_id`
+- `feishu_app`：`app_id` / `app_secret` / `receive_id` / `receive_id_type`
+- `feishu_bot`：`webhook_url`
 
 3) 启动（首次自动迁移）
 
@@ -138,6 +170,12 @@ python -m insightbot.cli --task daily_brief --dry-run
 ### 日志
 
 - 各 pipeline 日志写入 `./logs/bot.log`（每日轮转）
+
+### Channels 页行为
+
+- 频道支持保存前联通性测试，测试使用的是**当前表单值**
+- 频道会显示当前配置是否完整，以及被哪些任务引用
+- 已被任务引用的频道不能直接删除，避免破坏生产任务
 
 ### 部署建议
 

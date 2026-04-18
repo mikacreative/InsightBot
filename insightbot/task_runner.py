@@ -240,17 +240,20 @@ def _send_content_to_channel(channel_id: str, content: str, config: dict) -> boo
         return send_to_channel(channel_id, empty_msg)
 
     # Send header
-    send_to_channel(channel_id, header_msg)
+    if not send_to_channel(channel_id, header_msg):
+        return False
     time.sleep(1)
 
     # Send content blocks
-    send_to_channel(channel_id, content)
+    if not send_to_channel(channel_id, content):
+        return False
     time.sleep(1)
 
     # Send footer
     if settings.get("show_footer", False):
         footer = f"\n{settings.get('footer_text', '')}"
-        send_to_channel(channel_id, footer)
+        if not send_to_channel(channel_id, footer):
+            return False
         time.sleep(1)
 
     return True

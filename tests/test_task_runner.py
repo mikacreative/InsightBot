@@ -197,3 +197,26 @@ class TestRunTaskReal:
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
                 assert result["channel_results"][0]["ok"] is True
+
+    def test_channel_result_false_when_header_send_fails(self):
+        from insightbot.task_runner import run_task
+
+        fake_config = {
+            "_task_pipeline": "editorial",
+            "_task_channels": ["wecom_main"],
+            "feeds": {},
+            "ai": {"api_url": "...", "api_key": "...", "model": "..."},
+            "settings": {"report_title": "早报"},
+        }
+        fake_loader = lambda: fake_config
+
+        with patch("insightbot.task_runner._run_editorial_pipeline") as mock_ep:
+            mock_ep.return_value = {
+                "ok": True,
+                "final_markdown": "## 报告",
+                "error": None,
+            }
+            with patch("insightbot.task_runner.send_to_channel", side_effect=[False]):
+                result = run_task("daily_brief", fake_loader, dry_run=False)
+
+        assert result["channel_results"][0]["ok"] is False

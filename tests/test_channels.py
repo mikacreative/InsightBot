@@ -61,6 +61,89 @@ class TestWeChatChannel:
             assert "连通性测试" in call_content
 
 
+class TestFeishuBotChannel:
+    def test_send_delegates_to_feishu(self):
+        from insightbot.channels import FeishuBotChannel
+
+        ch = FeishuBotChannel(
+            channel_id="feishu_test",
+            name="Feishu",
+            webhook_url="https://open.feishu.cn/webhook/abc",
+            mention_all=True,
+        )
+        with patch("insightbot.channels.send_text_to_bot") as mock_send:
+            mock_send.return_value = True
+            result = ch.send("hello world")
+
+        assert result is True
+        mock_send.assert_called_once_with(
+            webhook_url="https://open.feishu.cn/webhook/abc",
+            content="hello world",
+            mention_all=True,
+        )
+
+    def test_test_sends_test_message(self):
+        from insightbot.channels import FeishuBotChannel
+
+        ch = FeishuBotChannel(
+            channel_id="feishu_test",
+            name="Feishu",
+            webhook_url="https://open.feishu.cn/webhook/abc",
+        )
+        with patch("insightbot.channels.send_text_to_bot") as mock_send:
+            mock_send.return_value = True
+            result = ch.test()
+
+        assert result is True
+        assert "飞书机器人配置正确" in mock_send.call_args.kwargs["content"]
+
+
+class TestFeishuAppChannel:
+    def test_send_interactive_delegates_to_feishu_app(self):
+        from insightbot.channels import FeishuAppChannel
+
+        ch = FeishuAppChannel(
+            channel_id="feishu_app",
+            name="飞书应用",
+            app_id="cli_xxx",
+            app_secret="secret_xxx",
+            receive_id="oc_xxx",
+            receive_id_type="open_id",
+            message_template="interactive",
+        )
+        with patch("insightbot.channels.send_interactive_message") as mock_send:
+            mock_send.return_value = True
+            result = ch.send("## 报告")
+
+        assert result is True
+        mock_send.assert_called_once_with(
+            app_id="cli_xxx",
+            app_secret="secret_xxx",
+            receive_id="oc_xxx",
+            receive_id_type="open_id",
+            title="飞书应用",
+            markdown="## 报告",
+        )
+
+    def test_send_text_delegates_to_feishu_app(self):
+        from insightbot.channels import FeishuAppChannel
+
+        ch = FeishuAppChannel(
+            channel_id="feishu_app",
+            name="飞书应用",
+            app_id="cli_xxx",
+            app_secret="secret_xxx",
+            receive_id="oc_xxx",
+            message_template="text",
+        )
+        with patch("insightbot.channels.send_text_message") as mock_send:
+            mock_send.return_value = True
+            result = ch.send("hello")
+
+        assert result is True
+        mock_send.assert_called_once()
+
+
 class TestChannelRegistry:
     def test_get_returns_channel(self):
         from insightbot.channels import ChannelRegistry, WeChatChannel
@@ -97,6 +180,45 @@ class TestChannelRegistry:
         registry.remove("new_ch")
         assert registry.get("new_ch") is None
 
+    def test_supports_feishu_bot(self):
+        from insightbot.channels import ChannelRegistry, FeishuBotChannel
+
+        registry = ChannelRegistry({
+            "channels": {
+                "feishu_main": {
+                    "type": "feishu_bot",
+                    "name": "飞书",
+                    "webhook_url": "https://open.feishu.cn/webhook/abc",
+                    "mention_all": True,
+                }
+            }
+        })
+
+        channel = registry.get("feishu_main")
+        assert isinstance(channel, FeishuBotChannel)
+        assert channel.mention_all is True
+
+    def test_supports_feishu_app(self):
+        from insightbot.channels import ChannelRegistry, FeishuAppChannel
+
+        registry = ChannelRegistry({
+            "channels": {
+                "feishu_app": {
+                    "type": "feishu_app",
+                    "name": "飞书应用",
+                    "app_id": "cli_xxx",
+                    "app_secret": "secret",
+                    "receive_id": "oc_xxx",
+                    "receive_id_type": "open_id",
+                    "message_template": "interactive",
+                }
+            }
+        })
+
+        channel = registry.get("feishu_app")
+        assert isinstance(channel, FeishuAppChannel)
+        assert channel.receive_id_type == "open_id"
+
 
 class TestModuleLevelFunctions:
     def test_init_channels_sets_global_registry(self):
@@ -125,3 +247,40 @@ class TestModuleLevelFunctions:
         import insightbot.channels as ch_module
         ch_module._registry = None
         assert all_channel_ids() == []
+
+    def test_test_channel_config_uses_unsaved_values(self):
+        from insightbot.channels import test_channel_config
+
+        with patch("insightbot.channels.send_text_to_bot") as mock_send:
+            mock_send.return_value = True
+            ok = test_channel_config(
+                "feishu_preview",
+                {
+                    "type": "feishu_bot",
+                    "name": "Preview",
+                    "webhook_url": "https://open.feishu.cn/webhook/preview",
+                    "mention_all": False,
+                },
+            )
+
+        assert ok is True
+        mock_send.assert_called_once()
+
+    def test_validate_channel_definition_for_feishu_app(self):
+        from insightbot.channels import validate_channel_definition
+
+        result = validate_channel_definition(
+            "feishu_app",
+            {
+                "type": "feishu_app",
+                "name": "飞书应用",
+                "app_id": "",
+                "app_secret": "",
+                "receive_id": "",
+                "receive_id_type": "chat_id",
+            },
+        )
+
+        assert result["is_ready"] is False
+        codes = {issue["code"] for issue in result["issues"]}
+        assert {"missing_app_id", "missing_app_secret", "missing_receive_id"} <= codes

@@ -1,6 +1,6 @@
 # InsightBot 部署指南
 
-**更新日期**：2026-04-16（适配 v2.0）
+**更新日期**：2026-04-18（适配 v2.0 / Channels 扩展）
 
 ---
 
@@ -14,6 +14,7 @@
     *   RSS 健康度面板能读取或刷新
     *   `python -m insightbot.cli --task daily_brief --dry-run` 能完整跑通
     *   频道联通性测试（tab2）在控制台正常
+    *   如启用飞书，至少验证一次 `feishu_app` 或 `feishu_bot` 渠道连通
     *   真实推送或 `INSIGHTBOT_DRY_RUN=1` 输出符合预期
 
 ---
@@ -73,6 +74,14 @@ pip install -r requirements.txt
 
 # 4. 确保 .env 包含最新配置（AI API Key、企业微信凭证等）
 #    编辑 /root/marketing_bot/.env 或在腾讯云控制台配置环境变量
+
+# 4.1 如需飞书渠道，推荐在控制台 tab2 新建 feishu_app 频道
+#     推荐字段：
+#     - app_id
+#     - app_secret
+#     - receive_id
+#     - receive_id_type=chat_id
+#     - message_template=interactive
 
 # 5. 首次部署会自动迁移（channels.json + tasks.json）
 #    如需手动迁移：python -m insightbot.migrate
@@ -134,6 +143,15 @@ docker-compose up -d
   MARKETING_BOT_DIR=/root/marketing_bot
   ```
 
+### 4.1 Channels 配置建议
+
+*   `wecom`：适合企业微信应用推送
+*   `feishu_app`：推荐的飞书接入方式。通过飞书应用鉴权后走 OpenAPI，可发送 richer message 卡片
+*   `feishu_bot`：适合轻量 webhook 推送或兜底通知
+
+> 飞书的推荐接入方式是 `feishu_app`。  
+> WebSocket 更适合事件订阅，生产发送链路仍建议使用应用鉴权 + OpenAPI。
+
 ### 5. 验证部署
 
 ```bash
@@ -149,6 +167,13 @@ journalctl -u insightbot-scheduler -f
 # 或
 tail -f /root/marketing_bot/logs/bot.log
 ```
+
+控制台里的验证建议：
+
+*   在 `📡 Channels` 页面先做“测试联通性”
+*   确认频道显示“配置完整”
+*   确认该频道已被目标任务引用
+*   再到 `🔬 任务调试` 跑一次 Dry Run 或真实发送
 
 ---
 
