@@ -102,6 +102,20 @@ The result should include:
 - final brief
 - diagnostics
 
+## Migration Bridge
+
+The bootstrap stage also includes a temporary bridge for running the current
+`InsightBot` `editorial_pipeline` through the new result contract:
+
+```python
+from editorial_intelligence.skills.editorial_briefing import (
+    run_editorial_briefing_from_insightbot_config,
+)
+```
+
+This allows gradual migration without forcing a full rewrite of the current
+production flow.
+
 ## Relationship to InsightBot
 
 Recommended split:

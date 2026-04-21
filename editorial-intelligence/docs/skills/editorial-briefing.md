@@ -124,3 +124,14 @@ The skill should not:
 - provide an operations console
 
 Those concerns belong to the product layer, such as `InsightBot`.
+
+## Migration Note
+
+During the bootstrap phase, the skill may be executed through a temporary
+InsightBot bridge:
+
+- `run_editorial_briefing_from_insightbot_config(config=..., logger=...)`
+
+This bridge exists only to let the new skill contract wrap the current
+`InsightBot` `editorial_pipeline` while the runtime and adapters are being
+gradually migrated.

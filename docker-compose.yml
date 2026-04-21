@@ -1,33 +1,47 @@
 version: '3.8'
 
+# =============================================================================
+# InsightBot 本地开发 / 轻量部署
+#
+# 包含：
+#   - redis: 缓存、限速等共享存储
+#   - insightbot: 主服务（scheduler + pipeline）
+#
+# 不在此文件（单独部署）：
+#   - RSSHub: 直接在宿主机安装，或 docker run diygod/rsshub
+#     监听端口 1200，通过 INSIGHTBOT_RSSHUB_URL 配置接入
+#   - 企业微信: WebSocket 或 outbound webhook 接入
+#
+# 使用方式：
+#   cp .env.local .env          # 填写 WECOM_* / AI_* 等密钥
+#   docker-compose up -d
+# =============================================================================
+
 services:
-  # 服务1: WeWe RSS - 专门搞定微信公众号
-  wewe-rss:
-    image: cooderl/wewe-rss-sqlite:latest
-    container_name: wewe-rss
-    ports:
-      - "4000:4000"
-    volumes:
-      - ./data:/app/data
-    environment:
-      - AUTH_CODE=123456  # 【重要】这是你进入后台的密码，建议修改
-    restart: always
-
-  # 服务2: RSSHub - 搞定微博/政府网/36Kr等
-  rsshub:
-    image: diygod/rsshub:latest
-    container_name: rsshub
-    ports:
-      - "1200:1200"
-    environment:
-      - NODE_ENV=production
-      - CACHE_TYPE=redis
-      - REDIS_URL=redis://redis:6379/
-    depends_on:
-      - redis
-    restart: always
-
-  # 辅助服务: Redis (为 RSSHub 提供缓存，防止被反爬)
   redis:
     image: redis:alpine
-    restart: always
+    container_name: insightbot-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  insightbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: insightbot
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379/
+      # 配置文件通过 volume 挂载或直接写在 .env 里
+    env_file:
+      - .env.local
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+
+volumes:
+  redis-data:

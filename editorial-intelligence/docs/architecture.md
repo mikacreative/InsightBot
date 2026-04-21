@@ -34,9 +34,21 @@ Responsible for:
 
 Responsible for:
 
-- RSS collection
-- search collection
-- future platform collection
+- RSS collection (official direct feeds via feedparser)
+- search collection (multi-provider: DuckDuckGo, Brave, 博查等)
+- future platform adapters
+
+### Source Priority
+
+Sources are weighted by reliability, highest first:
+
+| Source Type | Weight | Example |
+|---|---|---|
+| OFFICIAL | 1.0 | Direct RSS/Atom feed |
+| RSSHUB | 0.7 | RSSHub proxy feed |
+| AGENT_SEARCH | 0.4 | DuckDuckGo / Brave / 博查 |
+
+Within AGENT_SEARCH, individual provider weights can be configured via `SearchProvider` entries.
 
 ## Contract Layer
 

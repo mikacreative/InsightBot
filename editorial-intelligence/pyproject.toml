@@ -9,7 +9,12 @@ description = "Editorial intelligence runtime for multi-source briefing workflow
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Mika Creative" }]
-dependencies = []
+dependencies = [
+    "feedparser>=6.0",
+    "httpx>=0.25",
+    "beautifulsoup4>=4.12",
+    "chardet>=2.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "."}

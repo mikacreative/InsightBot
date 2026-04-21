@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 @dataclass(slots=True)
 class BriefingGoal:
     topic: str
+    queries: list[str] = field(default_factory=list)
+    description: str = ""
     audience: str = ""
     brief_type: str = "daily_brief"
     focus_areas: list[str] = field(default_factory=list)

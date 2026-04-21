@@ -37,6 +37,9 @@ data/task_state/*.json
 # OS/editor
 .DS_Store
 
+# Claude Code
+.claude/
+
 # Build / packaging / test artifacts
 insightbot.egg-info/
 marketing_bot.egg-info/
