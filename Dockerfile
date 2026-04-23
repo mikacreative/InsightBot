@@ -9,4 +9,4 @@ COPY . ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Default command: run the scheduler daemon
-CMD ["python", "-c", "from insightbot.cli import main; main()"]
+CMD ["python", "-m", "insightbot"]

@@ -8,6 +8,8 @@ config.secrets.json
 config.local.json
 config.local.content.json
 config.local.secrets.json
+tasks.json
+channels.json
 
 # Python
 venv/
@@ -43,4 +45,5 @@ data/task_state/*.json
 # Build / packaging / test artifacts
 insightbot.egg-info/
 marketing_bot.egg-info/
+editorial-intelligence/*.egg-info/
 pytest-of-mikawang/

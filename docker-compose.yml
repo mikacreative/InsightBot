@@ -6,11 +6,16 @@ version: '3.8'
 # 包含：
 #   - redis: 缓存、限速等共享存储
 #   - insightbot: 主服务（scheduler + pipeline）
+#   - console: Streamlit 管理台（端口 8501）
 #
 # 不在此文件（单独部署）：
 #   - RSSHub: 直接在宿主机安装，或 docker run diygod/rsshub
 #     监听端口 1200，通过 INSIGHTBOT_RSSHUB_URL 配置接入
-#   - 企业微信: WebSocket 或 outbound webhook 接入
+#
+# 可选服务：
+#   - webhook: 企业微信回调服务器（端口 8080）
+#     需要配置 WECOM_TOKEN / WECOM_ENCODING_AES_KEY
+#     并在企业微信后台填写回调 URL: http://your-domain:8080
 #
 # 使用方式：
 #   cp .env.local .env          # 填写 WECOM_* / AI_* 等密钥
@@ -35,6 +40,45 @@ services:
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379/
       # 配置文件通过 volume 挂载或直接写在 .env 里
+    env_file:
+      - .env.local
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+
+  console:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: insightbot-console
+    restart: unless-stopped
+    command:
+      - streamlit
+      - run
+      - scripts/app.py
+      - --server.port=8501
+      - --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env.local
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+
+  webhook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: insightbot-webhook
+    restart: unless-stopped
+    command: ["python", "-m", "insightbot", "--webhook"]
+    ports:
+      - "8080:8080"
     env_file:
       - .env.local
     volumes:

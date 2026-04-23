@@ -7,6 +7,7 @@ beautifulsoup4
 chardet<6
 httpx[socks]>=0.25.0
 ddgs>=3.0.0
+pycryptodome>=3.20.0
 
 ## ── 本地包（editable install）─────────────────────────────────────────────
 -e insightbot/
