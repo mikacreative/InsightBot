@@ -53,6 +53,14 @@ from insightbot.editorial_pipeline import (
     select_for_category,
     run_editorial_pipeline,
 )
+try:
+    from scripts.ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
+    from scripts.ui.overview import render_task_overview
+    from scripts.ui.task_config import render_task_empty_state_wizard
+except ModuleNotFoundError:
+    from ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
+    from ui.overview import render_task_overview
+    from ui.task_config import render_task_empty_state_wizard
 
 def main() -> None:
     bot_dir = default_bot_dir()
@@ -866,94 +874,25 @@ def main() -> None:
     ])
 
     with tab0:
-        st.subheader("运营概览")
-        active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
-        st.caption(f"当前聚焦任务：{active_task_name}。优先看最近一次运行、异常摘要和最近调试动作。")
-        if selected_task_id:
-            st.markdown(
-                f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">任务 ID: {selected_task_id}</span>'
-                f'<span class="ib-chip ib-chip-neutral">任务名: {active_task_name}</span></div>',
-                unsafe_allow_html=True,
-            )
-
-        health_counts = (overview_health_snapshot or {}).get("counts", {})
-        st.markdown(
-            f"""
-            <div class="ib-kpi-grid">
-              <div class="ib-kpi-card">
-                <div class="ib-kpi-label">任务状态</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{task_state_label}</div>
-              </div>
-              <div class="ib-kpi-card">
-                <div class="ib-kpi-label">可运行性</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{'需重验' if selected_task_state.get('needs_revalidation') else ('可运行' if selected_task_validation.get('is_runnable') else '不可运行')}</div>
-              </div>
-              <div class="ib-kpi-card">
-                <div class="ib-kpi-label">最近一次运行</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((latest_run_record or {}).get('started_at'))}</div>
-              </div>
-              <div class="ib-kpi-card">
-                <div class="ib-kpi-label">最后成功发送</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((latest_success_record or {}).get('started_at'))}</div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        render_task_overview(
+            selected_task_id=selected_task_id,
+            selected_task=selected_task,
+            selected_task_categories=selected_task_categories,
+            selected_task_validation=selected_task_validation,
+            selected_task_state=selected_task_state,
+            latest_run_record=latest_run_record,
+            latest_success_record=latest_success_record,
+            health_snapshot=overview_health_snapshot,
+            run_metrics=overview_run_metrics,
+            diagnosis_cards=overview_diagnosis_cards,
+            prompt_history=overview_prompt_history,
+            task_state_label=task_state_label,
+            task_state_class=task_state_class,
+            task_state_copy=task_state_copy,
+            format_timestamp=format_timestamp,
+            render_operating_chip=render_operating_chip,
+            render_diagnosis_card=render_diagnosis_card,
         )
-
-        top_col1, top_col2 = st.columns([1.35, 1.0])
-        with top_col1:
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">任务状态</div>', unsafe_allow_html=True)
-            render_operating_chip(task_state_label, task_state_class)
-            st.markdown(
-                f"""
-                <div class="ib-section-copy">
-                  {task_state_copy}<br/>
-                  板块数：{selected_task_validation.get('summary', {}).get('category_count', 0)}<br/>
-                  RSS 源数：{selected_task_validation.get('summary', {}).get('feed_count', 0)}<br/>
-                  异常 RSS 源：{health_counts.get('error', 0)}<br/>
-                  最近运行结果：{overview_run_metrics.get('result_label', '未知')}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with top_col2:
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">最近调试动态</div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="ib-section-copy">来自板块调试的最近记录，帮助你判断最近都在调哪些板块。</div>',
-                unsafe_allow_html=True,
-            )
-            if overview_prompt_history:
-                for item in overview_prompt_history[:3]:
-                    mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
-                    item_task = item.get("task_name") or item.get("task_id") or active_task_name
-                    st.markdown(
-                        f"- {item.get('created_at', '')} | {item_task} | {item.get('category', '未命名板块')} | {mode_label} | 草稿状态：{item.get('draft_status', '未知')}"
-                    )
-            else:
-                st.info("还没有 Prompt 调试记录。")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-        st.markdown('<div class="ib-section-title">异常摘要</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="ib-section-copy">优先展示当前最值得处理的问题。如果要排查“为什么今天没推送”，先看这里。</div>',
-            unsafe_allow_html=True,
-        )
-        if overview_diagnosis_cards:
-            for card in overview_diagnosis_cards[:3]:
-                render_diagnosis_card(
-                    card,
-                    prompt_categories=selected_task_categories,
-                    key_prefix="overview",
-                )
-        else:
-            st.success("当前没有明显异常摘要，系统状态看起来比较稳定。")
-        st.markdown("</div>", unsafe_allow_html=True)
 
     # ── Tab 1: 任务管理 ────────────────────────────────────────────────────────
     with tab1:
@@ -966,6 +905,14 @@ def main() -> None:
         else:
             task_def = deepcopy(tasks.get(selected_task_id, {}))
             st.markdown(f"**当前任务：{task_def.get('name', selected_task_id)}**")
+            render_task_empty_state_wizard(
+                task_id=selected_task_id,
+                task_def=task_def,
+                validation_result=selected_task_validation,
+                channels_data=channels_data,
+                save_task_definition=save_task_definition,
+                defaults=get_editorial_defaults(),
+            )
 
             basic_col1, basic_col2 = st.columns([1, 2])
             with basic_col1:
@@ -1567,6 +1514,13 @@ def main() -> None:
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
+        render_inline_dry_run_panel(
+            selected_task_id=selected_task_id,
+            selected_task=selected_task,
+            scheduler=scheduler,
+            summarize_task_debug_result=summarize_task_debug_result,
+        )
+
         if focused_category:
             focus_col1, focus_col2 = st.columns([4, 1.2])
             with focus_col1:
@@ -2031,94 +1985,12 @@ def main() -> None:
             st.toast("设置已生效！")
 
     with tab6:
-        st.subheader("🔬 任务调试")
-        st.caption("选择任务并运行 Dry Run — 仅在面板展示结果，不发送任何频道消息。")
-
-        tasks_data = load_tasks(bot_dir)
-        tasks = tasks_data.get("tasks", {})
-        task_ids = list(tasks.keys())
-
-        if not task_ids:
-            st.warning("暂无任务，请先在「📋 任务管理」创建任务。")
-        else:
-            selected = st.selectbox(
-                "选择任务",
-                options=task_ids,
-                index=task_ids.index(selected_task_id) if selected_task_id in task_ids else 0,
-            )
-
-            col_run, col_info = st.columns([1, 3])
-            with col_run:
-                dry_run = st.button("🔬 Dry Run", type="primary", use_container_width=True)
-
-            task_def = tasks.get(selected, {})
-            st.markdown(f"**Pipeline**: `{task_def.get('pipeline', 'editorial')}`")
-            st.markdown(f"**频道**: `{', '.join(task_def.get('channels', []))}`")
-            sched = task_def.get("schedule", {})
-            st.markdown(f"**调度**: {sched.get('hour', 8):02d}:{sched.get('minute', 0):02d}")
-
-            if dry_run:
-                ui_logger = build_ui_logger()
-                with st.spinner(f"正在 Dry Run 任务「{selected}」..."):
-                    try:
-                        result = scheduler.run_task_by_id(selected, dry_run=True)
-                    except Exception as e:
-                        result = {"ok": False, "error": str(e)}
-
-                st.session_state["task_debug_result"] = {
-                    **result,
-                    "_selected_task_id": selected,
-                    "_selected_task_name": task_def.get("name", selected),
-                }
-
-            if "task_debug_result" in st.session_state:
-                result = st.session_state["task_debug_result"]
-                result_task_id = result.get("_selected_task_id")
-                result_task_name = result.get("_selected_task_name", result_task_id)
-                if result_task_id == selected:
-                    st.markdown(
-                        f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">Dry Run 任务: {result_task_name}</span>'
-                        f'<span class="ib-chip ib-chip-neutral">任务 ID: {result_task_id}</span></div>',
-                        unsafe_allow_html=True,
-                    )
-                    if result.get("ok"):
-                        st.success(f"✅ Dry Run 完成（pipeline: {result.get('pipeline')}）")
-                    else:
-                        st.error(f"❌ Dry Run 失败: {result.get('error', '未知错误')}")
-
-                    if result.get("final_markdown"):
-                        st.markdown("#### 📤 简报预览")
-                        st.markdown(result["final_markdown"])
-
-                    with st.expander("🔬 完整中间结果"):
-                        st.json({
-                            "ok": result.get("ok"),
-                            "pipeline": result.get("pipeline"),
-                            "dry_run": result.get("dry_run"),
-                            "task_id": result.get("task_id"),
-                            "task_name": result_task_name,
-                            "error": result.get("error"),
-                            "channel_results": result.get("channel_results", []),
-                        }, expanded=False)
-                        stage_summary = summarize_task_debug_result(result)
-                        st.markdown("#### 流程摘要")
-                        metric_col1, metric_col2, metric_col3 = st.columns(3)
-                        metric_col1.metric("全局候选", stage_summary["global_candidates"])
-                        metric_col2.metric("全局初筛通过", stage_summary["screened_candidates"])
-                        metric_col3.metric("未分配", stage_summary["unassigned_candidates"])
-
-                        if stage_summary["assigned_by_category"]:
-                            st.markdown("#### 板块分配")
-                            st.json(stage_summary["assigned_by_category"], expanded=False)
-
-                        if stage_summary["selected_by_category"]:
-                            st.markdown("#### 最终产出")
-                            st.json(stage_summary["selected_by_category"], expanded=False)
-
-                        st.markdown("#### stage_results")
-                        st.json(result.get("stage_results", {}), expanded=False)
-                else:
-                    st.info(f"当前保存的是任务「{result_task_name}」的 Dry Run 结果；切回对应任务可查看详情。")
+        render_dry_run_tab(
+            tasks=load_tasks(bot_dir).get("tasks", {}),
+            selected_task_id=selected_task_id,
+            scheduler=scheduler,
+            summarize_task_debug_result=summarize_task_debug_result,
+        )
 
 
 if __name__ == "__main__":
