@@ -7,9 +7,11 @@ beautifulsoup4
 chardet<6
 httpx[socks]>=0.25.0
 ddgs>=3.0.0
+pycryptodome>=3.20.0
 
 ## ── 本地包（editable install）─────────────────────────────────────────────
 -e insightbot/
+-e editorial-intelligence/
 
 ## ── 测试依赖（本地开发用，生产环境可不安装）────────────────────────────────────
 pytest>=7.0

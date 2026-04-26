@@ -62,6 +62,7 @@ def migrate_from_v1(bot_dir: str | None = None) -> None:
         "enabled": True,
         "feeds": feeds,
         "pipeline": "editorial" if editorial_config.get("enabled") else "classic",
+        "_editorial_pipeline_mode": "legacy",  # "legacy" | "editorial-intelligence"
         "pipeline_config": {
             "global_shortlist_multiplier": editorial_config.get("global_shortlist_multiplier", 3),
             "allow_multi_assign": editorial_config.get("allow_multi_assign", False),

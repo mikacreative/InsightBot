@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from typing import Callable
 
-from .config import load_tasks
+from .config import load_tasks, load_tasks_config
 from .logging_setup import build_logger
 from .paths import bot_log_file_path, default_bot_dir, tasks_file_path
 
@@ -95,7 +95,7 @@ class Scheduler:
     def __init__(self, bot_dir: str | None = None):
         self.bot_dir = bot_dir or default_bot_dir()
         self.tasks: dict[str, Task] = {}
-        self._config_loader_fn: Callable[[], dict] = lambda: {}
+        self._config_loader_fn: Callable[[str], dict] = lambda task_id: {}
         self._log = logging.getLogger("Scheduler")
         self._load_tasks()
 
@@ -107,7 +107,7 @@ class Scheduler:
             self.tasks[task_id] = Task(
                 task_id,
                 task_def,
-                self._config_loader_fn,
+                lambda tid=task_id: load_tasks_config(tid, self.bot_dir),
             )
         self._log.info(f"Loaded {len(self.tasks)} tasks from tasks.json")
 
