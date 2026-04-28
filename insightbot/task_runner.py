@@ -10,12 +10,31 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
 from .channels import send_to_channel
 from .run_history import append_run_record
 
 logger = logging.getLogger("TaskRunner")
+
+
+def _normalize_search_queries(raw_queries: list[Any]) -> list[str]:
+    """Normalize task-level search query config into executable query strings."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for item in raw_queries or []:
+        if isinstance(item, dict):
+            query = str(item.get("keywords", "")).strip()
+        else:
+            query = str(item or "").strip()
+
+        if not query or query in seen:
+            continue
+        normalized.append(query)
+        seen.add(query)
+
+    return normalized
 
 
 def _estimate_counts(stage_results: dict) -> tuple[int, int]:
@@ -111,7 +130,14 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
     search_providers = {}
     if search_config.get("enabled", False):
         provider_type = search_config.get("provider", "duckduckgo")
-        if provider_type == "duckduckgo":
+        if provider_type == "baidu":
+            search_providers["baidu"] = SearchProvider(
+                provider_id="baidu",
+                name="Baidu",
+                weight=0.8,
+                enabled=True,
+            )
+        elif provider_type == "duckduckgo":
             search_providers["duckduckgo"] = SearchProvider(
                 provider_id="duckduckgo",
                 name="DuckDuckGo",
@@ -139,14 +165,17 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
                 enabled=True,
                 timeout_s=30,
             )
+        else:
+            logger.warning(f"editorial-intelligence: unsupported search provider '{provider_type}'")
 
     source_weight_config = SourceWeightConfig(search_providers=search_providers)
+    normalized_queries = _normalize_search_queries(search_config.get("queries", []))
 
     # Build goal from feeds structure
     topic_parts = list(feeds.keys()) or ["营销情报"]
     goal = BriefingGoal(
         topic=" / ".join(topic_parts),
-        queries=search_config.get("queries", []),
+        queries=normalized_queries,
         description="",
     )
     # Pipeline expects dict-like goal, so convert dataclass to dict

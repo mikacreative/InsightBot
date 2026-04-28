@@ -1,7 +1,7 @@
 """
 Multi-provider search adapter.
 
-Supports DuckDuckGo, Brave Search, 博查等，按配置权重分发请求。
+Supports Baidu, DuckDuckGo, Brave Search, 博查等，按配置权重分发请求。
 每个 provider 可独立开关，切换时无需改代码。
 
 使用方式：
@@ -111,7 +111,9 @@ class SearchAdapter:
     def _search_provider(
         self, provider: SearchProvider, query: str, top_k: int
     ) -> list:
-        if provider.provider_id == "duckduckgo":
+        if provider.provider_id == "baidu":
+            return self._baidu_search(query, top_k)
+        elif provider.provider_id == "duckduckgo":
             return self._duckduckgo_search(query, top_k)
         elif provider.provider_id == "brave":
             return self._brave_search(provider, query, top_k)
@@ -124,6 +126,61 @@ class SearchAdapter:
     # -------------------------------------------------------------------------
     # Provider implementations
     # -------------------------------------------------------------------------
+
+    def _baidu_search(self, query: str, top_k: int) -> list:
+        """Baidu search HTML scraping, suitable for mainland Tencent Cloud nodes."""
+        import requests
+        from bs4 import BeautifulSoup
+
+        from .base import NormalizedSignal
+
+        results: list[NormalizedSignal] = []
+        encoded_kw = requests.utils.quote(query)
+        url = f"https://www.baidu.com/s?wd={encoded_kw}&rn={top_k}"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        }
+
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            for item in soup.select(".result, .result-op")[:top_k]:
+                title_el = item.select_one("h3 a") or item.select_one("a")
+                if not title_el:
+                    continue
+                title = title_el.get_text(strip=True)
+                link = title_el.get("href", "")
+                if link.startswith("/"):
+                    link = "https://www.baidu.com" + link
+                snippet_el = item.select_one(".c-abstract") or item.select_one(".content-right_8Zs40") or item.select_one("span")
+                snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+
+                if not title or not link:
+                    continue
+
+                results.append(
+                    NormalizedSignal(
+                        source_type="agent_search",
+                        source_id="baidu",
+                        title=title,
+                        summary=snippet,
+                        url=link,
+                        published_at="",
+                        signals={"provider": "baidu", "query": query},
+                        raw={"title": title, "link": link, "snippet": snippet},
+                    )
+                )
+        except Exception as e:
+            logger.warning(f"Baidu search failed: {e}")
+
+        return results
 
     def _duckduckgo_search(self, query: str, top_k: int) -> list:
         """DuckDuckGo via ddgs library (no API key required)."""

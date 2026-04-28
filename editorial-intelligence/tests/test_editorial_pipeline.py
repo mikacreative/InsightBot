@@ -2,6 +2,8 @@
 Tests for editorial pipeline and source weight ranking.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from editorial_intelligence.adapters import NormalizedSignal, RSSAdapter, SearchAdapter
@@ -85,6 +87,35 @@ class TestRSSAdapter:
         adapter = RSSAdapter()
         result = adapter.collect(feeds=None)
         assert result == []
+
+
+class TestSearchAdapter:
+    def test_baidu_provider_collects_normalized_signals(self):
+        provider = SearchProvider(provider_id="baidu", name="Baidu", enabled=True)
+        adapter = SearchAdapter(
+            providers_config=SourceWeightConfig(search_providers={"baidu": provider})
+        )
+
+        html = """
+        <html><body>
+          <div class="result">
+            <h3><a href="https://example.com/a">AI 营销趋势</a></h3>
+            <div class="c-abstract">一条测试摘要</div>
+          </div>
+        </body></html>
+        """
+        fake_resp = MagicMock()
+        fake_resp.text = html
+        fake_resp.raise_for_status.return_value = None
+
+        with patch("requests.get", return_value=fake_resp):
+            signals = adapter.collect(queries=["AI 营销"], top_k=3)
+
+        assert len(signals) == 1
+        assert signals[0].source_id == "baidu"
+        assert signals[0].title == "AI 营销趋势"
+        assert signals[0].url == "https://example.com/a"
+        assert signals[0].signals["query"] == "AI 营销"
 
 
 def _make_signal(url: str, source_type: str, published_at: str) -> NormalizedSignal:
