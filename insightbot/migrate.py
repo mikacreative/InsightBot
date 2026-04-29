@@ -10,7 +10,13 @@ Reads existing config.content.json + config.secrets.json and generates:
 import logging
 import os
 
-from .config import load_runtime_config, save_channels, save_tasks
+from .config import (
+    derive_sections_from_feeds,
+    derive_sources_from_feeds_and_search,
+    load_runtime_config,
+    save_channels,
+    save_tasks,
+)
 from .paths import channels_file_path, tasks_file_path, default_bot_dir
 
 logger = logging.getLogger("Migration")
@@ -60,9 +66,10 @@ def migrate_from_v1(bot_dir: str | None = None) -> None:
     task_def = {
         "name": "每日营销早报",
         "enabled": True,
-        "feeds": feeds,
         "pipeline": "editorial" if editorial_config.get("enabled") else "classic",
         "_editorial_pipeline_mode": "legacy",  # "legacy" | "editorial-intelligence"
+        "sources": derive_sources_from_feeds_and_search(feeds, search_config),
+        "sections": derive_sections_from_feeds(feeds),
         "pipeline_config": {
             "global_shortlist_multiplier": editorial_config.get("global_shortlist_multiplier", 3),
             "allow_multi_assign": editorial_config.get("allow_multi_assign", False),
@@ -71,7 +78,6 @@ def migrate_from_v1(bot_dir: str | None = None) -> None:
             ),
             "assignment_batch_size": editorial_config.get("assignment_batch_size", 20),
         },
-        "search": search_config,
         "channels": ["wecom_main"],
         "schedule": schedule,
     }

@@ -1,6 +1,9 @@
 from typing import Any
 
 
+from .config import normalize_task_definition
+
+
 def _issue(*, code: str, level: str, message: str, field_path: str) -> dict[str, str]:
     return {
         "code": code,
@@ -11,8 +14,11 @@ def _issue(*, code: str, level: str, message: str, field_path: str) -> dict[str,
 
 
 def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_data: dict[str, Any]) -> dict[str, Any]:
-    feeds = task_def.get("feeds", {}) or {}
-    search = task_def.get("search", {}) or {}
+    task_def = normalize_task_definition(task_def)
+    sources = task_def.get("sources", {}) or {}
+    sections = task_def.get("sections", {}) or {}
+    rss_sources = sources.get("rss", []) or []
+    search = sources.get("search", {}) or {}
     schedule = task_def.get("schedule", {}) or {}
     channels = task_def.get("channels", []) or []
     pipeline = task_def.get("pipeline", "editorial")
@@ -21,29 +27,56 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
 
     issues: list[dict[str, str]] = []
 
-    if not feeds:
+    if not sections:
         issues.append(
             _issue(
-                code="missing_categories",
+                code="missing_sections",
                 level="error",
-                message="当前任务还没有任何板块。",
-                field_path="feeds",
+                message="当前任务还没有任何栏目。",
+                field_path="sections",
             )
         )
 
-    feed_count = 0
-    for category, feed_data in feeds.items():
-        rss_list = [item for item in (feed_data or {}).get("rss", []) if str(item).strip()]
-        feed_count += len(rss_list)
-        if not rss_list:
+    rss_source_count = 0
+    enabled_rss_sources = []
+    for idx, source in enumerate(rss_sources):
+        if not isinstance(source, dict):
+            continue
+        url = str(source.get("url", "")).strip()
+        enabled = bool(source.get("enabled", True))
+        if enabled and url:
+            enabled_rss_sources.append(source)
+            rss_source_count += 1
+        elif enabled and not url:
             issues.append(
                 _issue(
-                    code="missing_feed_rss",
+                    code="missing_source_url",
                     level="error",
-                    message=f"板块「{category}」还没有配置 RSS 源。",
-                    field_path=f"feeds.{category}.rss",
+                    message=f"RSS 信源 #{idx + 1} 缺少 URL。",
+                    field_path=f"sources.rss[{idx}].url",
                 )
             )
+
+    for section_name, section_data in sections.items():
+        if not str((section_data or {}).get("prompt", "")).strip():
+            issues.append(
+                _issue(
+                    code="missing_section_prompt",
+                    level="warning",
+                    message=f"栏目「{section_name}」还没有填写筛选 Prompt。",
+                    field_path=f"sections.{section_name}.prompt",
+                )
+            )
+
+    if not enabled_rss_sources and not search.get("enabled", False):
+        issues.append(
+            _issue(
+                code="missing_sources",
+                level="error",
+                message="当前任务没有任何可用信源：既没有启用 RSS，也没有启用搜索补充。",
+                field_path="sources",
+            )
+        )
 
     if not channels:
         issues.append(
@@ -82,7 +115,7 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
                 code="missing_search_queries",
                 level="warning",
                 message="已启用搜索补充，但还没有有效 query。",
-                field_path="search.queries",
+                field_path="sources.search.queries",
             )
         )
 
@@ -124,8 +157,8 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
         "status": status,
         "issues": issues,
         "summary": {
-            "category_count": len(feeds),
-            "feed_count": feed_count,
+            "section_count": len(sections),
+            "rss_source_count": rss_source_count,
             "channel_count": len(channels),
             "has_schedule": "hour" in schedule and "minute" in schedule,
             "search_query_count": len([item for item in search.get("queries", []) if str((item or {}).get("keywords", "")).strip()]),

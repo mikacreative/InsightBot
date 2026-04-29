@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased (2026-04-29)
+
+### Runtime
+
+- 修复 `editorial-intelligence` 路径下 task-level `search.queries` 的执行链：运行时会先把控制台保存的 query 规范化成真正可执行的字符串列表
+- 为 `editorial-intelligence` 的搜索 adapter 补上 `baidu` provider，和当前腾讯云生产环境的默认搜索配置对齐
+- 新增 `python -m insightbot` 统一入口，并支持 `--webhook` 启动企业微信回调服务
+
+### Console
+
+- 控制台当前基线收敛为 7 个主标签页
+- 原 `AI 提示词调优` / `RSS 健康度` / `信源发现` 不再作为长期一级入口
+- Prompt Debug 能力继续收口到 `验证与调试` 页内联工作流
+
+### Schema And Docs
+
+- `dev-editorial` 开发基线已把任务模型主入口切到 `sources + sections + pipeline_config`
+- 明确当前不做 `feeds -> sources + sections` 的长期兼容层，后续按任务数量手动迁移
+- 运行时内部仍临时派生 `feeds` 视图给 Prompt Debug / 健康检查 / 少量 legacy 路径使用
+- `README` 与 `v2.0_architecture` 已同步当前控制台结构和下一阶段 schema 方向
+
 ## v0.4.0 (2026-04-18)
 
 首次正式 release。

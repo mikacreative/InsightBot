@@ -13,6 +13,155 @@ from .paths import (
 )
 
 
+def _normalize_search_queries(search_payload: dict | None) -> dict:
+    search_payload = deepcopy(search_payload or {})
+    normalized_queries = []
+    for item in search_payload.get("queries", []) or []:
+        if isinstance(item, str):
+            keywords = item.strip()
+            if not keywords:
+                continue
+            normalized_queries.append(
+                {"keywords": keywords, "section_hints": [], "max_results": 10}
+            )
+            continue
+
+        if not isinstance(item, dict):
+            continue
+
+        keywords = str(item.get("keywords", "")).strip()
+        if not keywords:
+            continue
+
+        section_hints = item.get("section_hints")
+        if section_hints is None:
+            legacy_hint = str(item.get("category_hint", "")).strip()
+            section_hints = [legacy_hint] if legacy_hint else []
+        elif isinstance(section_hints, str):
+            section_hints = [section_hints.strip()] if section_hints.strip() else []
+        else:
+            section_hints = [str(v).strip() for v in section_hints if str(v).strip()]
+
+        normalized_queries.append(
+            {
+                "keywords": keywords,
+                "section_hints": section_hints,
+                "max_results": int(item.get("max_results", 10) or 10),
+            }
+        )
+
+    search_payload["queries"] = normalized_queries
+    return search_payload
+
+
+def derive_sections_from_feeds(feeds: dict | None) -> dict:
+    sections: dict[str, dict] = {}
+    for category, feed_data in (feeds or {}).items():
+        payload = feed_data or {}
+        sections[category] = {
+            "prompt": str(payload.get("prompt", "")).strip(),
+            "keywords": [str(v).strip() for v in payload.get("keywords", []) if str(v).strip()],
+            "source_hints": [str(category).strip()] if str(category).strip() else [],
+        }
+    return sections
+
+
+def derive_sources_from_feeds_and_search(feeds: dict | None, search: dict | None) -> dict:
+    rss_items: list[dict] = []
+    seen_urls: set[str] = set()
+    for category, feed_data in (feeds or {}).items():
+        for raw_url in (feed_data or {}).get("rss", []) or []:
+            raw_text = str(raw_url).strip()
+            if not raw_text:
+                continue
+            url = raw_text.split("#")[0].strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            source_id = re.sub(r"[^a-zA-Z0-9]+", "_", url).strip("_").lower() or f"rss_{len(rss_items)+1}"
+            rss_items.append(
+                {
+                    "id": source_id[:80],
+                    "url": raw_text,
+                    "enabled": True,
+                    "tags": [str(category).strip()] if str(category).strip() else [],
+                }
+            )
+
+    return {
+        "rss": rss_items,
+        "search": _normalize_search_queries(search),
+    }
+
+
+def derive_feeds_from_sources_and_sections(sources: dict | None, sections: dict | None) -> dict:
+    sections = deepcopy(sections or {})
+    rss_entries = list((sources or {}).get("rss", []) or [])
+    search_cfg = _normalize_search_queries((sources or {}).get("search", {}))
+
+    feeds: dict[str, dict] = {}
+    section_names = list(sections.keys())
+    for section_name, section_data in sections.items():
+        feeds[section_name] = {
+            "rss": [],
+            "keywords": [str(v).strip() for v in (section_data or {}).get("keywords", []) if str(v).strip()],
+            "prompt": str((section_data or {}).get("prompt", "")).strip(),
+        }
+
+    for source in rss_entries:
+        if not isinstance(source, dict):
+            continue
+        raw_url = str(source.get("url", "")).strip()
+        if not raw_url:
+            continue
+        target_sections = [str(v).strip() for v in source.get("section_hints", []) if str(v).strip()]
+        target_sections = [s for s in target_sections if s in feeds]
+        if not target_sections:
+            source_tags = [str(v).strip() for v in source.get("tags", []) if str(v).strip()]
+            for section_name, section_data in sections.items():
+                hints = [str(v).strip() for v in (section_data or {}).get("source_hints", []) if str(v).strip()]
+                if source_tags and set(source_tags) & set(hints):
+                    target_sections.append(section_name)
+        if not target_sections and section_names:
+            target_sections = [section_names[0]]
+
+        for section_name in target_sections:
+            feeds.setdefault(section_name, {"rss": [], "keywords": [], "prompt": ""})
+            if raw_url not in feeds[section_name]["rss"]:
+                feeds[section_name]["rss"].append(raw_url)
+
+    for query in search_cfg.get("queries", []) or []:
+        for hint in query.get("section_hints", []) or []:
+            if hint in feeds:
+                for keyword in str(query.get("keywords", "")).split():
+                    keyword = keyword.strip()
+                    if keyword and keyword not in feeds[hint]["keywords"]:
+                        feeds[hint]["keywords"].append(keyword)
+
+    return feeds
+
+
+def normalize_task_definition(task_def: dict | None) -> dict:
+    task_def = deepcopy(task_def or {})
+    if task_def.get("sources") or task_def.get("sections"):
+        task_def["sources"] = {
+            "rss": deepcopy((task_def.get("sources", {}) or {}).get("rss", []) or []),
+            "search": _normalize_search_queries((task_def.get("sources", {}) or {}).get("search", {})),
+        }
+        task_def["sections"] = deepcopy(task_def.get("sections", {}) or {})
+        task_def.pop("feeds", None)
+        task_def.pop("search", None)
+        return task_def
+
+    feeds = deepcopy(task_def.get("feeds", {}) or {})
+    search = deepcopy(task_def.get("search", {}) or {})
+    task_def["sources"] = derive_sources_from_feeds_and_search(feeds, search)
+    task_def["sections"] = derive_sections_from_feeds(feeds)
+    task_def.pop("feeds", None)
+    task_def.pop("search", None)
+    return task_def
+
+
 def _replace_env_vars(data):
     """
     递归遍历字典或列表，将字符串中的 ${VAR_NAME} 替换为对应的环境变量值。
@@ -171,15 +320,20 @@ def load_tasks_config(task_id: str, bot_dir: str | None = None) -> dict:
     tasks_map = tasks_data.get("tasks", {})
     if task_id not in tasks_map:
         raise KeyError(f"Task '{task_id}' not found in tasks.json")
-    task_def = tasks_map[task_id]
+    task_def = normalize_task_definition(tasks_map[task_id])
 
     # Start from base config
     config = deepcopy(base)
 
-    # Merge task-level feeds (replaces global feeds)
-    feeds = task_def.get("feeds", {})
-    if feeds:
-        config["feeds"] = deepcopy(feeds)
+    sources = deepcopy(task_def.get("sources", {}) or {})
+    sections = deepcopy(task_def.get("sections", {}) or {})
+    if sources:
+        config["sources"] = sources
+        config["search"] = deepcopy(sources.get("search", {}))
+    if sections:
+        config["sections"] = sections
+    if sources or sections:
+        config["feeds"] = derive_feeds_from_sources_and_sections(sources, sections)
 
     # Merge pipeline_config into ai section
     pipeline_config = task_def.get("pipeline_config", {})
@@ -187,11 +341,6 @@ def load_tasks_config(task_id: str, bot_dir: str | None = None) -> dict:
         ai = config.setdefault("ai", {})
         editorial = ai.setdefault("editorial_pipeline", {})
         editorial.update(deepcopy(pipeline_config))
-
-    # Merge search if present in task
-    search = task_def.get("search", {})
-    if search:
-        config["search"] = deepcopy(search)
 
     # Inject task's channels list so task_runner can read it
     config["_task_channels"] = list(task_def.get("channels", []))

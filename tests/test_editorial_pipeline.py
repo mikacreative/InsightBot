@@ -77,15 +77,34 @@ def _editorial_config():
                 },
             },
         },
-        "feeds": {
+        "sources": {
+            "rss": [
+                {
+                    "id": "marketing_feed",
+                    "url": "https://example-marketing.com/feed.xml",
+                    "enabled": True,
+                    "tags": ["marketing"],
+                    "section_hints": ["💡 营销行业"],
+                },
+                {
+                    "id": "ai_feed",
+                    "url": "https://example-ai.com/feed.xml",
+                    "enabled": True,
+                    "tags": ["ai"],
+                    "section_hints": ["🤖 数智前沿"],
+                },
+            ],
+            "search": {"enabled": False, "queries": []},
+        },
+        "sections": {
             "💡 营销行业": {
-                "rss": ["https://example-marketing.com/feed.xml"],
                 "keywords": [],
+                "source_hints": ["marketing"],
                 "prompt": "只保留与数字营销直接相关的内容。",
             },
             "🤖 数智前沿": {
-                "rss": ["https://example-ai.com/feed.xml"],
                 "keywords": ["AI营销", "智能广告"],
+                "source_hints": ["ai"],
                 "prompt": "只保留AI工具的实际应用案例。",
             },
         },

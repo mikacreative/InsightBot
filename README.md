@@ -1,6 +1,11 @@
 ## InsightBot (营销情报站)
 
 > 当前版本：`v0.4.0`
+>
+> 最新开发基线：
+> - `dev-editorial` 已把控制台收成 7 个主标签页
+> - `editorial-intelligence` 路径已修复 task-level search query 执行
+> - 任务模型主入口已切到 `sources + sections + pipeline_config`
 
 一个"RSS + AI + 多频道推送"的多任务营销情报简报机器人：
 
@@ -9,6 +14,7 @@
 - **内置调度器**：前台阻塞循环，只需守护一个进程，无需外部 cron
 - **任务中心控制台**：管理台按“当前任务”组织内容源、搜索补充、诊断、日志与 Dry Run
 - **调试友好**：控制台 Dry Run 永远不发送真实消息，仅在面板展示结果
+- **编辑式执行核**：`editorial pipeline` 已是默认主流程，底层正朝 `editorial-intelligence` skill runtime 过渡
 
 ### 核心模块
 
@@ -20,29 +26,31 @@
 | `insightbot/migrate.py` | v1 → v2 自动迁移 |
 | `insightbot/editorial_pipeline.py` | Editorial Pipeline（默认主流程） |
 | `insightbot/smart_brief_runner.py` | 经典简报流程 |
-| `scripts/app.py` | Streamlit 管理台（9 个标签页） |
+| `scripts/app.py` | Streamlit 管理台（当前为 7 个主标签页） |
 
 ### v0.4.0 新能力
 
 - **多任务多频道**：每个任务独立配置 feeds、pipeline、channels、schedule
 - **Channels 抽象**：企业微信凭证单独存储在 `channels.json`
-- **内置调度器**：无需外部 cron，直接守护 `python -m insightbot.cli` 即可
-- **调试控制台（tab8）**：Dry Run 在面板内展示完整简报预览 + 中间结果，零频道发送
+- **内置调度器**：无需外部 cron，直接守护 `python -m insightbot` 即可
+- **调试控制台**：Dry Run 在面板内展示完整简报预览 + 中间结果，零频道发送
 - **自动迁移**：首次启动会自动从旧版单任务配置生成 `channels.json` + `tasks.json`
 
-### 管理台标签页
+### 管理台标签页（当前）
 
 | Tab | 名称 | 说明 |
 |-----|------|------|
 | tab0 | 🏠 概览 | 当前任务运营总览、异常摘要、最近调试动态 |
 | tab1 | 📋 任务管理 | 当前任务的 feeds、搜索补充、pipeline、频道、调度 |
 | tab2 | 📡 Channels | 频道 CRUD + 联通性测试 |
-| tab3 | 🧠 AI 提示词调优 | Prompt Debug Console |
-| tab4 | 🩺 RSS 健康度 | 当前任务的单源级健康检查 + No Push Diagnosis |
-| tab5 | 📝 运行日志 | 当前任务优先的运行日志追踪 |
-| tab6 | 🔍 信源发现 | 将新 RSS 源直接订阅到当前任务板块 |
-| tab7 | ⚙️ 推送版式定制 | 早报标题、无更新提示语、底部链接 |
-| tab8 | 🔬 任务调试 | 任务级 Dry Run 面板（零频道发送） |
+| tab3 | 🧪 验证与调试 | 健康检查、No Push Diagnosis、板块调试、日志摘要 |
+| tab4 | 📝 运行日志 | 当前任务优先的运行日志追踪 |
+| tab5 | ⚙️ 推送版式定制 | 早报标题、无更新提示语、底部链接 |
+| tab6 | 🔬 任务调试 | 任务级 Dry Run 面板（零频道发送） |
+
+> 说明：
+> - 旧的 `AI 提示词调优` / `RSS 健康度` / `信源发现` 已不再作为一级标签页长期保留
+> - Prompt Debug 能力正在合并到 `验证与调试`
 
 ### 数据模型
 
@@ -87,7 +95,7 @@
 > 对飞书来说，**推荐默认接入 `feishu_app`**。  
 > 它通过飞书应用鉴权后走官方消息 API，支持 `interactive` 卡片；`feishu_bot` 仍可用，但更适合作为 webhook 兜底通道。
 
-**`tasks.json`** — 任务定义（替代原来的内联配置）
+**`tasks.json`** — 任务定义（当前主结构）
 ```json
 {
   "tasks": {
@@ -95,7 +103,13 @@
       "name": "每日营销早报",
       "enabled": true,
       "pipeline": "editorial",
-      "feeds": { "💡 营销行业": { "rss": [...], "keywords": [], "prompt": "" } },
+      "sources": {
+        "rss": [{ "id": "marketing_feed", "url": "https://example.com/feed.xml", "enabled": true }],
+        "search": { "enabled": true, "provider": "baidu", "queries": [{ "keywords": "AI 营销", "section_hints": ["🤖 数智前沿"], "max_results": 10 }] }
+      },
+      "sections": {
+        "💡 营销行业": { "prompt": "...", "keywords": ["营销"], "source_hints": ["marketing"] }
+      },
       "pipeline_config": {},
       "channels": ["wecom_main"],
       "schedule": { "hour": 8, "minute": 0 }
@@ -103,6 +117,15 @@
   }
 }
 ```
+
+> 当前 `dev-editorial` 开发基线已经把任务模型主入口切到：
+>
+> - `sources`
+> - `sections`
+> - `pipeline_config`
+>
+> 运行时内部仍会临时派生一份 `feeds` 视图，用于兼容 Prompt Debug、健康检查和少量 legacy 路径；这层适配不是长期主模型。  
+> 设计稿见：[Task Schema 重构：从 feeds 到 sources + sections](./docs/task_schema_sources_sections.md)
 
 ### 快速启动
 
@@ -139,21 +162,26 @@ streamlit run scripts/app.py \
 或命令行模式：
 
 ```bash
-python -m insightbot.cli
+python -m insightbot
 ```
 
 ### CLI 用法
 
 ```bash
 # 启动调度循环（阻塞）
-python -m insightbot.cli
+python -m insightbot
 
 # 运行指定任务（立即执行）
-python -m insightbot.cli --task daily_brief
+python -m insightbot --task daily_brief
 
 # Dry Run（仅面板展示，不发频道消息）
-python -m insightbot.cli --task daily_brief --dry-run
+python -m insightbot --task daily_brief --dry-run
+
+# 启动企业微信回调服务（端口 8080）
+python -m insightbot --webhook
 ```
+
+> `python -m insightbot.cli` 仍可用，但推荐统一使用 `python -m insightbot`。
 
 ### 环境变量
 
@@ -179,14 +207,16 @@ python -m insightbot.cli --task daily_brief --dry-run
 
 ### 部署建议
 
-- 生产环境推荐把 `python -m insightbot.cli` 作为唯一常驻进程来守护
+- 生产环境推荐把 `python -m insightbot` 作为唯一常驻进程来守护
 - 不建议同时维护系统 `cron`，否则容易与应用内调度重复触发
 - 优先使用 `systemd`、`supervisord` 或容器自动重启策略来保证进程存活
+- 如果需要从企业微信回调触发任务，可额外守护 `python -m insightbot --webhook`
 
 ### 文档
 
 - [Editorial Pipeline 设计文档](./docs/editorial_pipeline_design.md)
 - [Search 集成设计文档](./docs/search_integration_design.md)
 - [多任务架构说明](./docs/v2.0_architecture.md)
+- [Task Schema 重构：从 feeds 到 sources + sections](./docs/task_schema_sources_sections.md)
 - [本地测试指南](./LOCAL_TESTING_GUIDE.md)
 - [部署指南](./DEPLOYMENT_GUIDE.md)

@@ -37,6 +37,43 @@ def _normalize_search_queries(raw_queries: list[Any]) -> list[str]:
     return normalized
 
 
+def _extract_search_config(config: dict) -> dict:
+    sources = config.get("sources", {}) or {}
+    if isinstance(sources.get("search"), dict):
+        return sources.get("search", {}) or {}
+    return config.get("search", {}) or {}
+
+
+def _collect_primary_sources(config: dict) -> list[str]:
+    sources = config.get("sources", {}) or {}
+    primary_sources: list[str] = []
+    seen: set[str] = set()
+    for item in sources.get("rss", []) or []:
+        if isinstance(item, dict):
+            raw_url = str(item.get("url", "")).strip()
+            enabled = bool(item.get("enabled", True))
+        else:
+            raw_url = str(item).strip()
+            enabled = True
+        if not enabled or not raw_url:
+            continue
+        if raw_url in seen:
+            continue
+        primary_sources.append(raw_url)
+        seen.add(raw_url)
+    return primary_sources
+
+
+def _build_goal_topic(config: dict) -> str:
+    sections = config.get("sections", {}) or {}
+    if sections:
+        return " / ".join(sections.keys())
+    feeds = config.get("feeds", {}) or {}
+    if feeds:
+        return " / ".join(feeds.keys())
+    return "营销情报"
+
+
 def _estimate_counts(stage_results: dict) -> tuple[int, int]:
     candidate_count = 0
     selected_count = 0
@@ -114,17 +151,8 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
         logger.error("editorial-intelligence not installed: pip install -e editorial-intelligence/")
         return {"ok": False, "error": "editorial-intelligence not installed", "final_markdown": ""}
 
-    feeds = config.get("feeds", {})
-    search_config = config.get("search", {})
-
-    # Build primary_sources from feeds
-    primary_sources = []
-    for feed_id, feed_data in feeds.items():
-        rss_urls = feed_data.get("rss", [])
-        if isinstance(rss_urls, list):
-            for url in rss_urls:
-                if url:
-                    primary_sources.append(str(url))
+    search_config = _extract_search_config(config)
+    primary_sources = _collect_primary_sources(config)
 
     # Build search providers
     search_providers = {}
@@ -171,10 +199,8 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
     source_weight_config = SourceWeightConfig(search_providers=search_providers)
     normalized_queries = _normalize_search_queries(search_config.get("queries", []))
 
-    # Build goal from feeds structure
-    topic_parts = list(feeds.keys()) or ["营销情报"]
     goal = BriefingGoal(
-        topic=" / ".join(topic_parts),
+        topic=_build_goal_topic(config),
         queries=normalized_queries,
         description="",
     )
@@ -191,7 +217,10 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
         search_enabled=search_config.get("enabled", False),
     )
 
-    editorial_policy = config.get("pipeline_config", {})
+    editorial_policy = {
+        **(config.get("pipeline_config", {}) or {}),
+        "sections": config.get("sections", {}) or {},
+    }
 
     ei_result = run_ei_pipeline(
         context={

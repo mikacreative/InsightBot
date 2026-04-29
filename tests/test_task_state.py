@@ -8,8 +8,11 @@ from insightbot.task_state import (
 
 def _base_runtime_config() -> dict:
     return {
-        "feeds": {"营销": {"rss": ["https://example.com/feed.xml"], "prompt": "prompt"}},
-        "search": {},
+        "sources": {
+            "rss": [{"id": "marketing", "url": "https://example.com/feed.xml", "enabled": True}],
+            "search": {"enabled": False, "queries": []},
+        },
+        "sections": {"营销": {"prompt": "prompt", "keywords": []}},
         "settings": {"report_title": "日报"},
         "ai": {
             "system_prompt": "sys",
@@ -26,7 +29,7 @@ class TestTaskState:
     def test_revision_changes_when_runtime_config_changes(self):
         config = _base_runtime_config()
         revision_a = build_task_revision(config)
-        config["feeds"]["营销"]["prompt"] = "new prompt"
+        config["sections"]["营销"]["prompt"] = "new prompt"
         revision_b = build_task_revision(config)
         assert revision_a != revision_b
 
