@@ -56,10 +56,14 @@ from insightbot.editorial_pipeline import (
 try:
     from scripts.ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
     from scripts.ui.overview import render_task_overview
+    from scripts.ui.signal_desk.rooms import render_rooms_tab
+    from scripts.ui.signal_desk.saved_signals import render_saved_signals_tab
     from scripts.ui.task_config import render_task_empty_state_wizard
 except ModuleNotFoundError:
     from ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
     from ui.overview import render_task_overview
+    from ui.signal_desk.rooms import render_rooms_tab
+    from ui.signal_desk.saved_signals import render_saved_signals_tab
     from ui.task_config import render_task_empty_state_wizard
 
 def main() -> None:
@@ -867,8 +871,9 @@ def main() -> None:
         selected_task_state,
     )
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🏠 概览", "📋 任务管理", "📡 Channels",
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "🏠 概览", "📡 Signal Desk", "⭐ Saved Signals",
+        "📋 任务管理", "📡 Channels",
         "🧪 验证与调试", "📝 运行日志",
         "⚙️ 推送版式定制", "🔬 任务调试",
     ])
@@ -894,8 +899,20 @@ def main() -> None:
             render_diagnosis_card=render_diagnosis_card,
         )
 
-    # ── Tab 1: 任务管理 ────────────────────────────────────────────────────────
+    # ── Tab 1: Signal Desk ────────────────────────────────────────────────────
     with tab1:
+        render_rooms_tab(
+            bot_dir=bot_dir,
+            channels_data=channels_data,
+            save_task_definition=save_task_definition,
+        )
+
+    # ── Tab 2: Saved Signals ──────────────────────────────────────────────────
+    with tab2:
+        render_saved_signals_tab(bot_dir=bot_dir)
+
+    # ── Tab 3: 任务管理 ────────────────────────────────────────────────────────
+    with tab3:
         st.subheader("📋 任务管理")
         st.caption("把任务当成真正的产品单元来配置：内容源、搜索补充、筛选策略、频道与调度都在这里。")
 
@@ -1312,8 +1329,8 @@ def main() -> None:
 
             render_validation_result(selected_task_validation, task_state=selected_task_state)
 
-    # ── Tab 2: Channels ────────────────────────────────────────────────────────
-    with tab2:
+    # ── Tab 4: Channels ────────────────────────────────────────────────────────
+    with tab4:
         st.subheader("📡 Channels")
         st.caption("配置消息推送渠道（企业微信为主），测试联通性。")
 
@@ -1490,7 +1507,7 @@ def main() -> None:
             elif new_ch_id in channels_data["channels"]:
                 st.error("频道 ID 已存在。")
 
-    with tab3:
+    with tab5:
         st.subheader("验证与调试")
         st.caption("把最近运行、成功发送、健康检查、板块调试、No Push Diagnosis 和相关日志放在一页里，减少来回切页排查。")
 
@@ -1917,7 +1934,7 @@ def main() -> None:
             st.info("当前还没有相关日志。")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    with tab4:
+    with tab6:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
         st.caption("日志已开启企业级轮转模式（自动保留 30 天，每日切割）。默认优先展示当前任务相关日志，便于快速排查。")
         active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
@@ -1959,7 +1976,7 @@ def main() -> None:
         else:
             st.info("暂无深度日志。请点击侧边栏【立即手动运行】生成第一份报告。")
 
-    with tab5:
+    with tab7:
         st.subheader("推送版式与开关")
         settings = config["settings"]
 
@@ -1984,7 +2001,7 @@ def main() -> None:
             mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
             st.toast("设置已生效！")
 
-    with tab6:
+    with tab8:
         render_dry_run_tab(
             tasks=load_tasks(bot_dir).get("tasks", {}),
             selected_task_id=selected_task_id,
