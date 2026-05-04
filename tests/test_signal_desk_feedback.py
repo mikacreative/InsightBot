@@ -10,6 +10,7 @@ from insightbot.signal_desk.feedback import (
 )
 from insightbot.signal_desk.models import SignalItem
 from insightbot.paths import signal_desk_saved_signals_file_path
+from scripts.ui.signal_desk.room_detail import _format_feedback_summary
 
 
 def make_signal() -> SignalItem:
@@ -51,6 +52,23 @@ def test_append_feedback_and_summarize(tmp_path):
 
     assert len(records) == 3
     assert summary == {"good_for_pitch": 2, "not_relevant": 1}
+
+
+def test_format_feedback_summary_orders_known_actions():
+    summary = _format_feedback_summary(
+        {
+            "good_for_pitch": 2,
+            "useful": 3,
+            "not_relevant": 1,
+            "custom_action": 4,
+        }
+    )
+
+    assert summary == "Useful: 3 | Not relevant: 1 | Good for pitch: 2 | custom_action: 4"
+
+
+def test_format_feedback_summary_handles_empty_summary():
+    assert _format_feedback_summary({}) == "No feedback yet."
 
 
 def test_append_feedback_rejects_unsupported_action(tmp_path):

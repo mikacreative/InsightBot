@@ -7,7 +7,7 @@ import streamlit as st
 from insightbot.config import load_tasks, load_tasks_config
 from insightbot.signal_desk.compiler import compile_room_to_task
 from insightbot.signal_desk.models import BriefingRoom
-from insightbot.signal_desk.presets import get_use_case_template, list_judgement_lenses
+from insightbot.signal_desk.presets import get_editorial_preset, get_use_case_template, list_judgement_lenses
 from insightbot.signal_desk.source_packs import list_source_packs
 from insightbot.signal_desk.storage import load_rooms, save_room
 
@@ -21,6 +21,70 @@ def _slugify(value: str) -> str:
 
 def _parse_focus_areas(value: str) -> list[str]:
     return [item.strip() for item in re.split(r"[\n,;]+", value) if item.strip()]
+
+
+def _build_signal_desk_inspector(
+    template: dict,
+    source_packs: list[dict],
+    judgement_lenses: list[dict],
+) -> dict:
+    recommended_pack_ids = set(template.get("recommended_source_pack_ids", []))
+    default_lens_ids = set(template.get("default_judgement_lens_ids", []))
+    preset = get_editorial_preset(template["default_editorial_preset_id"])
+    return {
+        "source_packs": [
+            {
+                "id": pack["id"],
+                "name": pack["name"],
+                "coverage": pack.get("coverage", ""),
+                "limitations": pack.get("limitations", ""),
+                "bias": list(pack.get("bias", [])),
+                "freshness": pack.get("freshness", ""),
+                "recommended": pack["id"] in recommended_pack_ids,
+            }
+            for pack in source_packs
+        ],
+        "editorial_preset": {
+            "id": preset["id"],
+            "name": preset["name"],
+            "shortlist_size": preset.get("shortlist_size"),
+            "selection_rules": list(preset.get("selection_rules", [])),
+            "quality_checks": list(preset.get("quality_checks", [])),
+        },
+        "judgement_lenses": [
+            {
+                "id": lens["id"],
+                "label": lens["label"],
+                "core_question": lens.get("core_question", ""),
+                "default": lens["id"] in default_lens_ids,
+            }
+            for lens in judgement_lenses
+        ],
+    }
+
+
+def _render_signal_desk_inspector(inspector: dict) -> None:
+    with st.expander("Source, preset, and lens inspector", expanded=False):
+        st.markdown("**Source packs**")
+        for pack in inspector["source_packs"]:
+            suffix = " · recommended" if pack["recommended"] else ""
+            st.markdown(f"**{pack['name']}** (`{pack['id']}`){suffix}")
+            st.caption(
+                f"Coverage: {pack['coverage']} | Limitations: {pack['limitations']} | "
+                f"Bias: {', '.join(pack['bias']) or 'n/a'} | Freshness: {pack['freshness'] or 'n/a'}"
+            )
+
+        preset = inspector["editorial_preset"]
+        st.markdown(f"**Editorial preset: {preset['name']}** (`{preset['id']}`)")
+        st.caption(f"Shortlist size: {preset['shortlist_size']}")
+        st.markdown("Selection rules: " + "; ".join(preset["selection_rules"]))
+        st.markdown("Quality checks: " + "; ".join(preset["quality_checks"]))
+
+        st.markdown("**Judgement lenses**")
+        for lens in inspector["judgement_lenses"]:
+            suffix = " · default" if lens["default"] else ""
+            st.markdown(f"**{lens['label']}** (`{lens['id']}`){suffix}")
+            st.caption(lens["core_question"])
 
 
 def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) -> None:
@@ -60,6 +124,13 @@ def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) ->
         lens_id for lens_id in template.get("default_judgement_lens_ids", []) if lens_id in lens_ids
     ]
     default_schedule = template.get("default_schedule", {"hour": 8, "minute": 0})
+    _render_signal_desk_inspector(
+        _build_signal_desk_inspector(
+            template=template,
+            source_packs=source_packs,
+            judgement_lenses=judgement_lenses,
+        )
+    )
 
     with st.form("create_signal_desk_room"):
         name = st.text_input("Room name", value="Client Opportunity Radar").strip()

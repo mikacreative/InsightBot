@@ -4,10 +4,18 @@ from datetime import UTC, datetime
 
 import streamlit as st
 
-from insightbot.signal_desk.feedback import save_signal
+from insightbot.signal_desk.feedback import append_feedback, save_signal, summarize_feedback
 from insightbot.signal_desk.models import BriefingRoom, SignalItem
 from insightbot.signal_desk.signals import signal_items_from_run_result
 from insightbot.task_runner import run_task
+
+FEEDBACK_ACTION_LABELS = {
+    "useful": "Useful",
+    "not_relevant": "Not relevant",
+    "too_shallow": "Too shallow",
+    "good_for_pitch": "Good for pitch",
+    "good_for_client": "Good for client",
+}
 
 
 def _is_markdown_fallback_signal(signal: SignalItem) -> bool:
@@ -15,6 +23,28 @@ def _is_markdown_fallback_signal(signal: SignalItem) -> bool:
         signal.confidence.lower() == "low"
         and ("fallback" in signal.save_tags or "manual_review" in signal.judgement_lens)
     )
+
+
+def _format_feedback_summary(summary: dict[str, int]) -> str:
+    if not summary:
+        return "No feedback yet."
+
+    ordered_parts = [
+        f"{label}: {summary[action]}"
+        for action, label in FEEDBACK_ACTION_LABELS.items()
+        if summary.get(action)
+    ]
+    ordered_parts.extend(
+        f"{action}: {count}"
+        for action, count in sorted(summary.items())
+        if action not in FEEDBACK_ACTION_LABELS
+    )
+    return " | ".join(ordered_parts)
+
+
+def _render_feedback_summary(room_id: str, bot_dir: str) -> None:
+    summary = summarize_feedback(room_id, bot_dir=bot_dir)
+    st.caption("Room feedback: " + _format_feedback_summary(summary))
 
 
 def _render_signal_card(signal: SignalItem, bot_dir: str) -> None:
@@ -34,6 +64,18 @@ def _render_signal_card(signal: SignalItem, bot_dir: str) -> None:
             saved = save_signal(signal, bot_dir=bot_dir)
             st.success(f"Saved as {saved.id}")
 
+        st.caption("Feedback")
+        feedback_cols = st.columns(len(FEEDBACK_ACTION_LABELS))
+        for col, (action, label) in zip(feedback_cols, FEEDBACK_ACTION_LABELS.items(), strict=True):
+            if col.button(label, key=f"signal_feedback::{signal.room_id}::{signal.id}::{action}"):
+                append_feedback(
+                    signal_id=signal.id,
+                    room_id=signal.room_id,
+                    action=action,
+                    bot_dir=bot_dir,
+                )
+                st.success(f"Feedback recorded: {label}")
+
 
 def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> None:
     st.markdown(f"### {room.name}")
@@ -47,6 +89,9 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
     st.markdown(f"**Topic**: {room.topic}")
     if room.focus_areas:
         st.markdown("**Focus areas**: " + ", ".join(room.focus_areas))
+    feedback_summary_slot = st.empty()
+    with feedback_summary_slot:
+        _render_feedback_summary(room.id, bot_dir)
 
     result_key = f"signal_desk_dry_run::{room.id}"
     if st.button("Dry run room", type="primary", key=f"signal_desk_run::{room.id}"):
@@ -99,6 +144,8 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
         )
     for signal in signals:
         _render_signal_card(signal, bot_dir)
+    with feedback_summary_slot:
+        _render_feedback_summary(room.id, bot_dir)
 
     with st.expander("Final markdown", expanded=False):
         st.markdown(result.get("final_markdown") or "No final markdown.")

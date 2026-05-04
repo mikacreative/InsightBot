@@ -5,6 +5,7 @@ from insightbot.signal_desk.presets import (
 )
 from insightbot.signal_desk.source_packs import get_source_pack, merge_source_packs
 from insightbot.task_validation import validate_task_definition
+from scripts.ui.signal_desk.rooms import _build_signal_desk_inspector
 
 
 def test_client_opportunity_radar_defaults_exist():
@@ -18,6 +19,24 @@ def test_client_opportunity_radar_defaults_exist():
         "client_relevance",
         "pitch_potential",
     ]
+
+
+def test_signal_desk_inspector_exposes_trust_preset_and_lens_metadata():
+    template = get_use_case_template("client_opportunity_radar")
+    inspector = _build_signal_desk_inspector(
+        template=template,
+        source_packs=[get_source_pack("marketing_comms_cn")],
+        judgement_lenses=get_judgement_lenses(["client_relevance", "pitch_potential"]),
+    )
+
+    pack = inspector["source_packs"][0]
+    assert pack["coverage"]
+    assert pack["limitations"]
+    assert pack["bias"]
+    assert pack["freshness"] == "daily"
+    assert inspector["editorial_preset"]["selection_rules"]
+    assert inspector["editorial_preset"]["quality_checks"]
+    assert [lens["core_question"] for lens in inspector["judgement_lenses"]]
 
 
 def test_source_pack_has_trust_metadata():
