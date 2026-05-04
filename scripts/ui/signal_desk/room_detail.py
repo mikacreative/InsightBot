@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import streamlit as st
 
@@ -71,7 +71,7 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
                         "Recompile or recreate this briefing room."
                     ),
                 }
-        result["_signal_desk_run_id"] = datetime.utcnow().strftime("dry_run_%Y%m%d%H%M%S")
+        result["_signal_desk_run_id"] = datetime.now(UTC).strftime("dry_run_%Y%m%d%H%M%S")
         st.session_state[result_key] = result
 
     result = st.session_state.get(result_key)
