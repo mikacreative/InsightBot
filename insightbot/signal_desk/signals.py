@@ -24,8 +24,7 @@ def _candidate_to_signal(
     room_id: str,
     run_id: str,
     candidate: dict[str, Any],
-    index: int,
-) -> SignalItem:
+) -> SignalItem | None:
     what_happened = str(
         candidate.get("what_happened")
         or candidate.get("title")
@@ -36,7 +35,9 @@ def _candidate_to_signal(
     why_it_matters = str(candidate.get("why_it_matters") or summary).strip()
     candidate_id = str(candidate.get("id") or "").strip()
     source_url = str(candidate.get("url") or "").strip()
-    signal_key = candidate_id or what_happened or summary or source_url or f"candidate_{index}"
+    signal_key = candidate_id or what_happened or summary or source_url
+    if not signal_key:
+        return None
 
     source: dict[str, str] = {}
     if source_url:
@@ -90,11 +91,13 @@ def signal_items_from_run_result(
     stage_results = run_result.get("stage_results")
     shortlist = stage_results.get("shortlist") if isinstance(stage_results, dict) else []
     if isinstance(shortlist, list):
-        structured_signals = [
-            _candidate_to_signal(room_id, run_id, candidate, index)
-            for index, candidate in enumerate(shortlist)
-            if isinstance(candidate, dict)
-        ]
+        structured_signals: list[SignalItem] = []
+        for candidate in shortlist:
+            if not isinstance(candidate, dict):
+                continue
+            signal = _candidate_to_signal(room_id, run_id, candidate)
+            if signal is not None:
+                structured_signals.append(signal)
         if structured_signals:
             return structured_signals
 

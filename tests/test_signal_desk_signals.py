@@ -98,6 +98,23 @@ def test_signal_items_fallback_when_shortlist_has_no_dict_candidates():
     assert items[0].confidence == "low"
 
 
+def test_signal_items_fallback_when_shortlist_dict_candidate_is_empty():
+    run_result = {
+        "final_markdown": "## Social platform expands search ads\nTeams may need to revisit channel plans.",
+        "stage_results": {"shortlist": [{}]},
+    }
+
+    items = signal_items_from_run_result(
+        room_id="client_radar_social",
+        run_id="run_007",
+        run_result=run_result,
+    )
+
+    assert len(items) == 1
+    assert items[0].what_happened == "Social platform expands search ads"
+    assert items[0].confidence == "low"
+
+
 def test_signal_items_fallback_when_stage_results_is_none():
     run_result = {
         "final_markdown": "### Marketplace adds AI ads tool\nThis affects media planning workflows.",
