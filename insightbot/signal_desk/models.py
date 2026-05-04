@@ -101,6 +101,8 @@ class FeedbackRecord:
     room_id: str
     action: str
     note: str = ""
+    pattern_id: str = ""
+    context: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=_utc_now_iso)
 
     def to_dict(self) -> dict[str, Any]:

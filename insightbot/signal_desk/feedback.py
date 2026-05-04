@@ -109,6 +109,8 @@ def append_feedback(
     room_id: str,
     action: str,
     note: str = "",
+    pattern_id: str = "",
+    context: dict[str, Any] | None = None,
     bot_dir: str | None = None,
 ) -> FeedbackRecord:
     if action not in ALLOWED_FEEDBACK_ACTIONS:
@@ -120,6 +122,8 @@ def append_feedback(
         room_id=room_id,
         action=action,
         note=note,
+        pattern_id=pattern_id,
+        context=dict(context or {}),
     )
     _append_jsonl(signal_desk_feedback_file_path(bot_dir), record.to_dict())
     return record

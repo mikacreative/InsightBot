@@ -54,6 +54,22 @@ def test_append_feedback_and_summarize(tmp_path):
     assert summary == {"good_for_pitch": 2, "not_relevant": 1}
 
 
+def test_append_feedback_records_pattern_and_context(tmp_path):
+    append_feedback(
+        "sig_001",
+        "client_radar_beauty",
+        "good_for_pitch",
+        pattern_id="client_opportunity_radar",
+        context={"client": "Sephora", "category": "beauty retail"},
+        bot_dir=str(tmp_path),
+    )
+
+    records = list_feedback(room_id="client_radar_beauty", bot_dir=str(tmp_path))
+
+    assert records[0]["pattern_id"] == "client_opportunity_radar"
+    assert records[0]["context"]["client"] == "Sephora"
+
+
 def test_format_feedback_summary_orders_known_actions():
     summary = _format_feedback_summary(
         {

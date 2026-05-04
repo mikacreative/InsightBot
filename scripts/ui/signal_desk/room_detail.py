@@ -47,7 +47,14 @@ def _render_feedback_summary(room_id: str, bot_dir: str) -> None:
     st.caption("Room feedback: " + _format_feedback_summary(summary))
 
 
-def _render_signal_card(signal: SignalItem, bot_dir: str) -> None:
+def _feedback_context_for_room(room: BriefingRoom) -> dict:
+    intent = room.client_context.get("intent")
+    if isinstance(intent, dict):
+        return intent
+    return dict(room.client_context)
+
+
+def _render_signal_card(signal: SignalItem, room: BriefingRoom, bot_dir: str) -> None:
     with st.container(border=True):
         st.markdown(f"**{signal.what_happened or 'Untitled signal'}**")
         st.caption(f"Confidence: {signal.confidence} | Lens: {', '.join(signal.judgement_lens) or 'n/a'}")
@@ -72,6 +79,8 @@ def _render_signal_card(signal: SignalItem, bot_dir: str) -> None:
                     signal_id=signal.id,
                     room_id=signal.room_id,
                     action=action,
+                    pattern_id=room.use_case_template_id,
+                    context=_feedback_context_for_room(room),
                     bot_dir=bot_dir,
                 )
                 st.success(f"Feedback recorded: {label}")
@@ -143,7 +152,7 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
             "These low-confidence cards were extracted from final markdown and need manual review."
         )
     for signal in signals:
-        _render_signal_card(signal, bot_dir)
+        _render_signal_card(signal, room, bot_dir)
     with feedback_summary_slot:
         _render_feedback_summary(room.id, bot_dir)
 
