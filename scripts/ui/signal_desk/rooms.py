@@ -4,7 +4,7 @@ import re
 
 import streamlit as st
 
-from insightbot.config import load_tasks_config
+from insightbot.config import load_tasks, load_tasks_config
 from insightbot.signal_desk.compiler import compile_room_to_task
 from insightbot.signal_desk.models import BriefingRoom
 from insightbot.signal_desk.presets import get_use_case_template, list_judgement_lenses
@@ -149,8 +149,16 @@ def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) ->
         audience=audience or "senior account and strategy team",
         focus_areas=_parse_focus_areas(focus_areas_text),
     )
-    save_room(room, bot_dir=bot_dir)
     task_id, task_def = compile_room_to_task(room)
+    existing_tasks = load_tasks(bot_dir).get("tasks", {})
+    if task_id in existing_tasks:
+        st.error(
+            f"Compiled task ID `{task_id}` already exists. "
+            "Choose a different Room ID before creating this briefing room."
+        )
+        return
+
+    save_room(room, bot_dir=bot_dir)
     save_task_definition(task_id, task_def)
     st.success(f"Created briefing room `{room.id}` and compiled task `{task_id}`.")
     st.rerun()
