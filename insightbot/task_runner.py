@@ -190,10 +190,12 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
         "error": None,
         "final_markdown": ei_result.final_brief.get("markdown", ""),
         "source_summary": ei_result.source_summary,
+        "candidate_pool": ei_result.candidate_pool,
+        "shortlist": ei_result.shortlist,
+        "section_assignments": ei_result.section_assignments,
         "candidate_count": len(ei_result.candidate_pool),
         "shortlist_size": len(ei_result.shortlist),
         "diagnostics": ei_result.diagnostics,
-        "stage_results": {},
     }
 
 

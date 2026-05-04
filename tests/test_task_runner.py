@@ -9,6 +9,9 @@ test_task_runner.py — insightbot.task_runner 核心逻辑测试
 """
 
 import sys
+from dataclasses import dataclass, field
+from types import ModuleType
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,6 +38,99 @@ def test_normalize_search_queries_accepts_task_config_dicts():
         "AI marketing trend case",
         "brand campaign marketing case",
     ]
+
+
+def test_editorial_intelligence_pipeline_exposes_structured_shortlist():
+    from insightbot.task_runner import run_task
+
+    @dataclass(slots=True)
+    class BriefingResult:
+        ok: bool
+        source_summary: dict[str, Any] = field(default_factory=dict)
+        candidate_pool: list[dict[str, Any]] = field(default_factory=list)
+        shortlist: list[dict[str, Any]] = field(default_factory=list)
+        section_assignments: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+        final_brief: dict[str, Any] = field(default_factory=dict)
+        diagnostics: dict[str, Any] = field(default_factory=dict)
+
+    @dataclass(slots=True)
+    class BriefingGoal:
+        topic: str
+        queries: list[str]
+        description: str = ""
+        audience: str = ""
+
+    @dataclass(slots=True)
+    class SourceStrategy:
+        primary_sources: list[str]
+        search_enabled: bool = False
+
+    @dataclass(slots=True)
+    class SourceWeightConfig:
+        search_providers: dict[str, Any] = field(default_factory=dict)
+
+    @dataclass(slots=True)
+    class SearchProvider:
+        provider_id: str
+        name: str
+        weight: float
+        enabled: bool = True
+        api_key: str = ""
+        base_url: str = ""
+        timeout_s: int = 0
+
+    contracts_module = ModuleType("editorial_intelligence.contracts")
+    contracts_module.BriefingGoal = BriefingGoal
+    contracts_module.SourceStrategy = SourceStrategy
+    contracts_module.SourceWeightConfig = SourceWeightConfig
+
+    source_weight_module = ModuleType("editorial_intelligence.contracts.source_weight")
+    source_weight_module.SearchProvider = SearchProvider
+
+    workflow_module = ModuleType("editorial_intelligence.workflows.editorial_pipeline")
+    workflows_module = ModuleType("editorial_intelligence.workflows")
+    package_module = ModuleType("editorial_intelligence")
+
+    fake_config = {
+        "_task_pipeline": "editorial",
+        "_editorial_pipeline_mode": "editorial-intelligence",
+        "_task_channels": [],
+        "feeds": {},
+        "search": {"enabled": False, "queries": []},
+        "pipeline_config": {"shortlist_size": 1},
+    }
+    fake_ei_result = BriefingResult(
+        ok=True,
+        candidate_pool=[{"title": "A"}, {"title": "B"}],
+        shortlist=[
+            {
+                "title": "Brand launches AI shopping assistant",
+                "why_it_matters": "It affects retail conversion.",
+            }
+        ],
+        section_assignments={"Client Conversation Starters": [{"title": "Brand launches AI shopping assistant"}]},
+        final_brief={"markdown": "## Brief"},
+        diagnostics={"source_counts": {"shortlisted": 1}},
+    )
+    workflow_module.run_editorial_pipeline = MagicMock(return_value=fake_ei_result)
+    workflows_module.editorial_pipeline = workflow_module
+
+    with patch.dict(
+        sys.modules,
+        {
+            "editorial_intelligence": package_module,
+            "editorial_intelligence.contracts": contracts_module,
+            "editorial_intelligence.contracts.source_weight": source_weight_module,
+            "editorial_intelligence.workflows": workflows_module,
+            "editorial_intelligence.workflows.editorial_pipeline": workflow_module,
+        },
+    ):
+        with patch("insightbot.task_runner.append_run_record"):
+            result = run_task("room_client_radar", lambda: fake_config, dry_run=True)
+
+    assert result["stage_results"]["shortlist"] == fake_ei_result.shortlist
+    assert result["stage_results"]["candidate_pool"] == fake_ei_result.candidate_pool
+    assert result["stage_results"]["section_assignments"] == fake_ei_result.section_assignments
 
 
 class TestRunTaskDryRun:
