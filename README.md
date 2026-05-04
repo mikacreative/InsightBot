@@ -187,6 +187,7 @@ python -m insightbot.cli --task daily_brief --dry-run
 
 - [Signal Desk PRD](./docs/signal_desk_prd.md)
 - [Signal Desk MVP Architecture](./docs/signal_desk_mvp_architecture.md)
+- [Signal Desk Product IA And Pattern Architecture](./docs/signal_desk_product_ia_pattern_architecture.md)
 - [Signal Desk MVP Implementation Plan](./docs/superpowers/plans/2026-05-04-signal-desk-mvp.md)
 - [Editorial Pipeline 设计文档](./docs/editorial_pipeline_design.md)
 - [Search 集成设计文档](./docs/search_integration_design.md)
