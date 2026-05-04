@@ -1,3 +1,6 @@
+import json
+
+from insightbot.config import load_tasks_config
 from insightbot.signal_desk.compiler import compile_room_to_task
 from insightbot.signal_desk.models import BriefingRoom
 from insightbot.task_validation import validate_task_definition
@@ -53,3 +56,33 @@ def test_compile_room_adds_room_focus_and_topic_to_policy():
     assert "AI marketing opportunities" in rules
     assert "AI agent" in rules
     assert "content workflow" in rules
+
+
+def test_compiled_policy_survives_runtime_config_loading(tmp_path):
+    room = BriefingRoom(
+        id="client_radar_beauty",
+        name="Beauty Client Opportunity Radar",
+        topic="Beauty and retail marketing signals in China",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance"],
+        channels=["wecom_main"],
+        schedule={"hour": 8, "minute": 0},
+    )
+    task_id, task_def = compile_room_to_task(room)
+    (tmp_path / "config.content.json").write_text(
+        json.dumps({"ai": {}, "feeds": {}, "settings": {}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "tasks.json").write_text(
+        json.dumps({"tasks": {task_id: task_def}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    runtime_config = load_tasks_config(task_id, str(tmp_path))
+
+    assert runtime_config["pipeline_config"]["shortlist_size"] == 8
+    assert any(
+        "Client Relevance" in rule
+        for rule in runtime_config["pipeline_config"]["selection_rules"]
+    )

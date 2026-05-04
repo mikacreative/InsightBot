@@ -184,6 +184,7 @@ def load_tasks_config(task_id: str, bot_dir: str | None = None) -> dict:
     # Merge pipeline_config into ai section
     pipeline_config = task_def.get("pipeline_config", {})
     if pipeline_config:
+        config["pipeline_config"] = deepcopy(pipeline_config)
         ai = config.setdefault("ai", {})
         editorial = ai.setdefault("editorial_pipeline", {})
         editorial.update(deepcopy(pipeline_config))

@@ -41,6 +41,18 @@ def _estimate_counts(stage_results: dict) -> tuple[int, int]:
     return candidate_count, selected_count
 
 
+def _normalize_search_queries(queries: list) -> list[str]:
+    normalized: list[str] = []
+    for query in queries:
+        if isinstance(query, dict):
+            value = str(query.get("keywords", "")).strip()
+        else:
+            value = str(query).strip()
+        if value:
+            normalized.append(value)
+    return normalized
+
+
 def _build_run_record(
     *,
     task_id: str,
@@ -146,7 +158,7 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
     topic_parts = list(feeds.keys()) or ["营销情报"]
     goal = BriefingGoal(
         topic=" / ".join(topic_parts),
-        queries=search_config.get("queries", []),
+        queries=_normalize_search_queries(search_config.get("queries", [])),
         description="",
     )
     # Pipeline expects dict-like goal, so convert dataclass to dict

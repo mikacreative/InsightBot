@@ -21,6 +21,22 @@ sys.modules['feedparser'] = _mock_feedparser
 sys.modules['requests'] = _mock_requests
 
 
+def test_normalize_search_queries_accepts_task_config_dicts():
+    from insightbot.task_runner import _normalize_search_queries
+
+    queries = [
+        {"keywords": "AI marketing trend case", "category_hint": "AI and Martech"},
+        " brand campaign marketing case ",
+        {"keywords": "   "},
+        "",
+    ]
+
+    assert _normalize_search_queries(queries) == [
+        "AI marketing trend case",
+        "brand campaign marketing case",
+    ]
+
+
 class TestRunTaskDryRun:
     """dry_run=True 时不发送任何 channel，完整返回 stage_results。"""
 
