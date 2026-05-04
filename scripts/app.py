@@ -53,6 +53,18 @@ from insightbot.editorial_pipeline import (
     select_for_category,
     run_editorial_pipeline,
 )
+
+
+def _normalize_editable_search_query(query):
+    if isinstance(query, dict):
+        return {
+            "keywords": str(query.get("keywords", "")),
+            "category_hint": str(query.get("category_hint", "")),
+            "max_results": int(query.get("max_results", 10) or 10),
+        }
+    return {"keywords": str(query or ""), "category_hint": "", "max_results": 10}
+
+
 try:
     from scripts.ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
     from scripts.ui.overview import render_task_overview
@@ -1077,7 +1089,10 @@ def main() -> None:
 
             query_state_key = f"task_search_queries::{selected_task_id}"
             if query_state_key not in st.session_state:
-                st.session_state[query_state_key] = deepcopy(search_config.get("queries", []))
+                st.session_state[query_state_key] = [
+                    _normalize_editable_search_query(query)
+                    for query in deepcopy(search_config.get("queries", []))
+                ]
 
             search_queries = st.session_state[query_state_key]
             query_to_delete = None

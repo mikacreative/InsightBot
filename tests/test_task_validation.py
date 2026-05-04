@@ -1,4 +1,5 @@
 from insightbot.task_validation import validate_task_definition
+from scripts.app import _normalize_editable_search_query
 
 
 def _base_task_def() -> dict:
@@ -67,3 +68,10 @@ class TestTaskValidation:
 
         assert result["status"] == "ready"
         assert result["summary"]["search_query_count"] == 1
+
+    def test_editable_search_query_accepts_legacy_string_queries(self):
+        assert _normalize_editable_search_query(" AI marketing trend ") == {
+            "keywords": " AI marketing trend ",
+            "category_hint": "",
+            "max_results": 10,
+        }
