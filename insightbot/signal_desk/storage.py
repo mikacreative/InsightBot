@@ -33,7 +33,7 @@ def _room_storage_lock(path: str):
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             break
-        except FileExistsError:
+        except (FileExistsError, PermissionError):
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out waiting for room storage lock: {lock_path}")
             time.sleep(_LOCK_RETRY_DELAY_SECONDS)

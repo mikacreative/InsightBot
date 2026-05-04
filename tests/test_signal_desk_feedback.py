@@ -105,3 +105,22 @@ def test_append_feedback_holds_lock_while_writing(tmp_path, monkeypatch):
     append_feedback("sig_001", "client_radar_beauty", "good_for_pitch", bot_dir=str(tmp_path))
 
     assert lock_seen_during_write == [True]
+
+
+def test_append_feedback_retries_lock_on_permission_error(tmp_path, monkeypatch):
+    original_open = feedback_module.os.open
+    attempts = 0
+
+    def permission_error_once(path, flags):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("simulated Windows lock contention")
+        return original_open(path, flags)
+
+    monkeypatch.setattr(feedback_module.os, "open", permission_error_once)
+
+    append_feedback("sig_001", "client_radar_beauty", "good_for_pitch", bot_dir=str(tmp_path))
+
+    assert attempts == 2
+    assert len(list_feedback(room_id="client_radar_beauty", bot_dir=str(tmp_path))) == 1

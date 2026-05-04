@@ -107,3 +107,33 @@ def test_save_room_uses_lock_file_and_cleans_it_up(tmp_path, monkeypatch):
 
     assert saw_lock is True
     assert not storage.os.path.exists(lock_path)
+
+
+def test_save_room_retries_lock_on_permission_error(tmp_path, monkeypatch):
+    bot_dir = str(tmp_path)
+    original_open = storage.os.open
+    attempts = 0
+
+    def permission_error_once(path, flags):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("simulated Windows lock contention")
+        return original_open(path, flags)
+
+    monkeypatch.setattr(storage.os, "open", permission_error_once)
+    room = BriefingRoom(
+        id="client_radar_beauty",
+        name="Beauty Client Opportunity Radar",
+        topic="Beauty signals",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance"],
+        channels=["wecom_main"],
+        schedule={"hour": 8, "minute": 0},
+    )
+
+    save_room(room, bot_dir=bot_dir)
+
+    assert attempts == 2
+    assert list(load_rooms(bot_dir=bot_dir).keys()) == ["client_radar_beauty"]
