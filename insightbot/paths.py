@@ -78,3 +78,23 @@ def task_health_cache_file_path(task_id: str, bot_dir: str | None = None) -> str
 def task_state_file_path(task_id: str, bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("TASK_STATE_FILE", os.path.join(data_dir(bot_dir), "task_state", f"{task_id}.json"))
+
+
+def signal_desk_dir(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_DIR", os.path.join(data_dir(bot_dir), "signal_desk"))
+
+
+def signal_desk_rooms_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_ROOMS_FILE", os.path.join(signal_desk_dir(bot_dir), "rooms.json"))
+
+
+def signal_desk_saved_signals_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_SAVED_SIGNALS_FILE", os.path.join(signal_desk_dir(bot_dir), "saved_signals.jsonl"))
+
+
+def signal_desk_feedback_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_FEEDBACK_FILE", os.path.join(signal_desk_dir(bot_dir), "feedback.jsonl"))
