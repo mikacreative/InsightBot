@@ -7,6 +7,7 @@ import streamlit as st
 from insightbot.config import load_tasks, load_tasks_config
 from insightbot.signal_desk.compiler import compile_room_to_task
 from insightbot.signal_desk.models import BriefingRoom
+from insightbot.signal_desk.patterns import IntentContract, list_pattern_contracts
 from insightbot.signal_desk.presets import get_editorial_preset, get_use_case_template, list_judgement_lenses
 from insightbot.signal_desk.source_packs import list_source_packs
 from insightbot.signal_desk.storage import load_rooms, save_room
@@ -89,7 +90,7 @@ def _render_signal_desk_inspector(inspector: dict) -> None:
 
 def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) -> None:
     st.subheader("Signal Desk")
-    st.caption("Create briefing rooms that compile into runnable InsightBot tasks.")
+    st.caption("Create intelligence rooms by choosing a pattern and adding work context.")
 
     rooms = load_rooms(bot_dir=bot_dir)
     if rooms:
@@ -108,20 +109,32 @@ def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) ->
         st.info("No briefing rooms yet. Create a Client Opportunity Radar below.")
 
     st.divider()
-    st.markdown("### Create Client Opportunity Radar")
+    st.markdown("### New intelligence room")
 
     template = get_use_case_template("client_opportunity_radar")
+    patterns = list_pattern_contracts()
     source_packs = list_source_packs()
     judgement_lenses = list_judgement_lenses()
     channel_options = list((channels_data or {}).get("channels", {}).keys())
 
+    pattern_options = [pattern.id for pattern in patterns]
+    selected_pattern_id = st.selectbox(
+        "Pattern",
+        options=pattern_options,
+        format_func=lambda pattern_id: next(
+            (pattern.name for pattern in patterns if pattern.id == pattern_id),
+            pattern_id,
+        ),
+    )
+    selected_pattern = next(pattern for pattern in patterns if pattern.id == selected_pattern_id)
+
     source_pack_ids = [pack["id"] for pack in source_packs]
     default_pack_ids = [
-        pack_id for pack_id in template.get("recommended_source_pack_ids", []) if pack_id in source_pack_ids
+        pack_id for pack_id in selected_pattern.default_source_pack_ids if pack_id in source_pack_ids
     ]
     lens_ids = [lens["id"] for lens in judgement_lenses]
     default_lens_ids = [
-        lens_id for lens_id in template.get("default_judgement_lens_ids", []) if lens_id in lens_ids
+        lens_id for lens_id in selected_pattern.default_judgement_lens_ids if lens_id in lens_ids
     ]
     default_schedule = template.get("default_schedule", {"hour": 8, "minute": 0})
     _render_signal_desk_inspector(
@@ -133,18 +146,33 @@ def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) ->
     )
 
     with st.form("create_signal_desk_room"):
-        name = st.text_input("Room name", value="Client Opportunity Radar").strip()
+        client = st.text_input("Client", placeholder="Sephora, IKEA, or a client group").strip()
+        category = st.text_input("Category", placeholder="beauty retail, home, automotive").strip()
+        focus_topics_text = st.text_area(
+            "Focus topics",
+            placeholder="One per line, for example:\nAI retail\nsocial commerce\ncampaign cases",
+            height=90,
+        )
+        output_intent = st.selectbox(
+            "Output intent",
+            options=[
+                "client_conversation",
+                "proposal_angle",
+                "internal_inspiration",
+                "trend_observation",
+            ],
+        )
+        time_window = st.selectbox(
+            "Time window",
+            options=["last_7_days", "last_14_days", "last_30_days"],
+        )
+        name = st.text_input("Room name", value=selected_pattern.name).strip()
         room_id = st.text_input("Room ID", value=_slugify(name)).strip()
         topic = st.text_area(
             "Topic",
-            value="Client-relevant marketing communications signals, campaign cases, and pitchable ideas.",
+            value=selected_pattern.user_job,
             height=90,
         ).strip()
-        focus_areas_text = st.text_area(
-            "Focus areas",
-            placeholder="One per line, for example:\nbeauty retail\nAI marketing\nsocial commerce",
-            height=90,
-        )
         audience = st.text_input("Audience", value="senior account and strategy team").strip()
 
         selected_source_pack_ids = st.multiselect(
@@ -185,7 +213,7 @@ def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) ->
         with sched_col3:
             enabled = st.checkbox("Enable compiled task", value=False)
 
-        submitted = st.form_submit_button("Create room and task", use_container_width=True)
+        submitted = st.form_submit_button("Create room", use_container_width=True)
 
     if not submitted:
         return
@@ -199,12 +227,30 @@ def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) ->
     if not name or not topic:
         st.error("Room name and topic are required.")
         return
+    if not client or not category:
+        st.error("Client and category are required.")
+        return
     if not selected_source_pack_ids:
         st.error("Select at least one source pack.")
         return
     if not selected_lens_ids:
         st.error("Select at least one judgement lens.")
         return
+
+    focus_topics = _parse_focus_areas(focus_topics_text)
+    if not focus_topics:
+        st.error("Add at least one focus topic.")
+        return
+
+    intent = IntentContract(
+        pattern_id=selected_pattern.id,
+        room_id=room_id,
+        client=client,
+        category=category,
+        focus_topics=focus_topics,
+        output_intent=output_intent,
+        time_window=time_window,
+    )
 
     room = BriefingRoom(
         id=room_id,
@@ -216,9 +262,10 @@ def render_rooms_tab(bot_dir: str, channels_data: dict, save_task_definition) ->
         channels=selected_channels,
         schedule={"hour": int(hour), "minute": int(minute)},
         enabled=enabled,
-        use_case_template_id=template["id"],
+        use_case_template_id=selected_pattern.id,
         audience=audience or "senior account and strategy team",
-        focus_areas=_parse_focus_areas(focus_areas_text),
+        focus_areas=focus_topics,
+        client_context={"intent": intent.to_dict()},
     )
     task_id, task_def = compile_room_to_task(room)
     existing_tasks = load_tasks(bot_dir).get("tasks", {})

@@ -9,6 +9,7 @@ from insightbot.paths import (
     signal_desk_feedback_file_path,
 )
 from insightbot.signal_desk.models import BriefingRoom
+from insightbot.signal_desk.patterns import IntentContract
 from insightbot.signal_desk import storage
 from insightbot.signal_desk.storage import load_rooms, save_room, delete_room
 
@@ -137,3 +138,29 @@ def test_save_room_retries_lock_on_permission_error(tmp_path, monkeypatch):
 
     assert attempts == 2
     assert list(load_rooms(bot_dir=bot_dir).keys()) == ["client_radar_beauty"]
+
+
+def test_room_stores_pattern_intent_context():
+    intent = IntentContract(
+        pattern_id="client_opportunity_radar",
+        room_id="beauty_radar",
+        client="Sephora",
+        category="beauty retail",
+        focus_topics=["AI retail"],
+        output_intent="client_conversation",
+    )
+    room = BriefingRoom(
+        id="beauty_radar",
+        name="Beauty Radar",
+        topic="Beauty retail signals",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance"],
+        channels=[],
+        schedule={"hour": 8, "minute": 0},
+        client_context={"intent": intent.to_dict()},
+    )
+
+    restored = BriefingRoom.from_dict(room.to_dict())
+
+    assert restored.client_context["intent"]["client"] == "Sephora"
