@@ -68,12 +68,14 @@ def _normalize_editable_search_query(query):
 try:
     from scripts.ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
     from scripts.ui.overview import render_task_overview
+    from scripts.ui.signal_desk.product_shell import normalize_product_mode
     from scripts.ui.signal_desk.rooms import render_rooms_tab
     from scripts.ui.signal_desk.saved_signals import render_saved_signals_tab
     from scripts.ui.task_config import render_task_empty_state_wizard
 except ModuleNotFoundError:
     from ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
     from ui.overview import render_task_overview
+    from ui.signal_desk.product_shell import normalize_product_mode
     from ui.signal_desk.rooms import render_rooms_tab
     from ui.signal_desk.saved_signals import render_saved_signals_tab
     from ui.task_config import render_task_empty_state_wizard
@@ -746,8 +748,7 @@ def main() -> None:
 
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
     render_prompt_debug_styles()
-    st.title("🚀 营销情报站 | 智控中心")
-    st.caption(f"当前编辑配置文件: {active_edit_path}")
+    st.title("Signal Desk")
 
     if "settings" not in config:
         config["settings"] = {}
@@ -755,115 +756,130 @@ def main() -> None:
         config["ai"] = {}
 
     with st.sidebar:
-        st.header("⚡ 快捷操作")
-        task_ids = list(tasks_data.get("tasks", {}).keys())
-        if task_ids:
-            active_task_id = st.selectbox(
-                "当前任务",
-                options=task_ids,
-                index=task_ids.index(selected_task_id) if selected_task_id in task_ids else 0,
-                key="current_task_selector",
-            )
-            selected_task_id = active_task_id
-            st.session_state["selected_task_id"] = active_task_id
-            selected_task = tasks_data["tasks"].get(selected_task_id, {})
-            selected_task_runtime_config = build_task_runtime_config(selected_task_id)
-            selected_task_feeds = deepcopy(selected_task.get("feeds", {}))
-            selected_task_categories = list(selected_task_feeds.keys())
-            selected_task_state = load_task_state(selected_task_id, bot_dir)
-            current_revision = build_task_revision(selected_task_runtime_config)
-            if selected_task_state.get("config_revision") != current_revision:
-                selected_task_state = touch_revalidation_state(
-                    task_id=selected_task_id,
-                    config_revision=current_revision,
-                    needs_revalidation=True,
-                    bot_dir=bot_dir,
-                    last_validated_revision=selected_task_state.get("last_validated_revision"),
-                )
-            selected_task_validation = validate_task_definition(selected_task_id, selected_task, channels_data)
-            st.caption(
-                f"Pipeline: `{selected_task.get('pipeline', 'editorial')}` | "
-                f"Channels: {len(selected_task.get('channels', []))} | "
-                f"Categories: {len(selected_task_categories)}"
-            )
-        else:
-            st.info("暂无任务，请先在任务管理页面创建。")
-
-        st.markdown("**➕ 创建新任务**")
-        quick_new_task_id = st.text_input(
-            "任务 ID",
-            placeholder="e.g. weekly_report",
-            key="quick_create_task_id",
-        )
-        quick_new_task_name = st.text_input(
-            "任务名称",
-            placeholder="每周深度报告",
-            key="quick_create_task_name",
-        )
-        quick_col1, quick_col2, quick_col3 = st.columns([1.2, 1, 1])
-        with quick_col1:
-            quick_new_task_pipeline = st.selectbox(
-                "Pipeline",
-                options=["editorial", "classic"],
+        product_mode = normalize_product_mode(
+            st.radio(
+                "Product mode",
+                options=["Signal Desk", "Control Center"],
                 index=0,
-                key="quick_create_task_pipeline",
             )
-        with quick_col2:
-            quick_new_task_hour = st.number_input("小时", 0, 23, 8, key="quick_create_task_hour")
-        with quick_col3:
-            quick_new_task_min = st.number_input("分钟", 0, 59, 0, key="quick_create_task_min")
+        )
+        st.caption(f"Mode: {product_mode}")
+        if product_mode == "Signal Desk":
+            st.markdown("**Workspace**")
+            st.caption("Use rooms, signals, saved items, and briefs without editing raw task machinery.")
+            st.divider()
+            st.caption("Control Center contains task, channel, validation, log, and debug operations.")
+        else:
+            st.header("⚡ 快捷操作")
+            st.caption(f"当前编辑配置文件: {active_edit_path}")
+            task_ids = list(tasks_data.get("tasks", {}).keys())
+            if task_ids:
+                active_task_id = st.selectbox(
+                    "当前任务",
+                    options=task_ids,
+                    index=task_ids.index(selected_task_id) if selected_task_id in task_ids else 0,
+                    key="current_task_selector",
+                )
+                selected_task_id = active_task_id
+                st.session_state["selected_task_id"] = active_task_id
+                selected_task = tasks_data["tasks"].get(selected_task_id, {})
+                selected_task_runtime_config = build_task_runtime_config(selected_task_id)
+                selected_task_feeds = deepcopy(selected_task.get("feeds", {}))
+                selected_task_categories = list(selected_task_feeds.keys())
+                selected_task_state = load_task_state(selected_task_id, bot_dir)
+                current_revision = build_task_revision(selected_task_runtime_config)
+                if selected_task_state.get("config_revision") != current_revision:
+                    selected_task_state = touch_revalidation_state(
+                        task_id=selected_task_id,
+                        config_revision=current_revision,
+                        needs_revalidation=True,
+                        bot_dir=bot_dir,
+                        last_validated_revision=selected_task_state.get("last_validated_revision"),
+                    )
+                selected_task_validation = validate_task_definition(selected_task_id, selected_task, channels_data)
+                st.caption(
+                    f"Pipeline: `{selected_task.get('pipeline', 'editorial')}` | "
+                    f"Channels: {len(selected_task.get('channels', []))} | "
+                    f"Categories: {len(selected_task_categories)}"
+                )
+            else:
+                st.info("暂无任务，请先在任务管理页面创建。")
 
-        if st.button("创建任务", key="quick_create_task_btn", use_container_width=True):
-            tasks_data = get_tasks_data()
-            tasks = tasks_data.get("tasks", {})
-            if quick_new_task_id and quick_new_task_id not in tasks:
-                tasks[quick_new_task_id] = {
-                    "name": quick_new_task_name or quick_new_task_id,
-                    "enabled": False,
-                    "pipeline": quick_new_task_pipeline,
-                    "feeds": deepcopy(selected_task_feeds or config.get("feeds", {})),
-                    "pipeline_config": deepcopy(get_editorial_defaults()),
-                    "search": deepcopy((selected_task or {}).get("search", config.get("search", {}))),
-                    "channels": deepcopy((selected_task or {}).get("channels", [])),
-                    "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
-                }
-                save_tasks(tasks_data, bot_dir)
-                scheduler.reload()
-                mark_task_changed(quick_new_task_id)
-                st.session_state["selected_task_id"] = quick_new_task_id
-                st.success(f"任务「{quick_new_task_id}」已创建。")
-                st.rerun()
-            elif quick_new_task_id in tasks:
-                st.error("任务 ID 已存在。")
+            st.markdown("**➕ 创建新任务**")
+            quick_new_task_id = st.text_input(
+                "任务 ID",
+                placeholder="e.g. weekly_report",
+                key="quick_create_task_id",
+            )
+            quick_new_task_name = st.text_input(
+                "任务名称",
+                placeholder="每周深度报告",
+                key="quick_create_task_name",
+            )
+            quick_col1, quick_col2, quick_col3 = st.columns([1.2, 1, 1])
+            with quick_col1:
+                quick_new_task_pipeline = st.selectbox(
+                    "Pipeline",
+                    options=["editorial", "classic"],
+                    index=0,
+                    key="quick_create_task_pipeline",
+                )
+            with quick_col2:
+                quick_new_task_hour = st.number_input("小时", 0, 23, 8, key="quick_create_task_hour")
+            with quick_col3:
+                quick_new_task_min = st.number_input("分钟", 0, 59, 0, key="quick_create_task_min")
 
-        if st.button("▶️ 立即手动运行", type="primary", use_container_width=True):
-            with st.spinner("AI 正在全网检索并撰写简报..."):
-                subprocess.run([sys.executable, "-m", "insightbot.cli"])
-                st.success("运行指令已发送，请查看企业微信或日志。")
+            if st.button("创建任务", key="quick_create_task_btn", use_container_width=True):
+                tasks_data = get_tasks_data()
+                tasks = tasks_data.get("tasks", {})
+                if quick_new_task_id and quick_new_task_id not in tasks:
+                    tasks[quick_new_task_id] = {
+                        "name": quick_new_task_name or quick_new_task_id,
+                        "enabled": False,
+                        "pipeline": quick_new_task_pipeline,
+                        "feeds": deepcopy(selected_task_feeds or config.get("feeds", {})),
+                        "pipeline_config": deepcopy(get_editorial_defaults()),
+                        "search": deepcopy((selected_task or {}).get("search", config.get("search", {}))),
+                        "channels": deepcopy((selected_task or {}).get("channels", [])),
+                        "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
+                    }
+                    save_tasks(tasks_data, bot_dir)
+                    scheduler.reload()
+                    mark_task_changed(quick_new_task_id)
+                    st.session_state["selected_task_id"] = quick_new_task_id
+                    st.success(f"任务「{quick_new_task_id}」已创建。")
+                    st.rerun()
+                elif quick_new_task_id in tasks:
+                    st.error("任务 ID 已存在。")
 
-        st.divider()
-        st.header("⏳ 调度器状态")
+            if st.button("▶️ 立即手动运行", type="primary", use_container_width=True):
+                with st.spinner("AI 正在全网检索并撰写简报..."):
+                    subprocess.run([sys.executable, "-m", "insightbot.cli"])
+                    st.success("运行指令已发送，请查看企业微信或日志。")
 
-        tasks_def = load_tasks(bot_dir)  # reload to show current
-        enabled_count = sum(1 for t in tasks_def.get("tasks", {}).values() if t.get("enabled"))
-        total_count = len(tasks_def.get("tasks", {}))
-        st.metric("活跃任务", f"{enabled_count}/{total_count}")
+            st.divider()
+            st.header("⏳ 调度器状态")
 
-        if st.button("🚀 运行所有已启用任务", use_container_width=True):
-            with st.spinner("正在运行所有已启用任务..."):
-                results = scheduler.run_all_enabled()
-            for r in results:
-                status = "✅" if r.get("ok") else "❌"
-                st.write(f"{status} {r.get('task_id')}")
-            st.success("任务运行完成！")
+            tasks_def = load_tasks(bot_dir)  # reload to show current
+            enabled_count = sum(1 for t in tasks_def.get("tasks", {}).values() if t.get("enabled"))
+            total_count = len(tasks_def.get("tasks", {}))
+            st.metric("活跃任务", f"{enabled_count}/{total_count}")
 
-        st.divider()
-        st.header("📡 Channels")
-        channels_data = load_channels(bot_dir)
-        channel_count = len(channels_data.get("channels", {}))
-        st.metric("已配置频道", str(channel_count))
+            if st.button("🚀 运行所有已启用任务", use_container_width=True):
+                with st.spinner("正在运行所有已启用任务..."):
+                    results = scheduler.run_all_enabled()
+                for r in results:
+                    status = "✅" if r.get("ok") else "❌"
+                    st.write(f"{status} {r.get('task_id')}")
+                st.success("任务运行完成！")
 
-        st.caption("在「📡 Channels」标签页管理频道配置和联通性测试。")
+            st.divider()
+            st.header("📡 Channels")
+            channels_data = load_channels(bot_dir)
+            channel_count = len(channels_data.get("channels", {}))
+            st.metric("已配置频道", str(channel_count))
+
+            st.caption("在 Control Center 管理频道配置和联通性测试。")
 
     overview_health_snapshot = load_task_health(selected_task_id, bot_dir) if selected_task_id else None
     overview_run_summary = parse_recent_run_summary(bot_log_path)
@@ -882,6 +898,26 @@ def main() -> None:
         latest_success_record,
         selected_task_state,
     )
+
+    if product_mode == "Signal Desk":
+        workspace_rooms, workspace_signals, workspace_saved, workspace_briefs = st.tabs([
+            "Rooms", "Signals", "Saved", "Briefs",
+        ])
+        with workspace_rooms:
+            render_rooms_tab(
+                bot_dir=bot_dir,
+                channels_data=channels_data,
+                save_task_definition=save_task_definition,
+            )
+        with workspace_signals:
+            st.subheader("Signals")
+            st.caption("Latest signal review will live here. Use Rooms to run or preview a room for now.")
+        with workspace_saved:
+            render_saved_signals_tab(bot_dir=bot_dir)
+        with workspace_briefs:
+            st.subheader("Briefs")
+            st.caption("Work-ready client conversation briefs and proposal angle exports will live here.")
+        return
 
     tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "🏠 概览", "📡 Signal Desk", "⭐ Saved Signals",
