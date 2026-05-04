@@ -1,14 +1,21 @@
-## InsightBot (营销情报站)
+## Signal Desk / InsightBot (营销情报站)
 
-> 当前版本：`v0.4.0`
+> 当前阶段：`Signal Desk product shell + Pattern contracts`
 
-一个"RSS + AI + 多频道推送"的多任务营销情报简报机器人：
+Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是现有 RSS / search / AI pipeline / channels / scheduler 运行底座。
 
-- **多任务**：每个任务有独立的 RSS 源、Pipeline、频道和调度时间
-- **多频道**：Channels 抽象层，支持企业微信、飞书应用、飞书机器人等多样化推送渠道
-- **内置调度器**：前台阻塞循环，只需守护一个进程，无需外部 cron
-- **任务中心控制台**：管理台按“当前任务”组织内容源、搜索补充、诊断、日志与 Dry Run
-- **调试友好**：控制台 Dry Run 永远不发送真实消息，仅在面板展示结果
+当前产品结构是两层：
+
+- **Signal Desk**：默认用户工作台，只暴露 Rooms、Signals、Saved、Briefs，让用户提出情报需求、调用 pattern、查看和保存结果。
+- **Control Center**：内部运营和质控中心，管理 tasks、channels、validation、logs、delivery format、debug 和 raw pipeline。
+- **Pattern Library**：把 source pack、editorial policy、judgement lenses、quality gates 和用户 intent 收成可调用的产品能力。
+
+运行底座仍保留：
+
+- **多任务**：每个任务有独立的内容源、pipeline、频道和调度时间。
+- **多频道**：Channels 抽象层，支持企业微信、飞书应用、飞书机器人等推送渠道。
+- **内置调度器**：前台阻塞循环，只需守护一个进程，无需外部 cron。
+- **调试友好**：Dry Run 永远不发送真实消息，仅在面板展示结果。
 
 ### 核心模块
 
@@ -20,29 +27,27 @@
 | `insightbot/migrate.py` | v1 → v2 自动迁移 |
 | `insightbot/editorial_pipeline.py` | Editorial Pipeline（默认主流程） |
 | `insightbot/smart_brief_runner.py` | 经典简报流程 |
-| `scripts/app.py` | Streamlit 管理台（9 个标签页） |
+| `insightbot/signal_desk/patterns.py` | Pattern、Intent、Quality Gate 合同 |
+| `insightbot/signal_desk/models.py` | BriefingRoom、SavedSignal、FeedbackRecord 数据模型 |
+| `scripts/ui/signal_desk/product_shell.py` | Signal Desk / Control Center 产品壳 |
+| `scripts/app.py` | Streamlit Web app 入口 |
 
-### v0.4.0 新能力
+### 当前新能力
 
-- **多任务多频道**：每个任务独立配置 feeds、pipeline、channels、schedule
-- **Channels 抽象**：企业微信凭证单独存储在 `channels.json`
-- **内置调度器**：无需外部 cron，直接守护 `python -m insightbot.cli` 即可
-- **调试控制台（tab8）**：Dry Run 在面板内展示完整简报预览 + 中间结果，零频道发送
-- **自动迁移**：首次启动会自动从旧版单任务配置生成 `channels.json` + `tasks.json`
+- **用户工作台优先**：默认进入 `Signal Desk`，不让普通用户面对任务配置、channel 和验证细节。
+- **Control Center 后置**：复杂配置仍保留，但作为内部 operator / admin surface。
+- **Pattern contract**：首个内置 pattern 是 `Client Opportunity Radar`，包含 intent、默认 source、judgement lenses 和 quality gate。
+- **反馈上下文**：反馈记录已带 `pattern_id` 和 room intent context，后续可用于 pattern tuning。
+- **自动迁移与运行底座**：仍支持旧配置迁移、任务调度、channels 和 CLI 运行。
 
-### 管理台标签页
+### 产品入口
 
-| Tab | 名称 | 说明 |
-|-----|------|------|
-| tab0 | 🏠 概览 | 当前任务运营总览、异常摘要、最近调试动态 |
-| tab1 | 📋 任务管理 | 当前任务的 feeds、搜索补充、pipeline、频道、调度 |
-| tab2 | 📡 Channels | 频道 CRUD + 联通性测试 |
-| tab3 | 🧠 AI 提示词调优 | Prompt Debug Console |
-| tab4 | 🩺 RSS 健康度 | 当前任务的单源级健康检查 + No Push Diagnosis |
-| tab5 | 📝 运行日志 | 当前任务优先的运行日志追踪 |
-| tab6 | 🔍 信源发现 | 将新 RSS 源直接订阅到当前任务板块 |
-| tab7 | ⚙️ 推送版式定制 | 早报标题、无更新提示语、底部链接 |
-| tab8 | 🔬 任务调试 | 任务级 Dry Run 面板（零频道发送） |
+| Product Mode | Tabs | 说明 |
+| --- | --- | --- |
+| `Signal Desk` | Rooms / Signals / Saved / Briefs | 面向使用者的情报工作台。创建 room、调用 pattern、看 signal、保存素材、准备 brief。 |
+| `Control Center` | Overview / Signal Desk / Saved Signals / Task Management / Channels / Validation & Debug / Logs / Delivery Format / Task Debug | 面向内部运营和质控。管理 pipeline、任务、频道、验证、日志和调试。 |
+
+长期方向是让 Agent 辅助 Pattern Library 和 Control Center，但 MVP 先保持 human-first，不把 autonomous agent 放进关键路径。
 
 ### 数据模型
 
@@ -189,6 +194,7 @@ python -m insightbot.cli --task daily_brief --dry-run
 - [Signal Desk MVP Architecture](./docs/signal_desk_mvp_architecture.md)
 - [Signal Desk Product IA And Pattern Architecture](./docs/signal_desk_product_ia_pattern_architecture.md)
 - [Signal Desk MVP Implementation Plan](./docs/superpowers/plans/2026-05-04-signal-desk-mvp.md)
+- [Signal Desk Product Shell And Pattern Contracts Plan](./docs/superpowers/plans/2026-05-04-signal-desk-product-shell-pattern-contracts.md)
 - [Editorial Pipeline 设计文档](./docs/editorial_pipeline_design.md)
 - [Search 集成设计文档](./docs/search_integration_design.md)
 - [多任务架构说明](./docs/v2.0_architecture.md)

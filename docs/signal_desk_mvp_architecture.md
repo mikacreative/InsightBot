@@ -38,7 +38,8 @@ The current repo already has these stable pieces:
 | Task runner | `insightbot/task_runner.py` | Owns pipeline dispatch and channel sending |
 | Run history | `insightbot/run_history.py` | JSONL run records in `data/task_runs.jsonl` |
 | Paths | `insightbot/paths.py` | Centralized local file paths |
-| UI shell | `scripts/app.py` | Streamlit task console |
+| UI shell | `scripts/app.py`, `scripts/ui/signal_desk/product_shell.py` | Streamlit product shell with `Signal Desk` and `Control Center` modes |
+| Pattern contracts | `insightbot/signal_desk/patterns.py` | `PatternContract`, `IntentContract`, `QualityGateContract`, first built-in `Client Opportunity Radar` |
 | Capability contracts | `editorial-intelligence/editorial_intelligence/contracts/` | Existing `BriefingGoal`, `SourceStrategy`, `EditorialPolicy`, `BriefingResult` |
 
 There is already a bridge path for `tasks.json` tasks using `_editorial_pipeline_mode: editorial-intelligence`.
@@ -54,6 +55,9 @@ The MVP should reuse that path rather than creating a parallel execution engine.
 - source pack registry
 - editorial preset registry
 - judgement lens registry
+- pattern contracts
+- intent capture
+- quality gate contracts
 - compiling a room into a task definition
 - saved signals
 - feedback records
@@ -152,6 +156,22 @@ MVP only needs one active template:
 ```
 
 Future templates can be added after the first pilot works.
+
+### 4.2.1 Implemented Pattern Contracts
+
+The current code introduces `PatternContract` as the product-level contract above source packs, editorial presets, judgement lenses, and quality gates.
+
+Implemented contract objects:
+
+- `PatternContract`: callable product pattern, currently seeded with `client_opportunity_radar`.
+- `IntentContract`: room-level user intent captured from client, category, focus topics, downstream output intent, and time window.
+- `QualityGateContract`: minimum signal standard used by the product layer before deeper agent automation exists.
+
+Current implementation detail:
+
+- room creation stores the intent contract under `BriefingRoom.client_context["intent"]`;
+- feedback records can carry `pattern_id` and `context`;
+- this gives later agent workflows enough structured context without making autonomous tuning part of MVP.
 
 ### 4.3 `SourcePack`
 
@@ -502,15 +522,27 @@ Add a new top-level tab or page group:
 ```text
 Signal Desk
   - Rooms
-  - Room Detail
+  - Signals
+  - Saved
+  - Briefs
+
+Control Center
+  - Overview
+  - Signal Desk
   - Saved Signals
-  - Presets / Source Packs
+  - Task Management
+  - Channels
+  - Validation & Debug
+  - Logs
+  - Delivery Format
+  - Task Debug
 ```
 
 Because `scripts/app.py` is already large, implementation should prefer new UI modules:
 
 ```text
 scripts/ui/signal_desk/
+  product_shell.py
   rooms.py
   room_detail.py
   saved_signals.py
@@ -744,4 +776,3 @@ insightbot/signal_desk compiler + defaults + storage
 Then wire a small Streamlit room creation UI on top.
 
 This gives Signal Desk a real product model while preserving the current working `InsightBot` runtime.
-
