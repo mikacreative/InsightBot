@@ -45,14 +45,25 @@ def _candidate_to_signal(
     if candidate.get("published_at"):
         source["published_at"] = str(candidate["published_at"])
 
+    client_relevance = str(candidate.get("client_relevance") or "").strip()
+    if not client_relevance:
+        client_relevance = (
+            "Needs review against this briefing room's client portfolio and current work."
+        )
+    suggested_action = str(candidate.get("suggested_action") or "").strip()
+    if not suggested_action:
+        suggested_action = (
+            "Review source context and decide whether to save, discuss with a client team, or discard."
+        )
+
     return SignalItem(
         id=_make_signal_id(room_id, run_id, signal_key),
         room_id=room_id,
         run_id=run_id,
         what_happened=what_happened,
         why_it_matters=why_it_matters,
-        client_relevance=str(candidate.get("client_relevance") or ""),
-        suggested_action=str(candidate.get("suggested_action") or ""),
+        client_relevance=client_relevance,
+        suggested_action=suggested_action,
         judgement_lens=_as_string_list(candidate.get("judgement_lens")),
         source=source,
         confidence=str(candidate.get("confidence") or "medium"),

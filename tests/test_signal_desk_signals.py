@@ -32,6 +32,37 @@ def test_signal_items_from_structured_shortlist():
     assert items[0].confidence == "high"
 
 
+def test_signal_items_from_editorial_intelligence_candidate_shape_have_required_fields():
+    run_result = {
+        "stage_results": {
+            "shortlist": [
+                {
+                    "source_type": "agent_search",
+                    "source_id": "duckduckgo",
+                    "title": "Brand launches AI shopping assistant",
+                    "summary": "A beauty brand launched an AI shopping assistant.",
+                    "url": "https://example.com/ai-shopping",
+                    "published_at": "2026-05-04T00:00:00+00:00",
+                    "signals": {"provider": "duckduckgo"},
+                }
+            ]
+        },
+    }
+
+    items = signal_items_from_run_result(
+        room_id="client_radar_beauty",
+        run_id="run_ei_001",
+        run_result=run_result,
+    )
+
+    assert len(items) == 1
+    assert items[0].what_happened == "Brand launches AI shopping assistant"
+    assert items[0].why_it_matters == "A beauty brand launched an AI shopping assistant."
+    assert items[0].client_relevance
+    assert items[0].suggested_action
+    assert items[0].source["url"] == "https://example.com/ai-shopping"
+
+
 def test_signal_items_fallback_to_final_markdown():
     run_result = {
         "final_markdown": "### Platform changes social search\nThis may affect content discovery.",
