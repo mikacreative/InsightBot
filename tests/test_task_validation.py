@@ -54,3 +54,16 @@ class TestTaskValidation:
 
         assert result["status"] == "needs_attention"
         assert any(item["code"] == "missing_search_queries" for item in result["issues"])
+
+    def test_search_query_count_accepts_legacy_string_queries(self):
+        task_def = _base_task_def()
+        task_def["search"] = {"enabled": True, "queries": [" AI marketing trend ", ""]}
+
+        result = validate_task_definition(
+            "daily_brief",
+            task_def,
+            {"channels": {"wecom_main": {"type": "wecom"}}},
+        )
+
+        assert result["status"] == "ready"
+        assert result["summary"]["search_query_count"] == 1

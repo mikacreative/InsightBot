@@ -10,6 +10,12 @@ def _issue(*, code: str, level: str, message: str, field_path: str) -> dict[str,
     }
 
 
+def _has_search_query(value: Any) -> bool:
+    if isinstance(value, dict):
+        return bool(str(value.get("keywords", "")).strip())
+    return bool(str(value or "").strip())
+
+
 def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_data: dict[str, Any]) -> dict[str, Any]:
     feeds = task_def.get("feeds", {}) or {}
     search = task_def.get("search", {}) or {}
@@ -76,7 +82,8 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
             )
         )
 
-    if search.get("enabled") and not [item for item in search.get("queries", []) if str((item or {}).get("keywords", "")).strip()]:
+    search_queries = [item for item in search.get("queries", []) if _has_search_query(item)]
+    if search.get("enabled") and not search_queries:
         issues.append(
             _issue(
                 code="missing_search_queries",
@@ -128,7 +135,7 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
             "feed_count": feed_count,
             "channel_count": len(channels),
             "has_schedule": "hour" in schedule and "minute" in schedule,
-            "search_query_count": len([item for item in search.get("queries", []) if str((item or {}).get("keywords", "")).strip()]),
+            "search_query_count": len(search_queries),
             "pipeline": pipeline,
         },
     }
