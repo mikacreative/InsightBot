@@ -1,5 +1,6 @@
 import pytest
 
+import insightbot.signal_desk.feedback as feedback_module
 from insightbot.signal_desk.feedback import (
     append_feedback,
     list_feedback,
@@ -67,3 +68,40 @@ def test_list_saved_signals_skips_malformed_jsonl(tmp_path):
 
     assert len(items) == 1
     assert items[0]["signal"]["id"] == "sig_001"
+
+
+def test_append_feedback_holds_lock_while_writing(tmp_path, monkeypatch):
+    original_open = feedback_module.Path.open
+    lock_seen_during_write = []
+
+    class LockCheckingWriter:
+        def __init__(self, wrapped, path):
+            self._wrapped = wrapped
+            self._path = path
+
+        def __enter__(self):
+            self._wrapped.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return self._wrapped.__exit__(exc_type, exc, tb)
+
+        def write(self, value):
+            lock_seen_during_write.append(feedback_module.Path(str(self._path) + ".lock").exists())
+            return self._wrapped.write(value)
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+    def open_with_lock_check(path, *args, **kwargs):
+        opened = original_open(path, *args, **kwargs)
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if path.name == "feedback.jsonl" and "a" in mode:
+            return LockCheckingWriter(opened, path)
+        return opened
+
+    monkeypatch.setattr(feedback_module.Path, "open", open_with_lock_check)
+
+    append_feedback("sig_001", "client_radar_beauty", "good_for_pitch", bot_dir=str(tmp_path))
+
+    assert lock_seen_during_write == [True]

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 import uuid
 from collections import Counter
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +22,43 @@ ALLOWED_FEEDBACK_ACTIONS = {
     "need_more_like_this",
 }
 
+_LOCK_RETRY_DELAY_SECONDS = 0.05
+_LOCK_TIMEOUT_SECONDS = 5.0
+
+
+@contextmanager
+def _jsonl_append_lock(path: str):
+    lock_path = path + ".lock"
+    Path(lock_path).parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+    fd = None
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for JSONL append lock: {lock_path}")
+            time.sleep(_LOCK_RETRY_DELAY_SECONDS)
+
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.remove(lock_path)
+        except FileNotFoundError:
+            pass
+
 
 def _append_jsonl(path: str, payload: dict[str, Any]) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    line = json.dumps(payload, ensure_ascii=False) + "\n"
+    with _jsonl_append_lock(path):
+        with target.open("a", encoding="utf-8") as f:
+            f.write(line)
 
 
 def _read_jsonl(path: str) -> list[dict[str, Any]]:
