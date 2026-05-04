@@ -1,3 +1,7 @@
+import json
+
+import pytest
+
 from insightbot.paths import (
     signal_desk_dir,
     signal_desk_rooms_file_path,
@@ -5,6 +9,7 @@ from insightbot.paths import (
     signal_desk_feedback_file_path,
 )
 from insightbot.signal_desk.models import BriefingRoom
+from insightbot.signal_desk import storage
 from insightbot.signal_desk.storage import load_rooms, save_room, delete_room
 
 
@@ -61,3 +66,44 @@ def test_save_load_and_delete_room(tmp_path):
     delete_room("client_radar_beauty", bot_dir=bot_dir)
 
     assert load_rooms(bot_dir=bot_dir) == {}
+
+
+def test_load_rooms_rejects_malformed_room_entry(tmp_path):
+    bot_dir = str(tmp_path)
+    rooms_file = signal_desk_rooms_file_path(bot_dir)
+    rooms_path = tmp_path / "data" / "signal_desk"
+    rooms_path.mkdir(parents=True)
+    with open(rooms_file, "w", encoding="utf-8") as f:
+        json.dump({"rooms": {"client_radar_beauty": "malformed"}}, f)
+
+    with pytest.raises(ValueError, match="Room entry must be an object"):
+        load_rooms(bot_dir=bot_dir)
+
+
+def test_save_room_uses_lock_file_and_cleans_it_up(tmp_path, monkeypatch):
+    bot_dir = str(tmp_path)
+    lock_path = signal_desk_rooms_file_path(bot_dir) + ".lock"
+    original_atomic_write_json = storage._atomic_write_json
+    saw_lock = False
+
+    def tracking_atomic_write_json(path, payload):
+        nonlocal saw_lock
+        saw_lock = saw_lock or (path == signal_desk_rooms_file_path(bot_dir) and storage.os.path.exists(lock_path))
+        original_atomic_write_json(path, payload)
+
+    monkeypatch.setattr(storage, "_atomic_write_json", tracking_atomic_write_json)
+    room = BriefingRoom(
+        id="client_radar_beauty",
+        name="Beauty Client Opportunity Radar",
+        topic="Beauty signals",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance"],
+        channels=["wecom_main"],
+        schedule={"hour": 8, "minute": 0},
+    )
+
+    save_room(room, bot_dir=bot_dir)
+
+    assert saw_lock is True
+    assert not storage.os.path.exists(lock_path)
