@@ -48,3 +48,85 @@ def test_signal_items_fallback_to_final_markdown():
     assert items[0].what_happened == "Platform changes social search"
     assert items[0].confidence == "low"
     assert items[0].source == {}
+
+
+def test_signal_items_from_contract_shaped_shortlist_candidate():
+    run_result = {
+        "stage_results": {
+            "shortlist": [
+                {
+                    "what_happened": "Retailer expands creator commerce",
+                    "why_it_matters": "It changes how brands structure commerce content.",
+                    "client_relevance": "Relevant to beauty retailers testing social conversion.",
+                    "suggested_action": "Review creator-commerce pilots for the client.",
+                }
+            ]
+        },
+    }
+
+    items = signal_items_from_run_result(
+        room_id="client_radar_beauty",
+        run_id="run_003",
+        run_result=run_result,
+    )
+
+    assert len(items) == 1
+    assert items[0].id
+    assert items[0].what_happened == "Retailer expands creator commerce"
+    assert items[0].why_it_matters == "It changes how brands structure commerce content."
+    assert (
+        items[0].client_relevance
+        == "Relevant to beauty retailers testing social conversion."
+    )
+    assert items[0].suggested_action == "Review creator-commerce pilots for the client."
+
+
+def test_signal_items_fallback_when_shortlist_has_no_dict_candidates():
+    run_result = {
+        "final_markdown": "## Search platform updates ranking\nBrands may need to adjust content discovery.",
+        "stage_results": {"shortlist": ["not a candidate"]},
+    }
+
+    items = signal_items_from_run_result(
+        room_id="client_radar_social",
+        run_id="run_004",
+        run_result=run_result,
+    )
+
+    assert len(items) == 1
+    assert items[0].what_happened == "Search platform updates ranking"
+    assert items[0].confidence == "low"
+
+
+def test_signal_items_fallback_when_stage_results_is_none():
+    run_result = {
+        "final_markdown": "### Marketplace adds AI ads tool\nThis affects media planning workflows.",
+        "stage_results": None,
+    }
+
+    items = signal_items_from_run_result(
+        room_id="client_radar_media",
+        run_id="run_005",
+        run_result=run_result,
+    )
+
+    assert len(items) == 1
+    assert items[0].what_happened == "Marketplace adds AI ads tool"
+    assert items[0].confidence == "low"
+
+
+def test_fallback_signal_has_useful_default_fields():
+    run_result = {
+        "final_markdown": "### Platform changes social search\nThis may affect content discovery.",
+        "stage_results": {},
+    }
+
+    items = signal_items_from_run_result(
+        room_id="client_radar_social",
+        run_id="run_006",
+        run_result=run_result,
+    )
+
+    assert items[0].why_it_matters
+    assert items[0].client_relevance
+    assert items[0].suggested_action

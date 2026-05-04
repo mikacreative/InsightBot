@@ -20,16 +20,27 @@ def _as_string_list(value: Any) -> list[str]:
     return []
 
 
-def _candidate_to_signal(room_id: str, run_id: str, candidate: dict[str, Any]) -> SignalItem:
-    title = str(candidate.get("title") or candidate.get("summary") or "").strip()
+def _candidate_to_signal(
+    room_id: str,
+    run_id: str,
+    candidate: dict[str, Any],
+    index: int,
+) -> SignalItem:
+    what_happened = str(
+        candidate.get("what_happened")
+        or candidate.get("title")
+        or candidate.get("summary")
+        or ""
+    ).strip()
     summary = str(candidate.get("summary") or "").strip()
     why_it_matters = str(candidate.get("why_it_matters") or summary).strip()
     candidate_id = str(candidate.get("id") or "").strip()
-    signal_key = candidate_id or title or summary
+    source_url = str(candidate.get("url") or "").strip()
+    signal_key = candidate_id or what_happened or summary or source_url or f"candidate_{index}"
 
     source: dict[str, str] = {}
-    if candidate.get("url"):
-        source["url"] = str(candidate["url"])
+    if source_url:
+        source["url"] = source_url
     if candidate.get("published_at"):
         source["published_at"] = str(candidate["published_at"])
 
@@ -37,7 +48,7 @@ def _candidate_to_signal(room_id: str, run_id: str, candidate: dict[str, Any]) -
         id=_make_signal_id(room_id, run_id, signal_key),
         room_id=room_id,
         run_id=run_id,
-        what_happened=title,
+        what_happened=what_happened,
         why_it_matters=why_it_matters,
         client_relevance=str(candidate.get("client_relevance") or ""),
         suggested_action=str(candidate.get("suggested_action") or ""),
@@ -60,25 +71,32 @@ def _markdown_to_signal(room_id: str, run_id: str, final_markdown: str) -> Signa
         room_id=room_id,
         run_id=run_id,
         what_happened=heading,
-        why_it_matters="",
-        client_relevance="",
-        suggested_action="",
-        judgement_lens=[],
+        why_it_matters="Fallback signal extracted from the final markdown output.",
+        client_relevance="Needs manual review against the briefing room context.",
+        suggested_action="Review the full run output before saving or escalating this signal.",
+        judgement_lens=["manual_review"],
         source={},
         confidence="low",
-        save_tags=[],
+        save_tags=["fallback"],
         raw_candidate_ref="",
     )
 
 
-def signal_items_from_run_result(room_id: str, run_id: str, run_result: dict[str, Any]) -> list[SignalItem]:
-    shortlist = run_result.get("stage_results", {}).get("shortlist", [])
-    if shortlist:
-        return [
-            _candidate_to_signal(room_id, run_id, candidate)
-            for candidate in shortlist
+def signal_items_from_run_result(
+    room_id: str,
+    run_id: str,
+    run_result: dict[str, Any],
+) -> list[SignalItem]:
+    stage_results = run_result.get("stage_results")
+    shortlist = stage_results.get("shortlist") if isinstance(stage_results, dict) else []
+    if isinstance(shortlist, list):
+        structured_signals = [
+            _candidate_to_signal(room_id, run_id, candidate, index)
+            for index, candidate in enumerate(shortlist)
             if isinstance(candidate, dict)
         ]
+        if structured_signals:
+            return structured_signals
 
     final_markdown = str(run_result.get("final_markdown") or "")
     fallback_signal = _markdown_to_signal(room_id, run_id, final_markdown)
