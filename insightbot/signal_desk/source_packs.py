@@ -24,7 +24,18 @@ SOURCE_PACKS = {
         },
         "search": {
             "enabled": True,
-            "queries": ["中国 营销 案例 趋势", "品牌 营销 传播 案例"],
+            "queries": [
+                {
+                    "keywords": "中国 营销 案例 趋势",
+                    "category_hint": "Marketing Communications",
+                    "max_results": 5,
+                },
+                {
+                    "keywords": "品牌 营销 传播 案例",
+                    "category_hint": "Marketing Communications",
+                    "max_results": 5,
+                },
+            ],
         },
     },
     "brand_marketing_global": {
@@ -47,7 +58,18 @@ SOURCE_PACKS = {
         },
         "search": {
             "enabled": True,
-            "queries": ["brand campaign marketing case", "creative campaign brand marketing"],
+            "queries": [
+                {
+                    "keywords": "brand campaign marketing case",
+                    "category_hint": "Global Brand Marketing",
+                    "max_results": 5,
+                },
+                {
+                    "keywords": "creative campaign brand marketing",
+                    "category_hint": "Global Brand Marketing",
+                    "max_results": 5,
+                },
+            ],
         },
     },
     "ai_martech": {
@@ -70,7 +92,18 @@ SOURCE_PACKS = {
         },
         "search": {
             "enabled": True,
-            "queries": ["AI marketing trend case", "martech platform marketing update"],
+            "queries": [
+                {
+                    "keywords": "AI marketing trend case",
+                    "category_hint": "AI and Martech",
+                    "max_results": 5,
+                },
+                {
+                    "keywords": "martech platform marketing update",
+                    "category_hint": "AI and Martech",
+                    "max_results": 5,
+                },
+            ],
         },
     },
 }
@@ -95,6 +128,41 @@ def _dedupe(items: list[str]) -> list[str]:
     return result
 
 
+def _dedupe_rss(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        url = item.split("#", 1)[0].strip().lower()
+        if url and url not in seen:
+            seen.add(url)
+            result.append(item)
+    return result
+
+
+def _query_keywords(query: dict | str) -> str:
+    if isinstance(query, dict):
+        return str(query.get("keywords", "")).strip()
+    return str(query).strip()
+
+
+def _normalize_query(query: dict | str) -> dict:
+    if isinstance(query, dict):
+        return deepcopy(query)
+    return {"keywords": str(query).strip()}
+
+
+def _dedupe_queries(items: list[dict | str]) -> list[dict]:
+    seen: set[str] = set()
+    result: list[dict] = []
+    for item in items:
+        keywords = _query_keywords(item)
+        key = keywords.lower()
+        if key and key not in seen:
+            seen.add(key)
+            result.append(_normalize_query(item))
+    return result
+
+
 def merge_source_packs(packs: list[dict]) -> dict:
     merged = {"feeds": {}, "search": {"enabled": False, "queries": []}, "trust": []}
     for pack in packs:
@@ -112,7 +180,9 @@ def merge_source_packs(packs: list[dict]) -> dict:
             target = merged["feeds"].setdefault(
                 section, {"rss": [], "keywords": [], "prompt": ""}
             )
-            target["rss"] = _dedupe(target["rss"] + list(section_data.get("rss", [])))
+            target["rss"] = _dedupe_rss(
+                target["rss"] + list(section_data.get("rss", []))
+            )
             target["keywords"] = _dedupe(
                 target["keywords"] + list(section_data.get("keywords", []))
             )
@@ -122,7 +192,7 @@ def merge_source_packs(packs: list[dict]) -> dict:
         search = pack.get("search", {})
         if search.get("enabled"):
             merged["search"]["enabled"] = True
-        merged["search"]["queries"] = _dedupe(
+        merged["search"]["queries"] = _dedupe_queries(
             merged["search"]["queries"] + list(search.get("queries", []))
         )
     return merged

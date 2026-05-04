@@ -4,6 +4,7 @@ from insightbot.signal_desk.presets import (
     get_use_case_template,
 )
 from insightbot.signal_desk.source_packs import get_source_pack, merge_source_packs
+from insightbot.task_validation import validate_task_definition
 
 
 def test_client_opportunity_radar_defaults_exist():
@@ -38,7 +39,60 @@ def test_merge_source_packs_dedupes_feeds_and_queries():
 
     rss = merged["feeds"]["Marketing Communications"]["rss"]
     queries = merged["search"]["queries"]
+    keywords = [query["keywords"] for query in queries]
 
     assert len(rss) == len(set(rss))
-    assert len(queries) == len(set(queries))
+    assert all(isinstance(query, dict) for query in queries)
+    assert all(query.get("keywords") for query in queries)
+    assert len(keywords) == len(set(keywords))
     assert merged["search"]["enabled"] is True
+
+
+def test_merge_source_packs_dedupes_rss_by_url_before_comment():
+    merged = merge_source_packs(
+        [
+            {
+                "id": "pack_a",
+                "name": "Pack A",
+                "feeds": {
+                    "Marketing Communications": {
+                        "rss": ["https://example.com/feed # First label"],
+                        "keywords": [],
+                    }
+                },
+                "search": {"enabled": False, "queries": []},
+            },
+            {
+                "id": "pack_b",
+                "name": "Pack B",
+                "feeds": {
+                    "Marketing Communications": {
+                        "rss": ["https://example.com/feed # Second label"],
+                        "keywords": [],
+                    }
+                },
+                "search": {"enabled": False, "queries": []},
+            },
+        ]
+    )
+
+    rss = merged["feeds"]["Marketing Communications"]["rss"]
+
+    assert rss == ["https://example.com/feed # First label"]
+
+
+def test_merged_search_queries_validate_with_task_definition():
+    merged = merge_source_packs([get_source_pack("marketing_comms_cn")])
+    task_def = {
+        "feeds": merged["feeds"],
+        "search": merged["search"],
+        "schedule": {"hour": 8, "minute": 0},
+        "channels": ["wecom_main"],
+        "pipeline": "editorial",
+        "pipeline_config": {"shortlist_size": 8},
+    }
+    channels_data = {"channels": {"wecom_main": {"name": "WeCom Main"}}}
+
+    result = validate_task_definition("signal_desk_smoke", task_def, channels_data)
+
+    assert result["summary"]["search_query_count"] > 0
