@@ -68,16 +68,20 @@ def _normalize_editable_search_query(query):
 try:
     from scripts.ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
     from scripts.ui.overview import render_task_overview
+    from scripts.ui.signal_desk.briefs import render_briefs_tab
     from scripts.ui.signal_desk.product_shell import normalize_product_mode
     from scripts.ui.signal_desk.rooms import render_rooms_tab
     from scripts.ui.signal_desk.saved_signals import render_saved_signals_tab
+    from scripts.ui.signal_desk.signals import render_signals_tab
     from scripts.ui.task_config import render_task_empty_state_wizard
 except ModuleNotFoundError:
     from ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
     from ui.overview import render_task_overview
+    from ui.signal_desk.briefs import render_briefs_tab
     from ui.signal_desk.product_shell import normalize_product_mode
     from ui.signal_desk.rooms import render_rooms_tab
     from ui.signal_desk.saved_signals import render_saved_signals_tab
+    from ui.signal_desk.signals import render_signals_tab
     from ui.task_config import render_task_empty_state_wizard
 
 def main() -> None:
@@ -910,13 +914,11 @@ def main() -> None:
                 save_task_definition=save_task_definition,
             )
         with workspace_signals:
-            st.subheader("Signals")
-            st.caption("Latest signal review will live here. Use Rooms to run or preview a room for now.")
+            render_signals_tab(bot_dir=bot_dir)
         with workspace_saved:
             render_saved_signals_tab(bot_dir=bot_dir)
         with workspace_briefs:
-            st.subheader("Briefs")
-            st.caption("Work-ready client conversation briefs and proposal angle exports will live here.")
+            render_briefs_tab(bot_dir=bot_dir)
         return
 
     tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([

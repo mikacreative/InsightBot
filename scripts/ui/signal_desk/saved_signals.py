@@ -7,7 +7,7 @@ from insightbot.signal_desk.feedback import list_saved_signals
 
 def render_saved_signals_tab(bot_dir: str) -> None:
     st.subheader("Saved Signals")
-    st.caption("Signals saved from Signal Desk dry runs.")
+    st.caption("Reusable work assets saved from Signal Desk room refreshes.")
 
     saved_signals = list_saved_signals(bot_dir=bot_dir)
     if not saved_signals:

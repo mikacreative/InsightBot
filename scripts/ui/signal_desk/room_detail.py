@@ -4,7 +4,14 @@ from datetime import UTC, datetime
 
 import streamlit as st
 
-from insightbot.signal_desk.feedback import append_feedback, save_signal, summarize_feedback
+from insightbot.signal_desk.feedback import (
+    append_feedback,
+    list_feedback,
+    list_saved_signals,
+    save_signal,
+    summarize_feedback,
+)
+from insightbot.signal_desk.health import build_pattern_health_summary
 from insightbot.signal_desk.models import BriefingRoom, SignalItem
 from insightbot.signal_desk.signals import signal_items_from_run_result
 from insightbot.task_runner import run_task
@@ -103,8 +110,8 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
         _render_feedback_summary(room.id, bot_dir)
 
     result_key = f"signal_desk_dry_run::{room.id}"
-    if st.button("Dry run room", type="primary", key=f"signal_desk_run::{room.id}"):
-        with st.spinner(f"Running dry run for {room.name}..."):
+    if st.button("Refresh selected signals", type="primary", key=f"signal_desk_run::{room.id}"):
+        with st.spinner(f"Refreshing selected signals for {room.name}..."):
             try:
                 result = run_task(
                     room.compiled_task_id,
@@ -130,7 +137,7 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
 
     result = st.session_state.get(result_key)
     if not result:
-        st.info("Run a dry run to turn the latest output into signal cards.")
+        st.info("Refresh selected signals to turn the latest room output into signal cards.")
         return
 
     if result.get("ok"):
@@ -155,6 +162,21 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
         _render_signal_card(signal, room, bot_dir)
     with feedback_summary_slot:
         _render_feedback_summary(room.id, bot_dir)
+
+    health_summary = build_pattern_health_summary(
+        room,
+        saved_signals=list_saved_signals(room_id=room.id, bot_dir=bot_dir),
+        feedback_records=list_feedback(room_id=room.id, bot_dir=bot_dir),
+        latest_signals=signals,
+    )
+    with st.expander("Pattern health", expanded=health_summary["status"] == "needs_attention"):
+        st.caption(f"Status: {health_summary['status']}")
+        st.markdown(
+            f"Latest signals: **{health_summary['latest_signal_count']}** | "
+            f"Fallback signals: **{health_summary['fallback_signal_count']}**"
+        )
+        for recommendation in health_summary["recommendations"]:
+            st.markdown(f"- {recommendation}")
 
     with st.expander("Final markdown", expanded=False):
         st.markdown(result.get("final_markdown") or "No final markdown.")
