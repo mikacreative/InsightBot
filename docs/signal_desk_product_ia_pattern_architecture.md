@@ -144,6 +144,17 @@ Signal Desk
    └─ internal share brief
 ```
 
+Alpha implementation now supports this path at a lightweight level:
+
+```text
+Rooms refresh selected signals
+Signals summarize room health
+Saved stores reusable work assets
+Briefs generates markdown stubs from saved signals
+```
+
+The Alpha brief is a work-in-progress artifact, not a polished client deliverable.
+
 User-facing language should be work-language, not system-language.
 
 | System word | User-facing word |

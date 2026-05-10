@@ -42,6 +42,8 @@ The current repo already has these stable pieces:
 | UI shell | `scripts/app.py`, `scripts/ui/signal_desk/product_shell.py` | Streamlit product shell with `Signal Desk` and `Control Center` modes |
 | Pattern contracts | `insightbot/signal_desk/patterns.py` | `PatternContract`, `IntentContract`, `QualityGateContract`, first built-in `Client Opportunity Radar` |
 | Agent access routing | `insightbot/signal_desk/routing.py` | Rule-based request route for future Skill/API/UI entrypoints |
+| Brief artifacts | `insightbot/signal_desk/briefs.py` | Generate lightweight brief markdown from saved signals and persist it to JSONL |
+| Pattern health | `insightbot/signal_desk/health.py` | Summarize saved signals, feedback, latest cards, fallback cards, and recommendations |
 | Capability contracts | `editorial-intelligence/editorial_intelligence/contracts/` | Existing `BriefingGoal`, `SourceStrategy`, `EditorialPolicy`, `BriefingResult` |
 
 There is already a bridge path for `tasks.json` tasks using `_editorial_pipeline_mode: editorial-intelligence`.
@@ -728,6 +730,26 @@ Deliverables:
 - feedback action buttons
 - saved signal list
 - feedback summary by room
+
+### Slice 4.5: Alpha Workspace Path
+
+Goal: make one complete local usage path visible in the user workspace.
+
+Implemented Alpha path:
+
+```text
+Room
+  -> Refresh selected signals
+  -> Signal cards
+  -> Save useful signals
+  -> Saved work assets
+  -> Generate brief stub
+  -> Pattern health summary
+```
+
+The current brief artifact is a lightweight markdown stub generated from saved signals. It is intentionally not a fully authored client deliverable yet.
+
+Pattern health is a deterministic summary of saved signals, feedback records, latest signal cards, fallback-card ratio, and recommendations. It is a human-readable precursor to a future Pattern Steward Assistant.
 
 ### Slice 5: Output Contract Hardening
 
