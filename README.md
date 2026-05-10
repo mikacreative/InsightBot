@@ -1,6 +1,6 @@
 ## Signal Desk / InsightBot (营销情报站)
 
-> 当前阶段：`Signal Desk product shell + Pattern contracts`
+> 当前阶段：`Signal Desk product shell + Pattern contracts + Agent Access routing`
 
 Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是现有 RSS / search / AI pipeline / channels / scheduler 运行底座。
 
@@ -28,6 +28,7 @@ Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是
 | `insightbot/editorial_pipeline.py` | Editorial Pipeline（默认主流程） |
 | `insightbot/smart_brief_runner.py` | 经典简报流程 |
 | `insightbot/signal_desk/patterns.py` | Pattern、Intent、Quality Gate 合同 |
+| `insightbot/signal_desk/routing.py` | Agent Access 请求路由合同 |
 | `insightbot/signal_desk/models.py` | BriefingRoom、SavedSignal、FeedbackRecord 数据模型 |
 | `scripts/ui/signal_desk/product_shell.py` | Signal Desk / Control Center 产品壳 |
 | `scripts/app.py` | Streamlit Web app 入口 |
@@ -37,6 +38,7 @@ Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是
 - **用户工作台优先**：默认进入 `Signal Desk`，不让普通用户面对任务配置、channel 和验证细节。
 - **Control Center 后置**：复杂配置仍保留，但作为内部 operator / admin surface。
 - **Pattern contract**：首个内置 pattern 是 `Client Opportunity Radar`，包含 intent、默认 source、judgement lenses 和 quality gate。
+- **Agent Access routing**：把自然语言或结构化参数解析成 `pattern_id`、`time_window`、`output_intent` 和 `result_mode`；默认返回精选 signals，只有明确请求才进入 raw feed 或 brief output。
 - **反馈上下文**：反馈记录已带 `pattern_id` 和 room intent context，后续可用于 pattern tuning。
 - **自动迁移与运行底座**：仍支持旧配置迁移、任务调度、channels 和 CLI 运行。
 

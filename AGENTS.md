@@ -1,6 +1,6 @@
 # InsightBot / Signal Desk Agent Context
 
-> Updated: 2026-05-04
+> Updated: 2026-05-11
 
 ## Current Product Direction
 
@@ -17,7 +17,7 @@ The current strategic choice is **Human-first / Agent-ready / Autonomy-later**. 
 ## Current Branch And Scope
 
 - Main working branch for this phase: `codex/signal-desk-prd-mvp`.
-- Current MVP focus: product shell split, pattern contracts, room intent capture, feedback context, and clean documentation.
+- Current MVP focus: product shell split, pattern contracts, room intent capture, feedback context, Agent Access routing, and clean documentation.
 - Keep existing `tasks.json`, scheduler, channels, and task runner as the execution base unless a task explicitly asks to replace them.
 
 ## Important Files
@@ -27,12 +27,15 @@ The current strategic choice is **Human-first / Agent-ready / Autonomy-later**. 
 - `scripts/ui/signal_desk/rooms.py`: user-facing room creation and pattern invocation UI.
 - `scripts/ui/signal_desk/room_detail.py`: room signal review, save, and feedback UI.
 - `insightbot/signal_desk/patterns.py`: pattern, intent, and quality gate contracts.
+- `insightbot/signal_desk/routing.py`: rule-based Agent Access request routing for future Skill/API/UI entrypoints.
 - `insightbot/signal_desk/models.py`: room, saved signal, and feedback data models.
 - `insightbot/signal_desk/storage.py`: local JSON / JSONL storage.
 - `docs/signal_desk_prd.md`: product PRD.
 - `docs/signal_desk_mvp_architecture.md`: MVP technical architecture.
 - `docs/signal_desk_product_ia_pattern_architecture.md`: product IA and agent-ready architecture.
+- `docs/signal_desk_agent_access_routing.md`: routing semantics for future Skill/API/Web entrypoints.
 - `docs/superpowers/plans/2026-05-04-signal-desk-product-shell-pattern-contracts.md`: implementation plan for product shell and pattern contracts.
+- `docs/superpowers/plans/2026-05-11-signal-desk-agent-access-routing.md`: implementation plan for Agent Access routing.
 
 ## Verification
 
@@ -40,6 +43,7 @@ Use focused checks before claiming completion:
 
 ```powershell
 python -m compileall insightbot scripts
+python -m pytest tests/test_signal_desk_routing.py tests/test_signal_desk_patterns.py -q
 python -m pytest tests/test_signal_desk_patterns.py tests/test_signal_desk_product_shell.py tests/test_signal_desk_storage.py tests/test_signal_desk_feedback.py
 python -m pytest tests/test_task_config_schema.py tests/test_task_state.py tests/test_task_runner.py tests/test_run_history.py tests/test_signal_desk_storage.py tests/test_signal_desk_feedback.py
 git diff --check
