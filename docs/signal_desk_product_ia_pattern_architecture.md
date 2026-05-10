@@ -6,6 +6,7 @@
 > Related docs:
 > - `docs/signal_desk_prd.md`
 > - `docs/signal_desk_mvp_architecture.md`
+> - `docs/signal_desk_agent_access_routing.md`
 
 ## 1. Decision
 
@@ -295,6 +296,16 @@ The recommended near-term stance is:
 Do not build an autonomous agent now.
 Build objects and workflows that an agent can safely operate later.
 ```
+
+The first implementation of this stance is the Agent Access routing contract:
+
+```text
+natural language or structured request
+  -> SignalDeskRoute
+  -> pattern_id + time_window + output_intent + result_mode
+```
+
+Default routing should return curated `selected_signals`. `raw_feed` and `brief_output` require explicit user intent. This keeps the user workspace simple while allowing future Skill/API entrypoints to share the same product semantics.
 
 This means early implementation can still be human-first:
 

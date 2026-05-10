@@ -4,6 +4,7 @@
 > Date: 2026-05-04  
 > Scope: MVP technical architecture for `Client Opportunity Radar`  
 > Related PRD: `docs/signal_desk_prd.md`
+> Related routing contract: `docs/signal_desk_agent_access_routing.md`
 
 ## 1. Architecture Decision
 
@@ -40,6 +41,7 @@ The current repo already has these stable pieces:
 | Paths | `insightbot/paths.py` | Centralized local file paths |
 | UI shell | `scripts/app.py`, `scripts/ui/signal_desk/product_shell.py` | Streamlit product shell with `Signal Desk` and `Control Center` modes |
 | Pattern contracts | `insightbot/signal_desk/patterns.py` | `PatternContract`, `IntentContract`, `QualityGateContract`, first built-in `Client Opportunity Radar` |
+| Agent access routing | `insightbot/signal_desk/routing.py` | Rule-based request route for future Skill/API/UI entrypoints |
 | Capability contracts | `editorial-intelligence/editorial_intelligence/contracts/` | Existing `BriefingGoal`, `SourceStrategy`, `EditorialPolicy`, `BriefingResult` |
 
 There is already a bridge path for `tasks.json` tasks using `_editorial_pipeline_mode: editorial-intelligence`.
