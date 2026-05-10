@@ -98,3 +98,8 @@ def signal_desk_saved_signals_file_path(bot_dir: str | None = None) -> str:
 def signal_desk_feedback_file_path(bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     return os.getenv("SIGNAL_DESK_FEEDBACK_FILE", os.path.join(signal_desk_dir(bot_dir), "feedback.jsonl"))
+
+
+def signal_desk_briefs_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_BRIEFS_FILE", os.path.join(signal_desk_dir(bot_dir), "briefs.jsonl"))

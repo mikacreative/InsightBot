@@ -107,3 +107,17 @@ class FeedbackRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class BriefArtifact:
+    id: str
+    room_id: str
+    title: str
+    output_intent: str
+    source_signal_ids: list[str]
+    markdown: str
+    created_at: str = field(default_factory=_utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
