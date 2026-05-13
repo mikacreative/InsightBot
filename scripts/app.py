@@ -105,6 +105,24 @@ def main() -> None:
         logger.propagate = False
         return logger
 
+    def split_feed_url_and_name(raw_value: str) -> tuple[str, str]:
+        raw_text = str(raw_value or "").strip()
+        if " # " in raw_text:
+            base_url, _, display_name = raw_text.partition(" # ")
+            return base_url.strip(), display_name.strip()
+        return raw_text, ""
+
+    def compose_feed_url_and_name(feed_url: str, feed_name: str) -> str:
+        normalized_url = str(feed_url or "").strip()
+        normalized_name = str(feed_name or "").strip()
+        if not normalized_url:
+            return ""
+        return f"{normalized_url} # {normalized_name}" if normalized_name else normalized_url
+
+    def get_source_display_name(source: dict, fallback: str) -> str:
+        _, feed_name = split_feed_url_and_name(source.get("url", ""))
+        return feed_name or fallback
+
     def summarize_task_debug_result(result: dict) -> dict:
         stage_results = result.get("stage_results", {}) if isinstance(result, dict) else {}
         assignment_map = stage_results.get("assignment_result", {}).get("category_candidate_map", {})
@@ -691,7 +709,7 @@ def main() -> None:
             if feed_url in existing_urls:
                 return False
 
-            entry = f"{feed_url} # {feed_name}" if feed_name else feed_url
+            entry = compose_feed_url_and_name(feed_url, feed_name)
             rss_sources.append(
                 {
                     "id": f"source_{len(rss_sources) + 1}",
@@ -1007,7 +1025,9 @@ def main() -> None:
             source_to_delete = None
             for idx, source in enumerate(rss_sources):
                 source_id = str(source.get("id", f"source_{idx + 1}")).strip() or f"source_{idx + 1}"
-                with st.expander(f"🔗 {source_id}", expanded=False):
+                source_url_value, source_name_value = split_feed_url_and_name(source.get("url", ""))
+                source_display_name = get_source_display_name(source, source_id)
+                with st.expander(f"🔗 {source_display_name}", expanded=False):
                     src_col1, src_col2 = st.columns([1.2, 2.8])
                     with src_col1:
                         source["id"] = st.text_input(
@@ -1021,26 +1041,27 @@ def main() -> None:
                             key=f"task_source_enabled_{selected_task_id}_{idx}",
                         )
                     with src_col2:
-                        source["url"] = st.text_input(
+                        edited_source_name = st.text_input(
+                            "信源名称",
+                            value=source_name_value,
+                            key=f"task_source_name_{selected_task_id}_{idx}",
+                            placeholder="优先显示这个名称；为空时回退到 Source ID",
+                        ).strip()
+                        edited_source_url = st.text_input(
                             "RSS URL",
-                            value=str(source.get("url", "")),
+                            value=source_url_value,
                             key=f"task_source_url_{selected_task_id}_{idx}",
                         ).strip()
+                        source["url"] = compose_feed_url_and_name(edited_source_url, edited_source_name)
 
-                    tag_text = ",".join(source.get("tags", []) or [])
-                    source["tags"] = [
-                        item.strip() for item in st.text_input(
-                            "Source Tags（逗号分隔）",
-                            value=tag_text,
-                            key=f"task_source_tags_{selected_task_id}_{idx}",
-                        ).split(",") if item.strip()
-                    ]
                     source["section_hints"] = st.multiselect(
                         "Section Hints",
                         options=list(sections_editor.keys()),
                         default=[hint for hint in source.get("section_hints", []) if hint in sections_editor],
                         key=f"task_source_hints_{selected_task_id}_{idx}",
                     )
+                    # tags is now treated as a legacy compatibility field; keep it aligned with section_hints.
+                    source["tags"] = list(source.get("section_hints", []) or [])
                     if st.button("删除信源", key=f"del_task_source_{selected_task_id}_{idx}"):
                         source_to_delete = idx
 
@@ -1052,7 +1073,7 @@ def main() -> None:
                 st.success("已删除信源。")
                 st.rerun()
 
-            add_source_col1, add_source_col2, add_source_col3 = st.columns([2.5, 1.5, 1])
+            add_source_col1, add_source_col2, add_source_col3, add_source_col4 = st.columns([2.3, 1.6, 1.6, 1])
             with add_source_col1:
                 new_source_url = st.text_input(
                     "新增 RSS URL",
@@ -1060,21 +1081,28 @@ def main() -> None:
                     key=f"new_task_source_url_{selected_task_id}",
                 ).strip()
             with add_source_col2:
-                new_source_tag = st.text_input(
-                    "默认标签",
-                    placeholder="marketing",
-                    key=f"new_task_source_tag_{selected_task_id}",
+                new_source_name = st.text_input(
+                    "信源名称（可选）",
+                    placeholder="例如：数英网",
+                    key=f"new_task_source_name_{selected_task_id}",
                 ).strip()
             with add_source_col3:
+                new_source_section_hint = st.selectbox(
+                    "默认栏目",
+                    options=[""] + list(sections_editor.keys()),
+                    key=f"new_task_source_section_{selected_task_id}",
+                )
+            with add_source_col4:
                 if st.button("添加信源", key=f"add_task_source_{selected_task_id}", use_container_width=True):
                     if new_source_url:
+                        section_hints = [new_source_section_hint] if new_source_section_hint else []
                         rss_sources.append(
                             {
                                 "id": f"source_{len(rss_sources) + 1}",
-                                "url": new_source_url,
+                                "url": compose_feed_url_and_name(new_source_url, new_source_name),
                                 "enabled": True,
-                                "tags": [new_source_tag] if new_source_tag else [],
-                                "section_hints": [],
+                                "tags": section_hints,
+                                "section_hints": section_hints,
                             }
                         )
                         sources_editor["rss"] = rss_sources
