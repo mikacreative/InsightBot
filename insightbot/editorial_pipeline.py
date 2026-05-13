@@ -31,6 +31,7 @@ from .smart_brief_runner import (
     _extract_entry_summary,
     _make_input_text,
     _normalize_ai_items,
+    _normalize_result_url,
     _parse_feed_url,
     _truncate_text,
     get_selection_settings,
@@ -162,7 +163,8 @@ def search_global_candidates(*, config: dict, logger) -> list[dict]:
 
             for r in raw_results:
                 normalized = _normalize_search_result(r, section_hints=section_hints)
-                all_results.append(normalized)
+                if normalized:
+                    all_results.append(normalized)
             logger.info(f"🔍 [{provider}] 关键词「{keywords}」→ {len(raw_results)} 条")
         except Exception as e:
             logger.warning(f"⚠️ 搜索失败 [{keywords}]: {e}")
@@ -191,12 +193,15 @@ def _derive_queries_from_sections(config: dict) -> list[dict]:
     return queries
 
 
-def _normalize_search_result(raw: dict, *, section_hints: list[str] | None = None) -> dict:
+def _normalize_search_result(raw: dict, *, section_hints: list[str] | None = None) -> dict | None:
     """将搜索引擎原始结果归一化为 GlobalCandidate 格式。"""
-    link = raw.get("link", "").strip()
+    link = _normalize_result_url(raw.get("link", ""))
     title = raw.get("title", "").strip()
     snippet = _clean_text(raw.get("snippet", ""))
     source_name = raw.get("source", "搜索结果")
+
+    if not link or not title:
+        return None
 
     candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, link)) if link else str(uuid.uuid4())
 
@@ -651,7 +656,7 @@ def _normalize_global_items(items: list[dict], *, selection_settings: dict[str, 
     for item in items:
         if not isinstance(item, dict):
             continue
-        url = str(item.get("link", "")).strip()
+        url = _normalize_result_url(item.get("link", ""))
         if not url or url in seen_urls:
             continue
         title = _truncate_text(item.get("title", ""), limit=title_max_len)

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from insightbot.smart_brief_runner import (
+    _render_markdown,
     _ai_process_category,
     _validate_and_repair,
     fetch_recent_candidates,
@@ -60,6 +61,21 @@ class TestJsonRepair:
     def test_filters_invalid_urls(self):
         raw = json.dumps(
             {"items": [{"title": "标题", "url": "javascript:alert(1)", "summary": "摘要"}]},
+            ensure_ascii=False,
+        )
+        assert _validate_and_repair(raw) == []
+
+    def test_filters_search_landing_page_urls(self):
+        raw = json.dumps(
+            {
+                "items": [
+                    {
+                        "title": "标题",
+                        "url": "http://weixin.sogou.com/weixin?type=2&query=AI+%E8%90%A5%E9%94%80",
+                        "summary": "摘要",
+                    }
+                ]
+            },
             ensure_ascii=False,
         )
         assert _validate_and_repair(raw) == []
@@ -214,6 +230,19 @@ class TestPromptDebug:
         assert result["status"] == "success"
         assert "## 营销板块" in result["preview_markdown"]
         assert "### [营销新闻标题](https://example.com/1)" in result["preview_markdown"]
+
+    def test_preview_markdown_encodes_unsafe_url_chars(self):
+        markdown = _render_markdown(
+            "营销板块",
+            [
+                {
+                    "title": "营销新闻标题",
+                    "url": "https://example.com/a(b)?q=hello world",
+                    "summary": "这是摘要内容",
+                }
+            ],
+        )
+        assert "https://example.com/a%28b%29?q=hello+world" in markdown
 
     def test_ai_process_category_returns_preview_for_valid_json(self, silent_logger):
         news_list = [{"title": "营销新闻", "link": "https://example.com/1"}]
