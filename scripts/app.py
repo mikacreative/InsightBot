@@ -13,6 +13,7 @@ from insightbot.config import (
     load_runtime_config,
     load_tasks,
     load_tasks_config,
+    normalize_task_definition,
     save_channels,
     save_tasks,
 )
@@ -33,11 +34,15 @@ from insightbot.prompt_debug_history import (
     make_compare_record,
     make_draft_run_record,
 )
-from insightbot.discovery.url_resolver import UrlResolver
 from insightbot.run_history import get_latest_run, get_latest_successful_send
 from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary, summarize_recent_run
 from insightbot.scheduler import create_scheduler
-from insightbot.smart_brief_runner import DEBUG_SAMPLE_NEWS, fetch_recent_candidates, get_selection_settings, run_prompt_debug
+from insightbot.smart_brief_runner import (
+    DEBUG_SAMPLE_NEWS,
+    fetch_recent_candidates,
+    get_selection_settings,
+    run_prompt_debug,
+)
 from insightbot.task_health_store import clear_task_health, load_task_health, save_task_health
 from insightbot.task_runner import run_task
 from insightbot.task_state import build_task_revision, load_task_state, touch_revalidation_state
@@ -49,6 +54,14 @@ from insightbot.editorial_pipeline import (
     select_for_category,
     run_editorial_pipeline,
 )
+try:
+    from scripts.ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
+    from scripts.ui.overview import render_task_overview
+    from scripts.ui.task_config import render_task_empty_state_wizard
+except ModuleNotFoundError:
+    from ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
+    from ui.overview import render_task_overview
+    from ui.task_config import render_task_empty_state_wizard
 
 def main() -> None:
     bot_dir = default_bot_dir()
@@ -452,8 +465,10 @@ def main() -> None:
         )
         render_operating_chip(label, css_class)
         summary = validation_result.get("summary", {})
+        section_count = summary.get("section_count", summary.get("category_count", 0))
+        rss_source_count = summary.get("rss_source_count", summary.get("feed_count", 0))
         st.caption(
-            f"板块 {summary.get('category_count', 0)} 个 | RSS {summary.get('feed_count', 0)} 个 | "
+            f"板块 {section_count} 个 | RSS {rss_source_count} 个 | "
             f"频道 {summary.get('channel_count', 0)} 个 | 调度 {'已配置' if summary.get('has_schedule') else '未配置'}"
         )
         if task_state and task_state.get("needs_revalidation"):
@@ -503,7 +518,7 @@ def main() -> None:
             unsafe_allow_html=True,
         )
         if task_state and task_state.get("needs_revalidation"):
-            st.warning("当前任务最近有配置变更，建议按顺序执行：刷新健康度 -> Dry Run/Prompt Debug -> 正式运行。")
+            st.warning("当前任务最近有配置变更，建议按顺序执行：刷新健康度 -> Dry Run/板块调试 -> 正式运行。")
 
     def load_recent_log_excerpt(limit: int = 120) -> str:
         if not os.path.exists(bot_log_path):
@@ -538,17 +553,17 @@ def main() -> None:
                     st.rerun()
             with action_col2:
                 if kind == "prompt_block" and st.button(
-                    f"🧠 预设到 Prompt Debug：{default_category}",
+                    f"🧠 准备调试：{default_category}",
                     key=f"{key_prefix}_diag_prompt_{default_category}",
                     use_container_width=True,
                 ):
                     set_prompt_debug_category(selected_task_id, default_category)
                     candidate_count, using_fallback = seed_prompt_debug_candidates(selected_task_id, default_category)
                     status_text = "内置样例" if using_fallback else "真实 RSS"
-                    st.success(f"已为 [{default_category}] 预设 Prompt Debug，并准备 {candidate_count} 条候选（{status_text}）。")
+                    st.success(f"已为 [{default_category}] 准备调试上下文，并抓取 {candidate_count} 条候选（{status_text}）。")
         if kind == "prompt_block":
             if default_category is None:
-                st.caption("建议切到“🧠 AI 提示词调优”，优先排查被拦截的板块。")
+                st.caption("建议在当前页下方的“板块调试”区域直接试跑草稿 Prompt，优先排查被拦截的板块。")
         elif kind == "source_error":
             st.caption("建议先在当前页的 RSS 健康度列表里查看这些异常源。")
         elif kind == "no_candidates":
@@ -645,7 +660,7 @@ def main() -> None:
     def save_task_definition(task_id: str, task_def: dict) -> None:
         tasks_data = get_tasks_data()
         tasks_data.setdefault("tasks", {})
-        tasks_data["tasks"][task_id] = task_def
+        tasks_data["tasks"][task_id] = normalize_task_definition(task_def)
         save_tasks(tasks_data, bot_dir)
         scheduler.reload()
         mark_task_changed(task_id)
@@ -659,23 +674,34 @@ def main() -> None:
             return runtime_config
 
     def add_rss_feed_to_task(task_id: str, category: str, feed_url: str, feed_name: str = "") -> bool:
-        """Add a single RSS feed into a task category."""
+        """Add a single RSS feed into a task section."""
         try:
             tasks_data = get_tasks_data()
-            task_def = deepcopy(tasks_data["tasks"].get(task_id, {}))
-            task_feeds = task_def.setdefault("feeds", {})
-            if category not in task_feeds:
-                task_feeds[category] = {"rss": [], "keywords": [], "prompt": ""}
+            task_def = normalize_task_definition(deepcopy(tasks_data["tasks"].get(task_id, {})))
+            task_sources = task_def.setdefault("sources", {})
+            task_sections = task_def.setdefault("sections", {})
+            task_sections.setdefault(category, {"prompt": "", "keywords": [], "source_hints": [category]})
+            rss_sources = list(task_sources.get("rss", []) or [])
 
             existing_urls = [
-                item.split(" # ")[0].strip() if isinstance(item, str) else item.get("feed_url", "")
-                for item in task_feeds[category].get("rss", [])
+                str(item.get("url", "")).split(" # ")[0].strip()
+                for item in rss_sources
+                if isinstance(item, dict)
             ]
             if feed_url in existing_urls:
                 return False
 
             entry = f"{feed_url} # {feed_name}" if feed_name else feed_url
-            task_feeds[category].setdefault("rss", []).append(entry)
+            rss_sources.append(
+                {
+                    "id": f"source_{len(rss_sources) + 1}",
+                    "url": entry,
+                    "enabled": True,
+                    "tags": [category],
+                    "section_hints": [category],
+                }
+            )
+            task_sources["rss"] = rss_sources
             tasks_data["tasks"][task_id] = task_def
             save_tasks(tasks_data, bot_dir)
             scheduler.reload()
@@ -684,6 +710,14 @@ def main() -> None:
         except Exception as e:
             st.error(f"淇濆瓨澶辫触: {e}")
             return False
+
+    def get_task_sections(task_def: dict | None) -> dict:
+        normalized = normalize_task_definition(task_def or {})
+        return deepcopy(normalized.get("sections", {}))
+
+    def get_task_sources(task_def: dict | None) -> dict:
+        normalized = normalize_task_definition(task_def or {})
+        return deepcopy(normalized.get("sources", {}))
 
     config = load_config()
     runtime_config = load_runtime_view()
@@ -695,7 +729,7 @@ def main() -> None:
     tasks_data = get_tasks_data()
     selected_task_id, selected_task = get_selected_task(tasks_data)
     selected_task_runtime_config = build_task_runtime_config(selected_task_id)
-    selected_task_feeds = deepcopy(selected_task.get("feeds", {})) if selected_task else {}
+    selected_task_feeds = deepcopy(selected_task_runtime_config.get("feeds", {})) if selected_task else {}
     selected_task_categories = list(selected_task_feeds.keys())
     selected_task_state = load_task_state(selected_task_id, bot_dir) if selected_task_id else {}
     if selected_task_id:
@@ -740,7 +774,7 @@ def main() -> None:
             st.session_state["selected_task_id"] = active_task_id
             selected_task = tasks_data["tasks"].get(selected_task_id, {})
             selected_task_runtime_config = build_task_runtime_config(selected_task_id)
-            selected_task_feeds = deepcopy(selected_task.get("feeds", {}))
+            selected_task_feeds = deepcopy(selected_task_runtime_config.get("feeds", {}))
             selected_task_categories = list(selected_task_feeds.keys())
             selected_task_state = load_task_state(selected_task_id, bot_dir)
             current_revision = build_task_revision(selected_task_runtime_config)
@@ -793,9 +827,9 @@ def main() -> None:
                     "name": quick_new_task_name or quick_new_task_id,
                     "enabled": False,
                     "pipeline": quick_new_task_pipeline,
-                    "feeds": deepcopy(selected_task_feeds or config.get("feeds", {})),
+                    "sources": deepcopy(get_task_sources(selected_task)),
+                    "sections": deepcopy(get_task_sections(selected_task)),
                     "pipeline_config": deepcopy(get_editorial_defaults()),
-                    "search": deepcopy((selected_task or {}).get("search", config.get("search", {}))),
                     "channels": deepcopy((selected_task or {}).get("channels", [])),
                     "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
                 }
@@ -855,101 +889,32 @@ def main() -> None:
         selected_task_state,
     )
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🏠 概览", "📋 任务管理", "📡 Channels",
-        "🧠 AI 提示词调优", "🧪 验证与诊断", "📝 运行日志",
-        "🔍 信源发现", "⚙️ 推送版式定制", "🔬 任务调试",
+        "🧪 验证与调试", "📝 运行日志",
+        "⚙️ 推送版式定制", "🔬 任务调试",
     ])
 
     with tab0:
-        st.subheader("运营概览")
-        active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
-        st.caption(f"当前聚焦任务：{active_task_name}。优先看最近一次运行、异常摘要和最近调试动作。")
-        if selected_task_id:
-            st.markdown(
-                f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">任务 ID: {selected_task_id}</span>'
-                f'<span class="ib-chip ib-chip-neutral">任务名: {active_task_name}</span></div>',
-                unsafe_allow_html=True,
-            )
-
-        health_counts = (overview_health_snapshot or {}).get("counts", {})
-        st.markdown(
-            f"""
-            <div class="ib-kpi-grid">
-              <div class="ib-kpi-card">
-                <div class="ib-kpi-label">任务状态</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{task_state_label}</div>
-              </div>
-              <div class="ib-kpi-card">
-                <div class="ib-kpi-label">可运行性</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{'需重验' if selected_task_state.get('needs_revalidation') else ('可运行' if selected_task_validation.get('is_runnable') else '不可运行')}</div>
-              </div>
-              <div class="ib-kpi-card">
-                <div class="ib-kpi-label">最近一次运行</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((latest_run_record or {}).get('started_at'))}</div>
-              </div>
-              <div class="ib-kpi-card">
-                <div class="ib-kpi-label">最后成功发送</div>
-                <div class="ib-kpi-value" style="font-size:1.05rem;">{format_timestamp((latest_success_record or {}).get('started_at'))}</div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        render_task_overview(
+            selected_task_id=selected_task_id,
+            selected_task=selected_task,
+            selected_task_categories=selected_task_categories,
+            selected_task_validation=selected_task_validation,
+            selected_task_state=selected_task_state,
+            latest_run_record=latest_run_record,
+            latest_success_record=latest_success_record,
+            health_snapshot=overview_health_snapshot,
+            run_metrics=overview_run_metrics,
+            diagnosis_cards=overview_diagnosis_cards,
+            prompt_history=overview_prompt_history,
+            task_state_label=task_state_label,
+            task_state_class=task_state_class,
+            task_state_copy=task_state_copy,
+            format_timestamp=format_timestamp,
+            render_operating_chip=render_operating_chip,
+            render_diagnosis_card=render_diagnosis_card,
         )
-
-        top_col1, top_col2 = st.columns([1.35, 1.0])
-        with top_col1:
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">任务状态</div>', unsafe_allow_html=True)
-            render_operating_chip(task_state_label, task_state_class)
-            st.markdown(
-                f"""
-                <div class="ib-section-copy">
-                  {task_state_copy}<br/>
-                  板块数：{selected_task_validation.get('summary', {}).get('category_count', 0)}<br/>
-                  RSS 源数：{selected_task_validation.get('summary', {}).get('feed_count', 0)}<br/>
-                  异常 RSS 源：{health_counts.get('error', 0)}<br/>
-                  最近运行结果：{overview_run_metrics.get('result_label', '未知')}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with top_col2:
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">最近调试动态</div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="ib-section-copy">来自 Prompt Debug 的最近记录，帮助你判断最近都在调哪些板块。</div>',
-                unsafe_allow_html=True,
-            )
-            if overview_prompt_history:
-                for item in overview_prompt_history[:3]:
-                    mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
-                    item_task = item.get("task_name") or item.get("task_id") or active_task_name
-                    st.markdown(
-                        f"- {item.get('created_at', '')} | {item_task} | {item.get('category', '未命名板块')} | {mode_label} | 草稿状态：{item.get('draft_status', '未知')}"
-                    )
-            else:
-                st.info("还没有 Prompt 调试记录。")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-        st.markdown('<div class="ib-section-title">异常摘要</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="ib-section-copy">优先展示当前最值得处理的问题。如果要排查“为什么今天没推送”，先看这里。</div>',
-            unsafe_allow_html=True,
-        )
-        if overview_diagnosis_cards:
-            for card in overview_diagnosis_cards[:3]:
-                render_diagnosis_card(
-                    card,
-                    prompt_categories=selected_task_categories,
-                    key_prefix="overview",
-                )
-        else:
-            st.success("当前没有明显异常摘要，系统状态看起来比较稳定。")
-        st.markdown("</div>", unsafe_allow_html=True)
 
     # ── Tab 1: 任务管理 ────────────────────────────────────────────────────────
     with tab1:
@@ -960,8 +925,16 @@ def main() -> None:
         if not tasks or not selected_task_id:
             st.info("暂没有任务，请先在下方创建。")
         else:
-            task_def = deepcopy(tasks.get(selected_task_id, {}))
+            task_def = normalize_task_definition(deepcopy(tasks.get(selected_task_id, {})))
             st.markdown(f"**当前任务：{task_def.get('name', selected_task_id)}**")
+            render_task_empty_state_wizard(
+                task_id=selected_task_id,
+                task_def=task_def,
+                validation_result=selected_task_validation,
+                channels_data=channels_data,
+                save_task_definition=save_task_definition,
+                defaults=get_editorial_defaults(),
+            )
 
             basic_col1, basic_col2 = st.columns([1, 2])
             with basic_col1:
@@ -1026,77 +999,158 @@ def main() -> None:
                 key=f"task_channels_{selected_task_id}",
             )
 
-            st.markdown("**内容板块与 RSS**")
-            feeds_editor = deepcopy(task_def.get("feeds", {}))
-            category_to_delete = None
-            for category, feed_data in feeds_editor.items():
-                with st.expander(f"📂 {category}", expanded=False):
-                    rss_val = "\n".join(feed_data.get("rss", []))
-                    feeds_editor[category]["rss"] = [
-                        x.strip()
-                        for x in st.text_area(
-                            "RSS 源（每行一个）",
-                            value=rss_val,
-                            height=120,
-                            key=f"task_rss_{selected_task_id}_{category}",
-                        ).split("\n")
-                        if x.strip()
+            st.markdown("**信源池**")
+            sections_editor = deepcopy(task_def.get("sections", {}))
+            sources_editor = deepcopy(task_def.get("sources", {}))
+            rss_sources = deepcopy(sources_editor.get("rss", []))
+
+            source_to_delete = None
+            for idx, source in enumerate(rss_sources):
+                source_id = str(source.get("id", f"source_{idx + 1}")).strip() or f"source_{idx + 1}"
+                with st.expander(f"🔗 {source_id}", expanded=False):
+                    src_col1, src_col2 = st.columns([1.2, 2.8])
+                    with src_col1:
+                        source["id"] = st.text_input(
+                            "Source ID",
+                            value=source_id,
+                            key=f"task_source_id_{selected_task_id}_{idx}",
+                        ).strip() or source_id
+                        source["enabled"] = st.toggle(
+                            "启用",
+                            value=bool(source.get("enabled", True)),
+                            key=f"task_source_enabled_{selected_task_id}_{idx}",
+                        )
+                    with src_col2:
+                        source["url"] = st.text_input(
+                            "RSS URL",
+                            value=str(source.get("url", "")),
+                            key=f"task_source_url_{selected_task_id}_{idx}",
+                        ).strip()
+
+                    tag_text = ",".join(source.get("tags", []) or [])
+                    source["tags"] = [
+                        item.strip() for item in st.text_input(
+                            "Source Tags（逗号分隔）",
+                            value=tag_text,
+                            key=f"task_source_tags_{selected_task_id}_{idx}",
+                        ).split(",") if item.strip()
                     ]
-                    kw_val = "\n".join(feed_data.get("keywords", []))
-                    feeds_editor[category]["keywords"] = [
+                    source["section_hints"] = st.multiselect(
+                        "Section Hints",
+                        options=list(sections_editor.keys()),
+                        default=[hint for hint in source.get("section_hints", []) if hint in sections_editor],
+                        key=f"task_source_hints_{selected_task_id}_{idx}",
+                    )
+                    if st.button("删除信源", key=f"del_task_source_{selected_task_id}_{idx}"):
+                        source_to_delete = idx
+
+            if source_to_delete is not None:
+                del rss_sources[source_to_delete]
+                sources_editor["rss"] = rss_sources
+                task_def["sources"] = sources_editor
+                save_task_definition(selected_task_id, task_def)
+                st.success("已删除信源。")
+                st.rerun()
+
+            add_source_col1, add_source_col2, add_source_col3 = st.columns([2.5, 1.5, 1])
+            with add_source_col1:
+                new_source_url = st.text_input(
+                    "新增 RSS URL",
+                    placeholder="https://example.com/feed.xml",
+                    key=f"new_task_source_url_{selected_task_id}",
+                ).strip()
+            with add_source_col2:
+                new_source_tag = st.text_input(
+                    "默认标签",
+                    placeholder="marketing",
+                    key=f"new_task_source_tag_{selected_task_id}",
+                ).strip()
+            with add_source_col3:
+                if st.button("添加信源", key=f"add_task_source_{selected_task_id}", use_container_width=True):
+                    if new_source_url:
+                        rss_sources.append(
+                            {
+                                "id": f"source_{len(rss_sources) + 1}",
+                                "url": new_source_url,
+                                "enabled": True,
+                                "tags": [new_source_tag] if new_source_tag else [],
+                                "section_hints": [],
+                            }
+                        )
+                        sources_editor["rss"] = rss_sources
+                        task_def["sources"] = sources_editor
+                        save_task_definition(selected_task_id, task_def)
+                        st.success("已添加信源。")
+                        st.rerun()
+
+            st.divider()
+            st.markdown("**栏目定义**")
+            section_to_delete = None
+            for category, section_data in sections_editor.items():
+                with st.expander(f"📂 {category}", expanded=False):
+                    kw_val = "\n".join(section_data.get("keywords", []))
+                    sections_editor[category]["keywords"] = [
                         x.strip()
                         for x in st.text_area(
-                            "关键词（每行一个）",
+                            "栏目关键词（每行一个）",
                             value=kw_val,
                             height=90,
                             key=f"task_kw_{selected_task_id}_{category}",
                         ).split("\n")
                         if x.strip()
                     ]
-                    feeds_editor[category]["prompt"] = st.text_area(
-                        "板块筛选 Prompt",
-                        value=feed_data.get("prompt", ""),
+                    hint_text = ",".join(section_data.get("source_hints", []) or [])
+                    sections_editor[category]["source_hints"] = [
+                        item.strip() for item in st.text_input(
+                            "Source Hints（逗号分隔）",
+                            value=hint_text,
+                            key=f"task_source_hint_{selected_task_id}_{category}",
+                        ).split(",") if item.strip()
+                    ]
+                    sections_editor[category]["prompt"] = st.text_area(
+                        "栏目筛选 Prompt",
+                        value=section_data.get("prompt", ""),
                         height=110,
                         key=f"task_prompt_{selected_task_id}_{category}",
                     ).strip()
-                    if st.button("删除板块", key=f"del_task_cat_{selected_task_id}_{category}"):
-                        category_to_delete = category
+                    if st.button("删除栏目", key=f"del_task_cat_{selected_task_id}_{category}"):
+                        section_to_delete = category
 
-            if category_to_delete:
-                feeds_editor.pop(category_to_delete, None)
-                task_def["feeds"] = feeds_editor
+            if section_to_delete:
+                sections_editor.pop(section_to_delete, None)
+                task_def["sections"] = sections_editor
                 save_task_definition(selected_task_id, task_def)
-                st.success(f"已删除板块：{category_to_delete}")
+                st.success(f"已删除栏目：{section_to_delete}")
                 st.rerun()
 
             add_cat_col1, add_cat_col2 = st.columns([3, 1])
             with add_cat_col1:
                 new_category_name = st.text_input(
-                    "新增板块名称",
+                    "新增栏目名称",
                     placeholder="例如：品牌营销动态",
                     key=f"new_task_category_{selected_task_id}",
                 )
             with add_cat_col2:
-                if st.button("添加板块", key=f"add_task_category_{selected_task_id}", use_container_width=True):
+                if st.button("添加栏目", key=f"add_task_category_{selected_task_id}", use_container_width=True):
                     if new_category_name.strip():
-                        feeds_editor.setdefault(
+                        sections_editor.setdefault(
                             new_category_name.strip(),
-                            {"rss": [], "keywords": [], "prompt": ""},
+                            {"keywords": [], "source_hints": [], "prompt": ""},
                         )
-                        task_def["feeds"] = feeds_editor
+                        task_def["sections"] = sections_editor
                         save_task_definition(selected_task_id, task_def)
-                        st.success(f"已添加板块：{new_category_name.strip()}")
+                        st.success(f"已添加栏目：{new_category_name.strip()}")
                         st.rerun()
 
             st.divider()
             st.markdown("**搜索补充**")
-            search_config = deepcopy(task_def.get("search", {}))
+            search_config = deepcopy((task_def.get("sources", {}) or {}).get("search", {}))
             search_enabled = st.toggle(
                 "启用搜索补充",
                 value=search_config.get("enabled", False),
                 key=f"task_search_enabled_{selected_task_id}",
             )
-            search_provider_options = ["baidu", "duckduckgo"]
+            search_provider_options = ["baidu", "duckduckgo", "brave", "bocha"]
             search_provider = search_config.get("provider", "baidu")
             if search_provider not in search_provider_options:
                 search_provider = "baidu"
@@ -1114,7 +1168,7 @@ def main() -> None:
             search_queries = st.session_state[query_state_key]
             query_to_delete = None
             for idx, query in enumerate(search_queries):
-                q_col1, q_col2, q_col3, q_col4 = st.columns([4, 2, 1, 1])
+                q_col1, q_col2, q_col3, q_col4 = st.columns([4, 3, 1, 1])
                 with q_col1:
                     query["keywords"] = st.text_input(
                         "关键词",
@@ -1124,12 +1178,16 @@ def main() -> None:
                         placeholder="品牌 AI 营销 新动作",
                     )
                 with q_col2:
-                    query["category_hint"] = st.selectbox(
-                        "板块 hint",
-                        options=[""] + list(feeds_editor.keys()),
-                        index=([""] + list(feeds_editor.keys())).index(query.get("category_hint", ""))
-                        if query.get("category_hint", "") in [""] + list(feeds_editor.keys())
-                        else 0,
+                    current_hints = query.get("section_hints", [])
+                    if isinstance(current_hints, str):
+                        current_hints = [current_hints] if current_hints else []
+                    elif not isinstance(current_hints, list):
+                        legacy_hint = str(query.get("category_hint", "")).strip()
+                        current_hints = [legacy_hint] if legacy_hint else []
+                    query["section_hints"] = st.multiselect(
+                        "栏目 hints",
+                        options=list(sections_editor.keys()),
+                        default=[hint for hint in current_hints if hint in sections_editor],
                         key=f"task_search_hint_{selected_task_id}_{idx}",
                         label_visibility="collapsed",
                     )
@@ -1154,17 +1212,17 @@ def main() -> None:
             q_action1, q_action2 = st.columns([1, 1])
             with q_action1:
                 if st.button("添加 Query", key=f"task_search_add_{selected_task_id}", use_container_width=True):
-                    search_queries.append({"keywords": "", "category_hint": "", "max_results": 10})
+                    search_queries.append({"keywords": "", "section_hints": [], "max_results": 10})
                     st.session_state[query_state_key] = search_queries
                     st.rerun()
             with q_action2:
-                if st.button("从板块关键词派生", key=f"task_search_derive_{selected_task_id}", use_container_width=True):
+                if st.button("从栏目关键词派生", key=f"task_search_derive_{selected_task_id}", use_container_width=True):
                     derived_queries = []
-                    for category, feed_data in feeds_editor.items():
-                        keywords = [kw.strip() for kw in feed_data.get("keywords", []) if kw.strip()]
+                    for category, section_data in sections_editor.items():
+                        keywords = [kw.strip() for kw in section_data.get("keywords", []) if kw.strip()]
                         if keywords:
                             derived_queries.append(
-                                {"keywords": " ".join(keywords), "category_hint": category, "max_results": 10}
+                                {"keywords": " ".join(keywords), "section_hints": [category], "max_results": 10}
                             )
                     st.session_state[query_state_key] = derived_queries
                     st.rerun()
@@ -1208,6 +1266,97 @@ def main() -> None:
                     key=f"task_pipe_scope_{selected_task_id}",
                 )
 
+            st.divider()
+            with st.expander("高级 AI 设置", expanded=False):
+                st.caption("Editorial 流程已经更像一个 skill，控制台这里只保留高频的全局策略入口。底层执行细节优先在“验证与调试”里就地调试。")
+
+                ai_config = deepcopy(config.get("ai", {}) or {})
+                selection_settings = get_selection_settings(selected_task_runtime_config)
+                secrets_view = load_secrets_config()
+                merged_ai_view = deepcopy((runtime_config.get("ai", {}) or {}))
+
+                env_overrides = [
+                    env_name for env_name in ("AI_API_KEY", "AI_API_URL", "AI_MODEL")
+                    if os.getenv(env_name)
+                ]
+                if env_overrides:
+                    st.warning(f"检测到环境变量覆盖：{', '.join(env_overrides)}。界面中的保存值可能不会在当前运行环境里立即生效。")
+
+                ai_prompt = st.text_area(
+                    "全局 System Prompt",
+                    value=ai_config.get("system_prompt", merged_ai_view.get("system_prompt", "")),
+                    height=180,
+                    key=f"task_global_system_prompt_{selected_task_id}",
+                ).strip()
+
+                st.markdown("**输出筛选规则**")
+                rule_col1, rule_col2, rule_col3 = st.columns(3)
+                with rule_col1:
+                    selection_max_items = st.number_input(
+                        "最多保留条数",
+                        min_value=1,
+                        max_value=20,
+                        value=int(selection_settings.get("max_selected_items", 5)),
+                        key=f"task_selection_max_items_{selected_task_id}",
+                    )
+                with rule_col2:
+                    selection_title_max = st.number_input(
+                        "标题最大字数",
+                        min_value=10,
+                        max_value=120,
+                        value=int(selection_settings.get("title_max_len", 30)),
+                        key=f"task_selection_title_max_{selected_task_id}",
+                    )
+                with rule_col3:
+                    selection_summary_max = st.number_input(
+                        "摘要最大字数",
+                        min_value=10,
+                        max_value=120,
+                        value=int(selection_settings.get("summary_max_len", 50)),
+                        key=f"task_selection_summary_max_{selected_task_id}",
+                    )
+
+                rule_col4, rule_col5 = st.columns(2)
+                with rule_col4:
+                    selection_threshold = st.number_input(
+                        "全量分析阈值（字符）",
+                        min_value=1000,
+                        max_value=200000,
+                        step=1000,
+                        value=int(selection_settings.get("full_context_threshold_chars", 40000)),
+                        key=f"task_selection_threshold_{selected_task_id}",
+                    )
+                with rule_col5:
+                    selection_batch_size = st.number_input(
+                        "分批分析大小",
+                        min_value=1,
+                        max_value=50,
+                        value=int(selection_settings.get("batch_size", 15)),
+                        key=f"task_selection_batch_size_{selected_task_id}",
+                    )
+
+                st.markdown("**运行时 AI 连接**")
+                runtime_col1, runtime_col2 = st.columns(2)
+                with runtime_col1:
+                    runtime_model = st.text_input(
+                        "模型名",
+                        value=merged_ai_view.get("model", ""),
+                        key=f"task_runtime_model_{selected_task_id}",
+                    ).strip()
+                    runtime_api_url = st.text_input(
+                        "API URL",
+                        value=merged_ai_view.get("api_url", ""),
+                        key=f"task_runtime_api_url_{selected_task_id}",
+                    ).strip()
+                with runtime_col2:
+                    runtime_api_key = st.text_input(
+                        "API Key",
+                        value=merged_ai_view.get("api_key", ""),
+                        type="password",
+                        key=f"task_runtime_api_key_{selected_task_id}",
+                    ).strip()
+                    st.caption("运行时凭证会优先写入 config.secrets.json；如果你改用本地 runtime，后续也可以完全迁移到环境变量。")
+
             save_col1, save_col2 = st.columns([1, 1])
             with save_col1:
                 if st.button("💾 保存当前任务配置", key=f"save_task_all_{selected_task_id}", use_container_width=True):
@@ -1218,17 +1367,39 @@ def main() -> None:
                     task_def["enabled"] = new_enabled
                     task_def["pipeline"] = new_pipeline
                     task_def["channels"] = selected_channels
-                    task_def["feeds"] = feeds_editor
-                    task_def["pipeline_config"] = pipeline_config
-                    task_def["search"] = {
+                    sources_editor["rss"] = rss_sources
+                    sources_editor["search"] = {
                         "enabled": search_enabled,
                         "provider": search_provider,
                         "queries": [q for q in search_queries if q.get("keywords", "").strip()],
                     }
+                    task_def["sources"] = sources_editor
+                    task_def["sections"] = sections_editor
+                    task_def["pipeline_config"] = pipeline_config
                     task_def["schedule"] = {"hour": int(new_hour), "minute": int(new_min)}
                     if selected_day_value is not None:
                         task_def["schedule"]["day_of_week"] = selected_day_value
                     save_task_definition(selected_task_id, task_def)
+
+                    config.setdefault("ai", {})
+                    config["ai"]["system_prompt"] = ai_prompt
+                    config["ai"]["selection"] = {
+                        "max_selected_items": int(selection_max_items),
+                        "title_max_len": int(selection_title_max),
+                        "summary_max_len": int(selection_summary_max),
+                        "full_context_threshold_chars": int(selection_threshold),
+                        "batch_size": int(selection_batch_size),
+                    }
+                    save_config(config)
+
+                    secrets_payload = load_secrets_config()
+                    secrets_payload.setdefault("ai", {})
+                    secrets_payload["ai"]["model"] = runtime_model
+                    secrets_payload["ai"]["api_url"] = runtime_api_url
+                    secrets_payload["ai"]["api_key"] = runtime_api_key
+                    save_secrets_config(secrets_payload)
+
+                    mark_task_changed(selected_task_id)
                     selected_task_state = load_task_state(selected_task_id, bot_dir)
                     selected_task_validation = validate_task_definition(
                         selected_task_id,
@@ -1429,464 +1600,8 @@ def main() -> None:
                 st.error("频道 ID 已存在。")
 
     with tab3:
-        ai_conf = config.get("ai", {})
-        ai_selection = get_selection_settings(selected_task_runtime_config)
-        runtime_ai = selected_task_runtime_config.get("ai", {})
-        feeds = selected_task_feeds
-        categories = list(feeds.keys())
-        prompt_debug_category_key = f"prompt_debug_category::{selected_task_id or 'default'}"
-        if prompt_debug_category_key not in st.session_state and categories:
-            st.session_state[prompt_debug_category_key] = categories[0]
-
-        st.markdown(
-            """
-            <div class="ib-hero">
-              <div class="ib-eyebrow">Prompt Debug Console</div>
-              <div class="ib-title">让管理员先试跑，再决定是否落盘</div>
-              <div class="ib-subtitle">
-                当前工作流只做一件事：先抓真实候选内容，再用草稿 Prompt 试跑，最后才选择是否把草稿写回内容配置。
-                运行时 AI 连接配置保持只读，避免把调优动作和生产连接参数混在一起。
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        top_col1, top_col2 = st.columns([1.45, 1.0])
-        with top_col1:
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">全局 System Prompt</div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="ib-section-copy">这是所有板块共享的全局系统规则。这里的保存会写入内容配置；不会触碰 AI 的运行时连接信息。</div>',
-                unsafe_allow_html=True,
-            )
-            st.text_area(
-                "System Prompt (系统提示词)",
-                value=ai_conf.get("system_prompt", ""),
-                height=220,
-                key="sys_prompt",
-                label_visibility="collapsed",
-            )
-            if st.button("💾 保存 System Prompt", use_container_width=True):
-                config["ai"]["system_prompt"] = st.session_state.sys_prompt
-                save_config(config)
-                mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
-                st.toast("System Prompt 更新成功。")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">输出规则</div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="ib-section-copy">条数、标题长度、摘要长度和全量输入阈值由系统注入到 Prompt，不需要手写在 System Prompt 里。</div>',
-                unsafe_allow_html=True,
-            )
-            max_selected_items = st.slider(
-                "最多保留条数",
-                min_value=1,
-                max_value=10,
-                value=ai_selection["max_selected_items"],
-                key="selection_max_selected_items",
-            )
-            title_max_len = st.slider(
-                "标题最大字数",
-                min_value=20,
-                max_value=80,
-                value=ai_selection["title_max_len"],
-                key="selection_title_max_len",
-            )
-            summary_max_len = st.slider(
-                "摘要最大字数",
-                min_value=20,
-                max_value=80,
-                value=ai_selection["summary_max_len"],
-                key="selection_summary_max_len",
-            )
-            full_context_threshold_chars = st.slider(
-                "全量输入阈值（字符）",
-                min_value=4000,
-                max_value=40000,
-                step=1000,
-                value=ai_selection["full_context_threshold_chars"],
-                key="selection_full_context_threshold_chars",
-            )
-            batch_size = st.slider(
-                "超阈值后的分片大小",
-                min_value=5,
-                max_value=30,
-                value=ai_selection["batch_size"],
-                key="selection_batch_size",
-            )
-            if st.button("💾 保存输出规则", use_container_width=True):
-                config.setdefault("ai", {})
-                config["ai"]["selection"] = {
-                    "max_selected_items": max_selected_items,
-                    "title_max_len": title_max_len,
-                    "summary_max_len": summary_max_len,
-                    "full_context_threshold_chars": full_context_threshold_chars,
-                    "batch_size": batch_size,
-                }
-                save_config(config)
-                mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
-                st.toast("输出规则已保存。")
-                st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with top_col2:
-            env_ai_override_names = ["AI_API_KEY", "AI_API_URL", "AI_MODEL"]
-            env_ai_overrides = [name for name in env_ai_override_names if os.getenv(name)]
-            secrets_config = load_secrets_config()
-            secrets_ai = secrets_config.setdefault("ai", {})
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">运行时 AI 连接</div>', unsafe_allow_html=True)
-            if env_ai_overrides:
-                st.markdown(
-                    '<div class="ib-section-copy">当前检测到环境变量覆盖，控制台里的保存不会立刻生效。请先移除环境变量覆盖，或直接改服务器环境。</div>',
-                    unsafe_allow_html=True,
-                )
-                st.warning(f"当前环境变量覆盖项：{', '.join(env_ai_overrides)}")
-                st.text_input("AI Model", value=runtime_ai.get("model", ""), disabled=True)
-                st.text_input("API URL", value=runtime_ai.get("api_url", ""), disabled=True)
-                masked_api_key = runtime_ai.get("api_key", "")
-                if masked_api_key:
-                    st.caption(f"API Key：{masked_api_key[:6]}...{masked_api_key[-4:]}")
-                else:
-                    st.warning("当前未检测到 AI API Key。请在 config.secrets.json 或环境变量中配置。")
-            else:
-                st.markdown(
-                    '<div class="ib-section-copy">这些值会写入 config.secrets.json，保存后会立即用于当前控制台调试。</div>',
-                    unsafe_allow_html=True,
-                )
-                st.text_input(
-                    "AI Model",
-                    value=secrets_ai.get("model", runtime_ai.get("model", "")),
-                    key="runtime_ai_model",
-                )
-                st.text_input(
-                    "API URL",
-                    value=secrets_ai.get("api_url", runtime_ai.get("api_url", "")),
-                    key="runtime_ai_url",
-                )
-                st.text_input(
-                    "API Key",
-                    value=secrets_ai.get("api_key", runtime_ai.get("api_key", "")),
-                    type="password",
-                    key="runtime_ai_key",
-                )
-                if st.button("💾 保存 AI 连接", use_container_width=True):
-                    secrets_ai["model"] = st.session_state["runtime_ai_model"].strip()
-                    secrets_ai["api_url"] = st.session_state["runtime_ai_url"].strip()
-                    secrets_ai["api_key"] = st.session_state["runtime_ai_key"].strip()
-                    save_secrets_config(secrets_config)
-                    st.toast("AI 连接配置已写入 config.secrets.json")
-                    st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        st.divider()
-        if not categories:
-            st.info("当前任务还没有板块，请先在「📋 任务管理」里补充内容板块。")
-        else:
-            selected_category = st.selectbox(
-                "调试板块",
-                options=categories,
-                index=categories.index(st.session_state[prompt_debug_category_key])
-                if st.session_state[prompt_debug_category_key] in categories else 0,
-                key=prompt_debug_category_key,
-            )
-            current_prompt = feeds.get(selected_category, {}).get("prompt", "")
-            draft_key = f"draft_prompt::{selected_task_id}::{selected_category}"
-            saved_prompt_key = f"saved_prompt::{selected_task_id}::{selected_category}"
-            if draft_key not in st.session_state:
-                st.session_state[draft_key] = current_prompt
-            st.session_state[saved_prompt_key] = current_prompt
-            prompt_changed = st.session_state[draft_key].strip() != current_prompt.strip()
-
-            prompt_col1, prompt_col2 = st.columns(2)
-            with prompt_col1:
-                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-                st.markdown('<div class="ib-section-title">当前已保存 Prompt</div>', unsafe_allow_html=True)
-                st.markdown(
-                    '<div class="ib-section-copy">这里显示当前内容配置里真正会被生产任务读取的板块 Prompt。</div>',
-                    unsafe_allow_html=True,
-                )
-                st.text_area(
-                    "当前已保存板块 Prompt",
-                    value=current_prompt,
-                    height=170,
-                    disabled=True,
-                    key=saved_prompt_key,
-                    label_visibility="collapsed",
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            with prompt_col2:
-                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-                st.markdown('<div class="ib-section-title">草稿 Prompt</div>', unsafe_allow_html=True)
-                st.markdown(
-                    '<div class="ib-section-copy">这里的编辑只存在于当前会话，直到你手动“写回编辑区”为止。</div>',
-                    unsafe_allow_html=True,
-                )
-                st.text_area(
-                    "草稿 Prompt（仅用于调试）",
-                    key=draft_key,
-                    height=170,
-                    label_visibility="collapsed",
-                )
-                if prompt_changed:
-                    st.markdown(
-                        '<div class="ib-chip-row"><span class="ib-chip ib-chip-warning">草稿已偏离当前配置</span></div>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        '<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">草稿与当前配置一致</span></div>',
-                        unsafe_allow_html=True,
-                    )
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            action_col1, action_col2, action_col3, action_col4 = st.columns(4)
-            with action_col1:
-                if st.button("📥 抓取最新候选", use_container_width=True):
-                    ui_logger = build_ui_logger()
-                    candidates = fetch_recent_candidates(feed_data=feeds.get(selected_category, {}), logger=ui_logger)
-                    using_fallback = False
-                    if not candidates:
-                        candidates = list(DEBUG_SAMPLE_NEWS)
-                        using_fallback = True
-                    st.session_state["prompt_debug_candidates"] = candidates
-                    st.session_state["prompt_debug_meta"] = {
-                        "category": selected_category,
-                        "using_fallback": using_fallback,
-                    }
-                    st.session_state.pop("prompt_debug_result", None)
-                    st.session_state.pop("prompt_debug_compare", None)
-                    if using_fallback:
-                        st.warning("实时 RSS 未抓到近 24 小时候选，已自动切换为内置样例数据。")
-                    else:
-                        st.success(f"已抓取 {len(candidates)} 条候选内容。")
-
-            with action_col2:
-                if st.button("🧪 运行草稿 Prompt", use_container_width=True):
-                    candidates = st.session_state.get("prompt_debug_candidates", [])
-                    meta = st.session_state.get("prompt_debug_meta", {})
-                    if not candidates or meta.get("category") != selected_category:
-                        st.warning("请先为当前板块抓取候选内容。")
-                    else:
-                        ui_logger = build_ui_logger()
-                        debug_result = run_prompt_debug(
-                            config=selected_task_runtime_config,
-                            category_name=selected_category,
-                            news_list=candidates,
-                            category_prompt=st.session_state[draft_key],
-                            logger=ui_logger,
-                        )
-                        append_prompt_debug_history(
-                            bot_dir,
-                            make_draft_run_record(
-                                task_id=selected_task_id,
-                                task_name=selected_task.get("name", selected_task_id) if selected_task_id else None,
-                                category=selected_category,
-                                candidate_count=len(candidates),
-                                result=debug_result,
-                                using_fallback_candidates=bool(meta.get("using_fallback")),
-                                draft_prompt=st.session_state[draft_key],
-                            ),
-                        )
-                        st.session_state["prompt_debug_result"] = debug_result
-                        st.session_state["prompt_debug_result_category"] = selected_category
-                        st.session_state.pop("prompt_debug_compare", None)
-
-            with action_col3:
-                if st.button("⚖️ 对比当前 vs 草稿", use_container_width=True):
-                    candidates = st.session_state.get("prompt_debug_candidates", [])
-                    meta = st.session_state.get("prompt_debug_meta", {})
-                    if not candidates or meta.get("category") != selected_category:
-                        st.warning("请先为当前板块抓取候选内容。")
-                    else:
-                        ui_logger = build_ui_logger()
-                        current_result = run_prompt_debug(
-                            config=selected_task_runtime_config,
-                            category_name=selected_category,
-                            news_list=candidates,
-                            category_prompt=current_prompt,
-                            logger=ui_logger,
-                        )
-                        draft_result = run_prompt_debug(
-                            config=selected_task_runtime_config,
-                            category_name=selected_category,
-                            news_list=candidates,
-                            category_prompt=st.session_state[draft_key],
-                            logger=ui_logger,
-                        )
-                        st.session_state["prompt_debug_compare"] = {
-                            "category": selected_category,
-                            "current": current_result,
-                            "draft": draft_result,
-                        }
-                        append_prompt_debug_history(
-                            bot_dir,
-                            make_compare_record(
-                                task_id=selected_task_id,
-                                task_name=selected_task.get("name", selected_task_id) if selected_task_id else None,
-                                category=selected_category,
-                                candidate_count=len(candidates),
-                                saved_result=current_result,
-                                draft_result=draft_result,
-                                using_fallback_candidates=bool(meta.get("using_fallback")),
-                                draft_prompt=st.session_state[draft_key],
-                            ),
-                        )
-                        st.session_state.pop("prompt_debug_result", None)
-
-            with action_col4:
-                if st.button("↩️ 草稿覆盖到编辑区", use_container_width=True):
-                    updated_prompt = st.session_state[draft_key].strip()
-                    feeds[selected_category]["prompt"] = updated_prompt
-                    st.session_state[saved_prompt_key] = updated_prompt
-                    task_def = deepcopy(selected_task)
-                    task_def["feeds"] = feeds
-                    save_task_definition(selected_task_id, task_def)
-                    st.toast(f"已将草稿 Prompt 写回 [{selected_category}]。")
-                    st.rerun()
-
-            candidates = st.session_state.get("prompt_debug_candidates", [])
-            meta = st.session_state.get("prompt_debug_meta", {})
-            debug_result = st.session_state.get("prompt_debug_result")
-            compare_result = st.session_state.get("prompt_debug_compare")
-            prompt_debug_history = filter_prompt_history_for_task(load_prompt_debug_history(bot_dir), selected_task_id)
-            result_matches_category = debug_result and st.session_state.get("prompt_debug_result_category") == selected_category
-            compare_matches_category = compare_result and compare_result.get("category") == selected_category
-            if candidates and meta.get("category") == selected_category:
-                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-                st.markdown('<div class="ib-section-title">候选池</div>', unsafe_allow_html=True)
-                st.markdown(
-                    '<div class="ib-section-copy">这里是本次调试会送进 AI 的原始候选内容。先确认候选池质量，再判断 Prompt 是否合理。</div>',
-                    unsafe_allow_html=True,
-                )
-                if compare_matches_category:
-                    selected_count = len(compare_result["draft"].get("selected_items", []))
-                else:
-                    selected_count = len(debug_result.get("selected_items", [])) if result_matches_category else 0
-                render_kpi_strip(
-                    candidate_count=len(candidates),
-                    selected_count=selected_count,
-                    using_fallback=bool(meta.get("using_fallback")),
-                    prompt_changed=prompt_changed,
-                )
-                current_mode = None
-                if compare_matches_category:
-                    current_mode = compare_result["draft"].get("selection_mode")
-                elif result_matches_category:
-                    current_mode = debug_result.get("selection_mode")
-                if current_mode:
-                    mode_label = "全量筛选" if current_mode == "full" else "分片 + 总选"
-                    st.caption(f"本次筛选模式：{mode_label}")
-                show_all_candidates = st.toggle(
-                    "显示全部候选",
-                    value=False,
-                    key=f"show_all_candidates::{selected_category}",
-                )
-                candidate_preview = candidates if show_all_candidates else candidates[:12]
-                st.markdown("**候选预览**")
-                st.markdown('<ol class="ib-list">', unsafe_allow_html=True)
-                for item in candidate_preview:
-                    title = item.get("title", "").strip()
-                    link = item.get("link", "").strip()
-                    summary = item.get("summary", "").strip()
-                    st.markdown(f'<li><a href="{link}">{title}</a></li>', unsafe_allow_html=True)
-                    st.caption(f"Summary: {summary or '无摘要'}")
-                st.markdown("</ol>", unsafe_allow_html=True)
-                if not show_all_candidates and len(candidates) > len(candidate_preview):
-                    st.caption(f"还有 {len(candidates) - len(candidate_preview)} 条候选未展开显示。")
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            if compare_matches_category:
-                current_result = compare_result["current"]
-                draft_result = compare_result["draft"]
-                current_selected = len(current_result.get("selected_items", []))
-                draft_selected = len(draft_result.get("selected_items", []))
-                delta = draft_selected - current_selected
-
-                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-                st.markdown('<div class="ib-section-title">当前版 vs 草稿版</div>', unsafe_allow_html=True)
-                st.markdown(
-                    '<div class="ib-section-copy">两边使用同一批候选内容，方便直接比较草稿 Prompt 是否真的优于当前版本。</div>',
-                    unsafe_allow_html=True,
-                )
-                delta_label = f"草稿多命中 {delta} 条" if delta > 0 else (f"草稿少命中 {abs(delta)} 条" if delta < 0 else "命中数量一致")
-                delta_class = "ib-chip-success" if delta > 0 else ("ib-chip-warning" if delta < 0 else "ib-chip-neutral")
-                st.markdown(
-                    f'<div class="ib-chip-row"><span class="ib-chip {delta_class}">{delta_label}</span></div>',
-                    unsafe_allow_html=True,
-                )
-                compare_col1, compare_col2 = st.columns(2)
-                with compare_col1:
-                    render_result_panel(title="当前已保存 Prompt", result=current_result)
-                with compare_col2:
-                    render_result_panel(title="草稿 Prompt", result=draft_result)
-                st.markdown("</div>", unsafe_allow_html=True)
-            elif result_matches_category:
-                status = debug_result.get("status", "unknown")
-                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-                st.markdown('<div class="ib-section-title">调试结果</div>', unsafe_allow_html=True)
-                st.markdown(
-                    '<div class="ib-section-copy">这里展示本次草稿 Prompt 的结果状态、命中内容和最终输出预览。</div>',
-                    unsafe_allow_html=True,
-                )
-                render_status_chip(status)
-                if status == "success":
-                    st.success(f"调试成功：候选 {debug_result['candidate_count']} 条，命中 {len(debug_result['selected_items'])} 条。")
-                elif status == "empty":
-                    st.warning(f"调试结果为空：候选 {debug_result['candidate_count']} 条，但没有命中内容。")
-                elif status == "empty_candidates":
-                    st.warning("当前没有可调试的候选内容。")
-                else:
-                    st.error(f"调试失败：{debug_result.get('error', '未知错误')}")
-
-                render_result_panel(title="草稿 Prompt", result=debug_result)
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-            st.markdown('<div class="ib-section-title">最近调试记录</div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="ib-section-copy">这里保留最近 20 次草稿试跑或对比记录，方便管理员回看最近调过哪些板块、结果是更好还是更差。</div>',
-                unsafe_allow_html=True,
-            )
-            if not prompt_debug_history:
-                st.info("还没有调试记录。先运行一次草稿 Prompt 或做一次“当前 vs 草稿”对比。")
-            else:
-                history_preview = prompt_debug_history[:8]
-                for item in history_preview:
-                    mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
-                    fallback_label = "内置样例" if item.get("using_fallback_candidates") else "真实 RSS"
-                    st.markdown(
-                        f"""
-                        <div class="ib-panel" style="margin-top:12px; margin-bottom:0;">
-                          <div class="ib-chip-row">
-                            <span class="ib-chip ib-chip-neutral">{mode_label}</span>
-                            <span class="ib-chip ib-chip-neutral">{item.get('category', '未命名板块')}</span>
-                            <span class="ib-chip ib-chip-neutral">{fallback_label}</span>
-                          </div>
-                          <div style="font-weight:700; margin:8px 0 6px;">{item.get('created_at', '')}</div>
-                          <div class="ib-section-copy" style="margin-bottom:6px;">
-                            候选 {item.get('candidate_count', 0)} 条 | {render_history_status('草稿', item.get('draft_status'), item.get('draft_selected_count'))}
-                          </div>
-                          <div class="ib-section-copy" style="margin-bottom:0;">
-                            {render_history_status('当前', item.get('saved_status'), item.get('saved_selected_count'))}
-                          </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                    excerpt = item.get("draft_prompt_excerpt", "").strip()
-                    if excerpt:
-                        st.caption(f"草稿摘要：{excerpt}")
-                if len(prompt_debug_history) > len(history_preview):
-                    st.caption(f"当前共保存 {len(prompt_debug_history)} 条记录，仅展开最近 {len(history_preview)} 条。")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    with tab4:
-        st.subheader("验证与诊断")
-        st.caption("把最近运行、成功发送、健康检查、No Push Diagnosis 和相关日志放在一页里，减少来回切页排查。")
+        st.subheader("验证与调试")
+        st.caption("把最近运行、成功发送、健康检查、板块调试、No Push Diagnosis 和相关日志放在一页里，减少来回切页排查。")
 
         health_snapshot = load_task_health(selected_task_id, bot_dir) if selected_task_id else None
         run_summary = parse_recent_run_summary(bot_log_path)
@@ -1908,6 +1623,13 @@ def main() -> None:
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
+        render_inline_dry_run_panel(
+            selected_task_id=selected_task_id,
+            selected_task=selected_task,
+            scheduler=scheduler,
+            summarize_task_debug_result=summarize_task_debug_result,
+        )
+
         if focused_category:
             focus_col1, focus_col2 = st.columns([4, 1.2])
             with focus_col1:
@@ -1923,16 +1645,16 @@ def main() -> None:
             st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
             st.markdown('<div class="ib-section-title">聚焦板块下一步</div>', unsafe_allow_html=True)
             st.markdown(
-                '<div class="ib-section-copy">把验证页和 Prompt Debug 串起来：先确认源健康，再准备候选并去调试当前板块。</div>',
+                '<div class="ib-section-copy">先确认源健康，再准备候选并在当前页下方直接调试这个板块。</div>',
                 unsafe_allow_html=True,
             )
             action_col1, action_col2 = st.columns(2)
             with action_col1:
-                if st.button("🧠 预设到 Prompt Debug", key=f"verification_prompt_debug::{focused_category}", use_container_width=True):
+                if st.button("🧠 设为当前调试板块", key=f"verification_prompt_debug::{focused_category}", use_container_width=True):
                     set_prompt_debug_category(selected_task_id, focused_category)
-                    st.success(f"已把 [{focused_category}] 设为 Prompt Debug 当前板块。")
+                    st.success(f"已把 [{focused_category}] 设为当前调试板块。")
             with action_col2:
-                if st.button("📥 抓候选到调试台", key=f"verification_fetch_candidates::{focused_category}", use_container_width=True):
+                if st.button("📥 抓候选到调试区", key=f"verification_fetch_candidates::{focused_category}", use_container_width=True):
                     candidate_count, using_fallback = seed_prompt_debug_candidates(selected_task_id, focused_category)
                     set_prompt_debug_category(selected_task_id, focused_category)
                     status_text = "内置样例" if using_fallback else "真实 RSS"
@@ -1950,8 +1672,195 @@ def main() -> None:
                 if excerpt:
                     st.caption(f"最近草稿摘要：{excerpt}")
             else:
-                st.info("这个板块最近还没有 Prompt Debug 记录，可以先抓候选再试跑。")
+                st.info("这个板块最近还没有调试记录，可以先抓候选再试跑。")
             st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+        st.markdown('<div class="ib-section-title">板块调试</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ib-section-copy">这里承接原来的 Prompt Debug 能力：抓候选、试跑草稿 Prompt、对比当前与草稿，并在确认后写回任务配置。</div>',
+            unsafe_allow_html=True,
+        )
+        if not selected_task_categories:
+            st.info("当前任务还没有板块，先去“任务管理”添加板块和 RSS 源。")
+        else:
+            debug_task_scope = selected_task_id or "default"
+            stored_debug_category = st.session_state.get(f"prompt_debug_category::{debug_task_scope}")
+            debug_category = focused_category or stored_debug_category or selected_task_categories[0]
+            if debug_category not in selected_task_categories:
+                debug_category = selected_task_categories[0]
+            set_prompt_debug_category(selected_task_id, debug_category)
+
+            debug_category = st.selectbox(
+                "调试板块",
+                options=selected_task_categories,
+                index=selected_task_categories.index(debug_category),
+                key=f"inline_prompt_debug_category::{debug_task_scope}",
+            )
+            set_prompt_debug_category(selected_task_id, debug_category)
+
+            saved_prompt = selected_task_feeds.get(debug_category, {}).get("prompt", "")
+            draft_key = f"draft_prompt::{debug_task_scope}::{debug_category}"
+            if draft_key not in st.session_state:
+                st.session_state[draft_key] = saved_prompt
+            draft_prompt = st.text_area(
+                "草稿 Prompt",
+                value=st.session_state[draft_key],
+                height=180,
+                key=draft_key,
+            ).strip()
+
+            debug_selection = get_selection_settings(selected_task_runtime_config)
+            st.caption(
+                f"当前筛选规则：最多保留 {debug_selection['max_selected_items']} 条 | 标题 {debug_selection['title_max_len']} 字 | "
+                f"摘要 {debug_selection['summary_max_len']} 字 | 分批大小 {debug_selection['batch_size']}"
+            )
+
+            debug_meta = st.session_state.get("prompt_debug_meta", {})
+            candidate_list = st.session_state.get("prompt_debug_candidates", [])
+            candidate_matches = (
+                debug_meta.get("task_id") == selected_task_id
+                and debug_meta.get("category") == debug_category
+            )
+            debug_candidates = candidate_list if candidate_matches else []
+            using_fallback_candidates = bool(debug_meta.get("using_fallback")) if candidate_matches else False
+            prompt_changed = draft_prompt != saved_prompt
+
+            debug_action1, debug_action2, debug_action3, debug_action4 = st.columns(4)
+            with debug_action1:
+                if st.button("📥 抓候选", key=f"inline_fetch_candidates::{debug_category}", use_container_width=True):
+                    candidate_count, using_fallback = seed_prompt_debug_candidates(selected_task_id, debug_category)
+                    status_text = "内置样例" if using_fallback else "真实 RSS"
+                    st.success(f"已为 [{debug_category}] 准备 {candidate_count} 条候选（{status_text}）。")
+                    st.rerun()
+            with debug_action2:
+                if st.button("🧪 试跑草稿", key=f"inline_draft_run::{debug_category}", use_container_width=True):
+                    if not debug_candidates:
+                        st.warning("请先抓取候选，再试跑草稿 Prompt。")
+                    else:
+                        ui_logger = build_ui_logger()
+                        result = run_prompt_debug(
+                            config=selected_task_runtime_config,
+                            category_name=debug_category,
+                            news_list=debug_candidates,
+                            category_prompt=draft_prompt,
+                            logger=ui_logger,
+                        )
+                        st.session_state["prompt_debug_result"] = {
+                            "category": debug_category,
+                            "result": result,
+                        }
+                        st.session_state.pop("prompt_debug_compare", None)
+                        append_prompt_debug_history(
+                            bot_dir,
+                            make_draft_run_record(
+                                task_id=selected_task_id,
+                                task_name=selected_task.get("name", selected_task_id) if selected_task else selected_task_id,
+                                category=debug_category,
+                                candidate_count=len(debug_candidates),
+                                result=result,
+                                using_fallback_candidates=using_fallback_candidates,
+                                draft_prompt=draft_prompt,
+                            ),
+                        )
+                        st.success("草稿 Prompt 试跑完成。")
+                        st.rerun()
+            with debug_action3:
+                if st.button("🆚 当前 vs 草稿", key=f"inline_compare_run::{debug_category}", use_container_width=True):
+                    if not debug_candidates:
+                        st.warning("请先抓取候选，再比较当前与草稿 Prompt。")
+                    else:
+                        ui_logger = build_ui_logger()
+                        saved_result = run_prompt_debug(
+                            config=selected_task_runtime_config,
+                            category_name=debug_category,
+                            news_list=debug_candidates,
+                            category_prompt=saved_prompt,
+                            logger=ui_logger,
+                        )
+                        draft_result = run_prompt_debug(
+                            config=selected_task_runtime_config,
+                            category_name=debug_category,
+                            news_list=debug_candidates,
+                            category_prompt=draft_prompt,
+                            logger=ui_logger,
+                        )
+                        st.session_state["prompt_debug_compare"] = {
+                            "category": debug_category,
+                            "saved_result": saved_result,
+                            "draft_result": draft_result,
+                        }
+                        st.session_state.pop("prompt_debug_result", None)
+                        append_prompt_debug_history(
+                            bot_dir,
+                            make_compare_record(
+                                task_id=selected_task_id,
+                                task_name=selected_task.get("name", selected_task_id) if selected_task else selected_task_id,
+                                category=debug_category,
+                                candidate_count=len(debug_candidates),
+                                saved_result=saved_result,
+                                draft_result=draft_result,
+                                using_fallback_candidates=using_fallback_candidates,
+                                draft_prompt=draft_prompt,
+                            ),
+                        )
+                        st.success("当前 Prompt 与草稿 Prompt 对比完成。")
+                        st.rerun()
+            with debug_action4:
+                if st.button("💾 写回草稿到任务", key=f"inline_writeback::{debug_category}", use_container_width=True):
+                    tasks_data = get_tasks_data()
+                    task_def = normalize_task_definition(deepcopy(tasks_data.get("tasks", {}).get(selected_task_id, {})))
+                    task_def.setdefault("sections", {}).setdefault(debug_category, {}).update(
+                        {**task_def.get("sections", {}).get(debug_category, {}), "prompt": draft_prompt}
+                    )
+                    save_task_definition(selected_task_id, task_def)
+                    st.success(f"已把 [{debug_category}] 的草稿 Prompt 写回任务配置。")
+                    st.rerun()
+
+            if debug_candidates:
+                render_kpi_strip(
+                    candidate_count=len(debug_candidates),
+                    selected_count=len((st.session_state.get("prompt_debug_result", {}).get("result") or {}).get("selected_items", []))
+                    if st.session_state.get("prompt_debug_result", {}).get("category") == debug_category
+                    else len((st.session_state.get("prompt_debug_compare", {}).get("draft_result") or {}).get("selected_items", []))
+                    if st.session_state.get("prompt_debug_compare", {}).get("category") == debug_category
+                    else 0,
+                    using_fallback=using_fallback_candidates,
+                    prompt_changed=prompt_changed,
+                )
+                with st.expander(f"候选池预览（{len(debug_candidates)} 条）", expanded=False):
+                    for idx, item in enumerate(debug_candidates[:20], start=1):
+                        st.markdown(f"**{idx}. [{item.get('title', '')}]({item.get('link', '')})**")
+                        st.caption(item.get("summary", "") or "无摘要")
+                    if len(debug_candidates) > 20:
+                        st.caption(f"其余 {len(debug_candidates) - 20} 条已省略。")
+            else:
+                st.info("当前还没有候选内容。先抓取一批候选，再试跑草稿或做对比。")
+
+            single_result = st.session_state.get("prompt_debug_result", {})
+            if single_result.get("category") == debug_category and single_result.get("result"):
+                render_result_panel(title="草稿试跑结果", result=single_result["result"])
+
+            compare_result = st.session_state.get("prompt_debug_compare", {})
+            if compare_result.get("category") == debug_category:
+                compare_col1, compare_col2 = st.columns(2)
+                with compare_col1:
+                    render_result_panel(title="当前 Prompt", result=compare_result.get("saved_result", {}))
+                with compare_col2:
+                    render_result_panel(title="草稿 Prompt", result=compare_result.get("draft_result", {}))
+
+            inline_history = filter_prompt_history_for_category(task_prompt_history, debug_category)
+            if inline_history:
+                st.markdown("**最近调试记录**")
+                for item in inline_history[:5]:
+                    mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
+                    st.markdown(
+                        f"- {item.get('created_at', '')} | {mode_label} | 候选 {item.get('candidate_count', 0)} 条 | "
+                        f"{render_history_status('草稿', item.get('draft_status'), item.get('draft_selected_count'))}"
+                    )
+            else:
+                st.caption("当前板块还没有调试历史。")
+        st.markdown("</div>", unsafe_allow_html=True)
 
         header_col1, header_col2, header_col3 = st.columns([1.3, 1.0, 1.2])
         with header_col1:
@@ -2117,7 +2026,7 @@ def main() -> None:
             st.info("当前还没有相关日志。")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    with tab5:
+    with tab4:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
         st.caption("日志已开启企业级轮转模式（自动保留 30 天，每日切割）。默认优先展示当前任务相关日志，便于快速排查。")
         active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
@@ -2159,166 +2068,7 @@ def main() -> None:
         else:
             st.info("暂无深度日志。请点击侧边栏【立即手动运行】生成第一份报告。")
 
-    with tab6:
-        st.subheader("➕ 添加源")
-        st.caption("支持单条或批量添加，自动通过 RSSHub 检测并 RSS 化")
-
-        # ---- 批量输入区 ----
-        url_text = st.text_area(
-            "网站 URL（支持批量，每行一个或用逗号分隔）",
-            placeholder="https://example.com\nhttps://another.com\nhttps://third.com",
-            height=120,
-            key="batch_url_input"
-        )
-
-        col_mode, col_btn = st.columns([1, 4])
-        with col_mode:
-            st.write("")
-        with col_btn:
-            if st.button("🔍 批量检测", type="primary", use_container_width=True):
-                if not url_text.strip():
-                    st.warning("请输入至少一个 URL")
-                else:
-                    # 解析URL列表
-                    raw_urls = url_text.strip().replace(",", "\n").split("\n")
-                    urls = [u.strip() for u in raw_urls if u.strip()]
-
-                    # 过滤有效URL
-                    valid_urls, invalid_msgs = [], []
-                    for u in urls:
-                        if u.startswith("http://") or u.startswith("https://"):
-                            valid_urls.append(u)
-                        else:
-                            invalid_msgs.append(f"⚠️ 无效格式已跳过: {u}")
-
-                    for msg in invalid_msgs:
-                        st.info(msg)
-
-                    if not valid_urls:
-                        st.error("没有找到有效的 URL（需以 http:// 或 https:// 开头）")
-                    else:
-                        resolver = UrlResolver()
-                        results = []
-
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-
-                        for i, url in enumerate(valid_urls):
-                            status_text.text(f"检测中 {i+1}/{len(valid_urls)}: {url[:50]}...")
-                            result = resolver.resolve(url)
-                            domain = url.split("://")[-1].split("/")[0]
-                            results.append({
-                                "original": url,
-                                "domain": domain,
-                                "status": result.status,
-                                "feed_url": result.feed_url if result.status == "success" else None,
-                                "reason": result.reason if result.status != "success" else None,
-                            })
-                            progress_bar.progress((i + 1) / len(valid_urls))
-
-                        status_text.text("检测完成！")
-                        st.session_state["batch_results"] = results
-
-        # ---- 批量检测结果展示 ----
-        if "batch_results" in st.session_state and st.session_state["batch_results"]:
-            results = st.session_state["batch_results"]
-            all_cats = list(selected_task_feeds.keys())
-
-            st.markdown(f"#### 📋 检测结果（{len(results)} 个）")
-
-            # 表头
-            hdr_col1, hdr_col2, hdr_col3, hdr_col4 = st.columns([3, 1, 3, 1])
-            with hdr_col1:
-                st.markdown("**原始 URL**")
-            with hdr_col2:
-                st.markdown("**状态**")
-            with hdr_col3:
-                st.markdown("**RSS / 原因**")
-            with hdr_col4:
-                st.markdown("**板块**")
-
-            st.markdown("---*")
-
-            # 每行结果 + 分类选择
-            if "batch_cats" not in st.session_state:
-                st.session_state["batch_cats"] = {}
-
-            any_success = False
-            for idx, r in enumerate(results):
-                col1, col2, col3, col4 = st.columns([3, 1, 3, 1])
-                with col1:
-                    display_url = r["original"][:60] + ("..." if len(r["original"]) > 60 else "")
-                    st.text(display_url)
-                with col2:
-                    if r["status"] == "success":
-                        st.markdown("✅ 成功")
-                        any_success = True
-                    else:
-                        st.markdown(f"❌ 失败")
-                with col3:
-                    if r["status"] == "success":
-                        st.text(r["feed_url"][:70] + ("..." if r["feed_url"] and len(r["feed_url"]) > 70 else ""))
-                    else:
-                        st.caption(r["reason"][:70] if r["reason"] else "未知原因")
-                with col4:
-                    if r["status"] == "success" and all_cats:
-                        default_cat = st.session_state["batch_cats"].get(r["original"], all_cats[0])
-                        sel = st.selectbox(
-                            "板块",
-                            options=all_cats,
-                            index=all_cats.index(default_cat) if default_cat in all_cats else 0,
-                            key=f"batch_cat_{idx}",
-                            label_visibility="collapsed"
-                        )
-                        st.session_state["batch_cats"][r["original"]] = sel
-                    elif r["status"] == "success":
-                        st.warning("无板块")
-
-            st.markdown("---*")
-
-            # 批量订阅按钮
-            if any_success and all_cats:
-                col_sub, col_clr = st.columns([1, 4])
-                with col_sub:
-                    if st.button("📥 批量订阅", type="primary", use_container_width=True):
-                        added, skipped, failed = 0, 0, 0
-                        for r in results:
-                            if r["status"] == "success":
-                                cat = st.session_state["batch_cats"].get(r["original"], all_cats[0])
-                                ok = bool(selected_task_id) and add_rss_feed_to_task(
-                                    selected_task_id,
-                                    cat,
-                                    r["feed_url"],
-                                    r["domain"],
-                                )
-                                if ok:
-                                    added += 1
-                                else:
-                                    skipped += 1
-                            else:
-                                failed += 1
-
-                        msg = f"添加 {added} 个源"
-                        if skipped:
-                            msg += f"，{skipped} 个已存在"
-                        if failed:
-                            msg += f"，{failed} 个失败"
-                        st.success(msg)
-                        st.session_state["batch_results"] = None
-                        st.session_state["batch_cats"] = {}
-                        st.rerun()
-
-                with col_clr:
-                    if st.button("🗑️ 清除结果", use_container_width=True):
-                        st.session_state["batch_results"] = None
-                        st.session_state["batch_cats"] = {}
-                        st.rerun()
-            elif not all_cats:
-                st.warning("请先创建板块后再订阅")
-
-        st.divider()
-
-    with tab7:
+    with tab5:
         st.subheader("推送版式与开关")
         settings = config["settings"]
 
@@ -2343,95 +2093,13 @@ def main() -> None:
             mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
             st.toast("设置已生效！")
 
-    with tab8:
-        st.subheader("🔬 任务调试")
-        st.caption("选择任务并运行 Dry Run — 仅在面板展示结果，不发送任何频道消息。")
-
-        tasks_data = load_tasks(bot_dir)
-        tasks = tasks_data.get("tasks", {})
-        task_ids = list(tasks.keys())
-
-        if not task_ids:
-            st.warning("暂无任务，请先在「📋 任务管理」创建任务。")
-        else:
-            selected = st.selectbox(
-                "选择任务",
-                options=task_ids,
-                index=task_ids.index(selected_task_id) if selected_task_id in task_ids else 0,
-            )
-
-            col_run, col_info = st.columns([1, 3])
-            with col_run:
-                dry_run = st.button("🔬 Dry Run", type="primary", use_container_width=True)
-
-            task_def = tasks.get(selected, {})
-            st.markdown(f"**Pipeline**: `{task_def.get('pipeline', 'editorial')}`")
-            st.markdown(f"**频道**: `{', '.join(task_def.get('channels', []))}`")
-            sched = task_def.get("schedule", {})
-            st.markdown(f"**调度**: {sched.get('hour', 8):02d}:{sched.get('minute', 0):02d}")
-
-            if dry_run:
-                ui_logger = build_ui_logger()
-                with st.spinner(f"正在 Dry Run 任务「{selected}」..."):
-                    try:
-                        result = scheduler.run_task_by_id(selected, dry_run=True)
-                    except Exception as e:
-                        result = {"ok": False, "error": str(e)}
-
-                st.session_state["task_debug_result"] = {
-                    **result,
-                    "_selected_task_id": selected,
-                    "_selected_task_name": task_def.get("name", selected),
-                }
-
-            if "task_debug_result" in st.session_state:
-                result = st.session_state["task_debug_result"]
-                result_task_id = result.get("_selected_task_id")
-                result_task_name = result.get("_selected_task_name", result_task_id)
-                if result_task_id == selected:
-                    st.markdown(
-                        f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">Dry Run 任务: {result_task_name}</span>'
-                        f'<span class="ib-chip ib-chip-neutral">任务 ID: {result_task_id}</span></div>',
-                        unsafe_allow_html=True,
-                    )
-                    if result.get("ok"):
-                        st.success(f"✅ Dry Run 完成（pipeline: {result.get('pipeline')}）")
-                    else:
-                        st.error(f"❌ Dry Run 失败: {result.get('error', '未知错误')}")
-
-                    if result.get("final_markdown"):
-                        st.markdown("#### 📤 简报预览")
-                        st.markdown(result["final_markdown"])
-
-                    with st.expander("🔬 完整中间结果"):
-                        st.json({
-                            "ok": result.get("ok"),
-                            "pipeline": result.get("pipeline"),
-                            "dry_run": result.get("dry_run"),
-                            "task_id": result.get("task_id"),
-                            "task_name": result_task_name,
-                            "error": result.get("error"),
-                            "channel_results": result.get("channel_results", []),
-                        }, expanded=False)
-                        stage_summary = summarize_task_debug_result(result)
-                        st.markdown("#### 流程摘要")
-                        metric_col1, metric_col2, metric_col3 = st.columns(3)
-                        metric_col1.metric("全局候选", stage_summary["global_candidates"])
-                        metric_col2.metric("全局初筛通过", stage_summary["screened_candidates"])
-                        metric_col3.metric("未分配", stage_summary["unassigned_candidates"])
-
-                        if stage_summary["assigned_by_category"]:
-                            st.markdown("#### 板块分配")
-                            st.json(stage_summary["assigned_by_category"], expanded=False)
-
-                        if stage_summary["selected_by_category"]:
-                            st.markdown("#### 最终产出")
-                            st.json(stage_summary["selected_by_category"], expanded=False)
-
-                        st.markdown("#### stage_results")
-                        st.json(result.get("stage_results", {}), expanded=False)
-                else:
-                    st.info(f"当前保存的是任务「{result_task_name}」的 Dry Run 结果；切回对应任务可查看详情。")
+    with tab6:
+        render_dry_run_tab(
+            tasks=load_tasks(bot_dir).get("tasks", {}),
+            selected_task_id=selected_task_id,
+            scheduler=scheduler,
+            summarize_task_debug_result=summarize_task_debug_result,
+        )
 
 
 if __name__ == "__main__":

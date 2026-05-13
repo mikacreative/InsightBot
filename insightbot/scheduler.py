@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from typing import Callable
 
-from .config import load_tasks, load_tasks_config
+from .config import load_tasks, load_tasks_config, normalize_task_definition
 from .logging_setup import build_logger
 from .paths import bot_log_file_path, default_bot_dir, tasks_file_path
 
@@ -37,9 +37,12 @@ class Task:
         self.channels = task_def.get("channels", [])
         self.schedule = task_def.get("schedule", {})
         self.pipeline = task_def.get("pipeline", "editorial")
-        self.feeds = task_def.get("feeds", {})
+        normalized = normalize_task_definition(task_def)
+        self.sources = normalized.get("sources", {})
+        self.sections = normalized.get("sections", {})
+        self.feeds = normalized.get("feeds", {})
         self.pipeline_config = task_def.get("pipeline_config", {})
-        self.search = task_def.get("search", {})
+        self.search = self.sources.get("search", {})
         self._config_loader = config_loader_fn
         self._last_run_at: datetime | None = None
 

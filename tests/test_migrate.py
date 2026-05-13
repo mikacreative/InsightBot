@@ -89,7 +89,8 @@ class TestMigrateFromV1:
         assert task["enabled"] is True
         assert task["pipeline"] == "editorial"
         assert task["channels"] == ["wecom_main"]
-        assert task["feeds"]["💡 营销行业"]["rss"] == ["http://example.com/rss"]
+        assert task["sources"]["rss"][0]["url"] == "http://example.com/rss"
+        assert "💡 营销行业" in task["sections"]
 
     def test_skips_when_files_exist(self, tmp_path):
         from insightbot.migrate import migrate_from_v1

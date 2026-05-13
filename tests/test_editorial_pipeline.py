@@ -25,6 +25,7 @@ sys.modules['requests'] = _mock_requests
 from insightbot.editorial_pipeline import (
     _build_publication_scope_summary,
     _resolve_category_name,
+    _normalize_search_result,
     _normalize_global_items,
     _validate_global_screen,
     assign_candidates_to_categories,
@@ -78,15 +79,34 @@ def _editorial_config():
                 },
             },
         },
-        "feeds": {
+        "sources": {
+            "rss": [
+                {
+                    "id": "marketing_feed",
+                    "url": "https://example-marketing.com/feed.xml",
+                    "enabled": True,
+                    "tags": ["marketing"],
+                    "section_hints": ["💡 营销行业"],
+                },
+                {
+                    "id": "ai_feed",
+                    "url": "https://example-ai.com/feed.xml",
+                    "enabled": True,
+                    "tags": ["ai"],
+                    "section_hints": ["🤖 数智前沿"],
+                },
+            ],
+            "search": {"enabled": False, "queries": []},
+        },
+        "sections": {
             "💡 营销行业": {
-                "rss": ["https://example-marketing.com/feed.xml"],
                 "keywords": [],
+                "source_hints": ["marketing"],
                 "prompt": "只保留与数字营销直接相关的内容。",
             },
             "🤖 数智前沿": {
-                "rss": ["https://example-ai.com/feed.xml"],
                 "keywords": ["AI营销", "智能广告"],
+                "source_hints": ["ai"],
                 "prompt": "只保留AI工具的实际应用案例。",
             },
         },
@@ -160,6 +180,34 @@ class TestBuildGlobalCandidates:
         ):
             candidates = build_global_candidates(config=config, logger=silent_logger)
         assert candidates == []
+
+
+class TestSearchCandidateNormalization:
+
+    def test_drops_sogou_search_landing_pages(self):
+        result = _normalize_search_result(
+            {
+                "title": "新智元 TTS 也要真人感",
+                "link": "http://weixin.sogou.com/weixin?type=2&query=%E6%96%B0%E6%99%BA%E5%85%83",
+                "snippet": "摘要",
+                "source": "baidu",
+            },
+            section_hints=["🤖 数智前沿"],
+        )
+        assert result is None
+
+    def test_normalizes_safe_search_result_urls(self):
+        result = _normalize_search_result(
+            {
+                "title": "OpenAI 发布音频模型",
+                "link": "https://example.com/a(b)?q=hello world",
+                "snippet": "摘要",
+                "source": "baidu",
+            },
+            section_hints=["🤖 数智前沿"],
+        )
+        assert result is not None
+        assert result["link"] == "https://example.com/a%28b%29?q=hello+world"
 
 
 # ---------- Stage 2: screen_global_candidates ----------

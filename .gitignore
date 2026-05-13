@@ -15,6 +15,8 @@ channels*.bak*
 tasks*.bak*
 back-up/
 backup/
+tasks.json
+channels.json
 
 # Python
 venv/
@@ -44,7 +46,11 @@ data/task_state/*.json
 # OS/editor
 .DS_Store
 
+# Claude Code
+.claude/
+
 # Build / packaging / test artifacts
 insightbot.egg-info/
 marketing_bot.egg-info/
+editorial-intelligence/*.egg-info/
 pytest-of-mikawang/

@@ -220,3 +220,21 @@ class TestRunTaskReal:
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
         assert result["channel_results"][0]["ok"] is False
+
+
+class TestEditorialIntelligenceSearchConfig:
+    def test_normalizes_task_search_queries_to_plain_strings(self):
+        from insightbot.task_runner import _normalize_search_queries
+
+        raw_queries = [
+            {"keywords": "品牌 AI 营销", "category_hint": "数智前沿", "max_results": 10},
+            {"keywords": "  品牌 AI 营销  ", "category_hint": "数智前沿", "max_results": 10},
+            {"keywords": "微信生态 传播", "category_hint": "营销行业", "max_results": 10},
+            "",
+            {"keywords": "   "},
+        ]
+
+        assert _normalize_search_queries(raw_queries) == [
+            "品牌 AI 营销",
+            "微信生态 传播",
+        ]

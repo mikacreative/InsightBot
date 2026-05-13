@@ -7,14 +7,71 @@ return final_markdown and do not call any channel APIs.
 """
 
 import logging
+import os
 import time
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
 from .channels import send_to_channel
 from .run_history import append_run_record
 
 logger = logging.getLogger("TaskRunner")
+
+
+def _normalize_search_queries(raw_queries: list[Any]) -> list[str]:
+    """Normalize task-level search query config into executable query strings."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for item in raw_queries or []:
+        if isinstance(item, dict):
+            query = str(item.get("keywords", "")).strip()
+        else:
+            query = str(item or "").strip()
+
+        if not query or query in seen:
+            continue
+        normalized.append(query)
+        seen.add(query)
+
+    return normalized
+
+
+def _extract_search_config(config: dict) -> dict:
+    sources = config.get("sources", {}) or {}
+    if isinstance(sources.get("search"), dict):
+        return sources.get("search", {}) or {}
+    return config.get("search", {}) or {}
+
+
+def _collect_primary_sources(config: dict) -> list[str]:
+    sources = config.get("sources", {}) or {}
+    primary_sources: list[str] = []
+    seen: set[str] = set()
+    for item in sources.get("rss", []) or []:
+        if isinstance(item, dict):
+            raw_url = str(item.get("url", "")).strip()
+            enabled = bool(item.get("enabled", True))
+        else:
+            raw_url = str(item).strip()
+            enabled = True
+        if not enabled or not raw_url:
+            continue
+        if raw_url in seen:
+            continue
+        primary_sources.append(raw_url)
+        seen.add(raw_url)
+    return primary_sources
+
+
+def _build_goal_topic(config: dict) -> str:
+    sections = config.get("sections", {}) or {}
+    if sections:
+        return " / ".join(sections.keys())
+    feeds = config.get("feeds", {}) or {}
+    if feeds:
+        return " / ".join(feeds.keys())
+    return "营销情报"
 
 
 def _estimate_counts(stage_results: dict) -> tuple[int, int]:
@@ -70,9 +127,120 @@ def _build_run_record(
 
 
 def _run_editorial_pipeline(*, config: dict, logger) -> dict:
-    from .editorial_pipeline import run_editorial_pipeline
+    pipeline_mode = config.get("_editorial_pipeline_mode", "legacy")
 
+    if pipeline_mode == "editorial-intelligence":
+        return _run_editorial_intelligence_pipeline(config=config, logger=logger)
+
+    # legacy fallback
+    from .editorial_pipeline import run_editorial_pipeline
     return run_editorial_pipeline(config=config, logger=logger)
+
+
+def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
+    """
+    Run the new editorial-intelligence pipeline instead of the legacy one.
+
+    Maps tasks.json config → SourceStrategy + BriefingGoal → pipeline → legacy result shape.
+    """
+    try:
+        from editorial_intelligence.contracts import BriefingGoal, SourceStrategy, SourceWeightConfig
+        from editorial_intelligence.workflows.editorial_pipeline import run_editorial_pipeline as run_ei_pipeline
+        from editorial_intelligence.contracts.source_weight import SearchProvider
+    except ImportError:
+        logger.error("editorial-intelligence not installed: pip install -e editorial-intelligence/")
+        return {"ok": False, "error": "editorial-intelligence not installed", "final_markdown": ""}
+
+    search_config = _extract_search_config(config)
+    primary_sources = _collect_primary_sources(config)
+
+    # Build search providers
+    search_providers = {}
+    if search_config.get("enabled", False):
+        provider_type = search_config.get("provider", "duckduckgo")
+        if provider_type == "baidu":
+            search_providers["baidu"] = SearchProvider(
+                provider_id="baidu",
+                name="Baidu",
+                weight=0.8,
+                enabled=True,
+            )
+        elif provider_type == "duckduckgo":
+            search_providers["duckduckgo"] = SearchProvider(
+                provider_id="duckduckgo",
+                name="DuckDuckGo",
+                weight=0.6,
+                enabled=True,
+            )
+        elif provider_type == "brave":
+            brave_key = search_config.get("api_key") or os.getenv("BRAVE_API_KEY", "")
+            search_providers["brave"] = SearchProvider(
+                provider_id="brave",
+                name="Brave Search",
+                api_key=brave_key,
+                base_url="https://api.search.brave.com/res/v1/web/search",
+                weight=0.4,
+                enabled=True,
+            )
+        elif provider_type == "bocha":
+            bocha_key = search_config.get("api_key") or os.getenv("BOCHA_API_KEY", "")
+            search_providers["bocha"] = SearchProvider(
+                provider_id="bocha",
+                name="博查 AI 搜索",
+                api_key=bocha_key,
+                base_url="https://api.bocha.cn",
+                weight=0.8,
+                enabled=True,
+                timeout_s=30,
+            )
+        else:
+            logger.warning(f"editorial-intelligence: unsupported search provider '{provider_type}'")
+
+    source_weight_config = SourceWeightConfig(search_providers=search_providers)
+    normalized_queries = _normalize_search_queries(search_config.get("queries", []))
+
+    goal = BriefingGoal(
+        topic=_build_goal_topic(config),
+        queries=normalized_queries,
+        description="",
+    )
+    # Pipeline expects dict-like goal, so convert dataclass to dict
+    goal_dict = {
+        "topic": goal.topic,
+        "queries": goal.queries,
+        "description": goal.description,
+        "audience": goal.audience,
+    }
+
+    source_strategy = SourceStrategy(
+        primary_sources=primary_sources,
+        search_enabled=search_config.get("enabled", False),
+    )
+
+    editorial_policy = {
+        **(config.get("pipeline_config", {}) or {}),
+        "sections": config.get("sections", {}) or {},
+    }
+
+    ei_result = run_ei_pipeline(
+        context={
+            "goal": goal_dict,
+            "source_strategy": source_strategy,
+            "editorial_policy": editorial_policy,
+            "source_weight_config": source_weight_config,
+        }
+    )
+
+    return {
+        "ok": ei_result.ok,
+        "error": None,
+        "final_markdown": ei_result.final_brief.get("markdown", ""),
+        "source_summary": ei_result.source_summary,
+        "candidate_count": len(ei_result.candidate_pool),
+        "shortlist_size": len(ei_result.shortlist),
+        "diagnostics": ei_result.diagnostics,
+        "stage_results": {},
+    }
 
 
 def _run_classic_pipeline(*, config: dict, logger):

@@ -5,6 +5,7 @@ Usage:
     insightbot              — start scheduler daemon (runs all enabled tasks on schedule)
     insightbot --task ID    — run a specific task immediately
     insightbot --dry-run ID — dry run a task (no channel sends, prints result to stdout)
+    insightbot --webhook    — start WeChat Work webhook server
 """
 
 import argparse
@@ -30,6 +31,11 @@ def main() -> None:
         action="store_true",
         help="Dry run: execute pipeline but do not send to any channel",
     )
+    parser.add_argument(
+        "--webhook",
+        action="store_true",
+        help="Start WeChat Work webhook server (port 8080)",
+    )
     args = parser.parse_args()
 
     bot_dir = default_bot_dir()
@@ -42,6 +48,13 @@ def main() -> None:
 
     # Create scheduler (auto-migrates v1 config if needed)
     scheduler = create_scheduler(bot_dir)
+
+    if args.webhook:
+        from .wecom_callback import start_webhook_server
+
+        logger.info("Starting WeChat Work webhook server...")
+        start_webhook_server(port=8080, scheduler=scheduler)
+        sys.exit(0)
 
     if args.task:
         # Run a specific task immediately
