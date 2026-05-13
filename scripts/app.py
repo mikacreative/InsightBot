@@ -465,8 +465,10 @@ def main() -> None:
         )
         render_operating_chip(label, css_class)
         summary = validation_result.get("summary", {})
+        section_count = summary.get("section_count", summary.get("category_count", 0))
+        rss_source_count = summary.get("rss_source_count", summary.get("feed_count", 0))
         st.caption(
-            f"板块 {summary.get('category_count', 0)} 个 | RSS {summary.get('feed_count', 0)} 个 | "
+            f"板块 {section_count} 个 | RSS {rss_source_count} 个 | "
             f"频道 {summary.get('channel_count', 0)} 个 | 调度 {'已配置' if summary.get('has_schedule') else '未配置'}"
         )
         if task_state and task_state.get("needs_revalidation"):
