@@ -60,6 +60,17 @@ class TestWeChatChannel:
             call_content = mock_send.call_args.kwargs["content"]
             assert "连通性测试" in call_content
 
+    def test_send_message_uses_content(self):
+        from insightbot.channels import OutboundMessage, WeChatChannel
+
+        ch = WeChatChannel("wecom_test", "Test", cid="x", secret="y", agent_id="z")
+        with patch("insightbot.channels.send_markdown_to_app") as mock_send:
+            mock_send.return_value = True
+            result = ch.send_message(OutboundMessage(content="hello", format="markdown", title="日报"))
+
+        assert result is True
+        assert mock_send.call_args.kwargs["content"] == "hello"
+
 
 class TestFeishuBotChannel:
     def test_send_delegates_to_feishu(self):
@@ -142,6 +153,25 @@ class TestFeishuAppChannel:
 
         assert result is True
         mock_send.assert_called_once()
+
+    def test_send_message_uses_explicit_title_for_interactive(self):
+        from insightbot.channels import FeishuAppChannel, OutboundMessage
+
+        ch = FeishuAppChannel(
+            channel_id="feishu_app",
+            name="飞书应用",
+            app_id="cli_xxx",
+            app_secret="secret_xxx",
+            receive_id="oc_xxx",
+            receive_id_type="open_id",
+            message_template="interactive",
+        )
+        with patch("insightbot.channels.send_interactive_message") as mock_send:
+            mock_send.return_value = True
+            result = ch.send_message(OutboundMessage(content="## 报告", format="interactive", title="日报标题"))
+
+        assert result is True
+        assert mock_send.call_args.kwargs["title"] == "日报标题"
 
 
 class TestChannelRegistry:
@@ -265,6 +295,20 @@ class TestModuleLevelFunctions:
 
         assert ok is True
         mock_send.assert_called_once()
+
+    def test_send_message_to_channel_delegates(self):
+        from insightbot.channels import OutboundMessage, init_channels, send_message_to_channel
+
+        init_channels({
+            "channels": {
+                "ch1": {"type": "wecom", "name": "C1", "cid": "a", "secret": "b", "agent_id": "c"}
+            }
+        })
+        with patch("insightbot.channels.send_markdown_to_app") as mock_send:
+            mock_send.return_value = True
+            ok = send_message_to_channel("ch1", OutboundMessage(content="hello"))
+
+        assert ok is True
 
     def test_validate_channel_definition_for_feishu_app(self):
         from insightbot.channels import validate_channel_definition

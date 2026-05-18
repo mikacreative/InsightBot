@@ -7,6 +7,7 @@ This allows multiple channel types to be added without changing pipeline code.
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from .feishu_app import send_interactive_message, send_text_message
@@ -16,12 +17,23 @@ from .wecom import send_markdown_to_app
 logger = logging.getLogger("Channels")
 
 
+@dataclass(frozen=True)
+class OutboundMessage:
+    content: str
+    format: str = "markdown"
+    title: str | None = None
+
+
 @runtime_checkable
 class Channel(Protocol):
     """Protocol that all channel types must implement."""
 
     def send(self, content: str) -> bool:
         """Send content to the channel. Returns True on success."""
+        ...
+
+    def send_message(self, message: OutboundMessage) -> bool:
+        """Send a pre-rendered message with optional channel-specific formatting."""
         ...
 
     def test(self) -> bool:
@@ -38,9 +50,21 @@ class Channel(Protocol):
         """Human-readable name."""
         ...
 
+    @property
+    def delivery_profile(self) -> dict:
+        """Channel delivery capabilities."""
+        ...
+
 
 class WeChatChannel:
     """WeChat Work (WeCom) channel implementation."""
+
+    delivery_profile = {
+        "channel_type": "wecom",
+        "preferred_format": "markdown",
+        "soft_limit": 3200,
+        "supports_interactive": False,
+    }
 
     def __init__(
         self,
@@ -67,6 +91,9 @@ class WeChatChannel:
             content=content,
         )
 
+    def send_message(self, message: OutboundMessage) -> bool:
+        return self.send(message.content)
+
     def test(self) -> bool:
         return send_markdown_to_app(
             cid=self.cid,
@@ -78,6 +105,13 @@ class WeChatChannel:
 
 class FeishuBotChannel:
     """Feishu incoming webhook bot implementation."""
+
+    delivery_profile = {
+        "channel_type": "feishu_bot",
+        "preferred_format": "text",
+        "soft_limit": 6000,
+        "supports_interactive": False,
+    }
 
     def __init__(
         self,
@@ -100,6 +134,9 @@ class FeishuBotChannel:
             content=content,
             mention_all=self.mention_all,
         )
+
+    def send_message(self, message: OutboundMessage) -> bool:
+        return self.send(message.content)
 
     def test(self) -> bool:
         return send_text_to_bot(
@@ -130,18 +167,33 @@ class FeishuAppChannel:
         self.receive_id_type = receive_id_type
         self.message_template = message_template
 
+    @property
+    def delivery_profile(self) -> dict:
+        return {
+            "channel_type": "feishu_app",
+            "preferred_format": self.message_template,
+            "soft_limit": 12000,
+            "supports_interactive": True,
+        }
+
     def send(self, content: str) -> bool:
         if os.getenv("INSIGHTBOT_DRY_RUN"):
             logger.info(f"[DRY_RUN] Would send to {self.channel_id}: {content[:50]}...")
             return True
+        return self.send_message(OutboundMessage(content=content, format=self.message_template, title=self.name))
 
-        if self.message_template == "text":
+    def send_message(self, message: OutboundMessage) -> bool:
+        if os.getenv("INSIGHTBOT_DRY_RUN"):
+            logger.info(f"[DRY_RUN] Would send to {self.channel_id}: {message.content[:50]}...")
+            return True
+
+        if message.format == "text" or self.message_template == "text":
             return send_text_message(
                 app_id=self.app_id,
                 app_secret=self.app_secret,
                 receive_id=self.receive_id,
                 receive_id_type=self.receive_id_type,
-                content=content,
+                content=message.content,
             )
 
         return send_interactive_message(
@@ -149,8 +201,8 @@ class FeishuAppChannel:
             app_secret=self.app_secret,
             receive_id=self.receive_id,
             receive_id_type=self.receive_id_type,
-            title=self.name,
-            markdown=content,
+            title=message.title or self.name,
+            markdown=message.content,
         )
 
     def test(self) -> bool:
@@ -281,6 +333,11 @@ def get_channel(channel_id: str) -> Channel:
 def send_to_channel(channel_id: str, content: str) -> bool:
     """Unified send interface. All pipeline code uses this, not send_markdown_to_app directly."""
     return get_channel(channel_id).send(content)
+
+
+def send_message_to_channel(channel_id: str, message: OutboundMessage) -> bool:
+    """Send a pre-rendered message to the given channel."""
+    return get_channel(channel_id).send_message(message)
 
 
 def test_channel(channel_id: str) -> bool:

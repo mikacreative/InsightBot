@@ -42,7 +42,7 @@ class TestRunTaskDryRun:
                 "screened_result": {},
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_to_channel") as mock_send, \
+            with patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
                  patch("insightbot.task_runner.append_run_record") as mock_history:
                 result = run_task("daily_brief", fake_loader, dry_run=True)
 
@@ -70,7 +70,7 @@ class TestRunTaskDryRun:
                 "final_markdown": "## 经典报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_to_channel") as mock_send, \
+            with patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
                  patch("insightbot.task_runner.append_run_record") as mock_history:
                 result = run_task("weekly_report", fake_loader, dry_run=True)
 
@@ -101,8 +101,10 @@ class TestRunTaskReal:
                 "final_markdown": "## 报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_to_channel") as mock_send, \
+            with patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
+                 patch("insightbot.task_runner.get_channel") as mock_channel, \
                  patch("insightbot.task_runner.append_run_record") as mock_history:
+                mock_channel.return_value.delivery_profile = {"preferred_format": "markdown", "channel_type": "wecom"}
                 mock_send.return_value = True
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
@@ -110,6 +112,7 @@ class TestRunTaskReal:
                 assert len(result["channel_results"]) == 2
                 assert result["channel_results"][0]["channel_id"] == "ch1"
                 assert result["channel_results"][1]["channel_id"] == "ch2"
+                assert result["channel_results"][0]["message_count"] >= 1
                 mock_history.assert_called_once()
 
     def test_pipeline_dispatch_editorial(self):
@@ -192,7 +195,9 @@ class TestRunTaskReal:
                 "final_markdown": "## 报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_to_channel") as mock_send:
+            with patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
+                 patch("insightbot.task_runner.get_channel") as mock_channel:
+                mock_channel.return_value.delivery_profile = {"preferred_format": "markdown", "channel_type": "wecom"}
                 mock_send.return_value = True
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
@@ -216,7 +221,9 @@ class TestRunTaskReal:
                 "final_markdown": "## 报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_to_channel", side_effect=[False]):
+            with patch("insightbot.task_runner.send_message_to_channel", side_effect=[False]), \
+                 patch("insightbot.task_runner.get_channel") as mock_channel:
+                mock_channel.return_value.delivery_profile = {"preferred_format": "markdown", "channel_type": "wecom"}
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
         assert result["channel_results"][0]["ok"] is False
