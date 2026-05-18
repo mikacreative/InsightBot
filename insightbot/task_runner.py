@@ -12,7 +12,8 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
-from .channels import send_to_channel
+from .channel_rendering import ChannelMessage, build_delivery_plan
+from .channels import get_channel, send_message_to_channel
 from .run_history import append_run_record
 
 logger = logging.getLogger("TaskRunner")
@@ -356,8 +357,17 @@ def run_task(
     channel_results: list[dict] = []
     for channel_id in task_channels:
         try:
-            ok = _send_content_to_channel(channel_id, final_markdown, config)
-            channel_results.append({"channel_id": channel_id, "ok": ok})
+            channel = get_channel(channel_id)
+            plan = build_delivery_plan(channel=channel, content=final_markdown, config=config)
+            ok = _send_content_to_channel(channel_id, final_markdown, config, plan=plan)
+            channel_results.append(
+                {
+                    "channel_id": channel_id,
+                    "ok": ok,
+                    "message_count": len(plan.messages),
+                    "message_format": plan.messages[0].format if plan.messages else channel.delivery_profile.get("preferred_format"),
+                }
+            )
             logger.info(f"TaskRunner: sent to channel '{channel_id}': ok={ok}")
         except Exception as e:
             logger.error(f"TaskRunner: failed to send to '{channel_id}': {e}")
@@ -394,34 +404,28 @@ def run_task(
     return payload
 
 
-def _send_content_to_channel(channel_id: str, content: str, config: dict) -> bool:
+def _send_content_to_channel(channel_id: str, content: str, config: dict, plan=None) -> bool:
     """
-    Build the full message (header + content + footer/empty) and send via channel.
+    Build a channel-aware message plan and send it message by message.
     """
-    settings = config.get("settings", {})
-    today_str = datetime.now().strftime("%m-%d")
-    title_template = settings.get("report_title", "📅 营销情报早报 | {date}")
-    header_msg = f"# {title_template.replace('{date}', today_str)}\n> 正在为您通过 AI 融合检索定向信源与全网热词..."
+    channel = get_channel(channel_id)
+    plan = plan or build_delivery_plan(channel=channel, content=content, config=config)
 
-    if not content:
-        empty_msg = settings.get("empty_message", "📭 今日全网无重要更新。")
-        return send_to_channel(channel_id, empty_msg)
-
-    # Send header
-    if not send_to_channel(channel_id, header_msg):
-        return False
-    time.sleep(1)
-
-    # Send content blocks
-    if not send_to_channel(channel_id, content):
-        return False
-    time.sleep(1)
-
-    # Send footer
-    if settings.get("show_footer", False):
-        footer = f"\n{settings.get('footer_text', '')}"
-        if not send_to_channel(channel_id, footer):
+    for index, message in enumerate(plan.messages):
+        outbound = ChannelMessage(
+            content=message.content,
+            format=message.format,
+            title=message.title or plan.title,
+        )
+        if not send_message_to_channel(channel_id, outbound):
+            logger.error(
+                "TaskRunner: channel '%s' failed on message %s/%s",
+                channel_id,
+                index + 1,
+                len(plan.messages),
+            )
             return False
-        time.sleep(1)
+        if index < len(plan.messages) - 1:
+            time.sleep(1)
 
     return True

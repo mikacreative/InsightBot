@@ -53,6 +53,12 @@ pip install -r requirements.txt
 
 当前开发基线下，所有高频调试功能都已集成到管理台，**无需任何命令行调试脚本**。
 
+当前发送层也已经按频道能力分流：
+
+- `wecom` 会在真实发送前自动做长度预算和分片；
+- `feishu_app` 默认走 `interactive` 卡片；
+- `INSIGHTBOT_DRY_RUN=1` 仍然会短路所有真实投递，只保留本地流程验证。
+
 ### 3.1 场景一：任务 Dry Run（`🔬 任务调试`）
 
 用于测试"抓取 → AI 筛选 → 生成简报"的完整链路。
@@ -122,7 +128,7 @@ pytest tests/test_scheduler.py -v
 
 ```bash
 set -a; source .env.local; set +a
-streamlit run scripts/app.py --server.address 0.0.0.0 --server.port 8501
+PYTHONPATH=. streamlit run scripts/app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
 管理台读取 `config.local.content.json`，敏感信息来自 `config.local.secrets.json` 或环境变量，不影响生产配置。
