@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-CONTINUATION_HINT_TEMPLATE = "> 续 {index}/{total}"
+CONTINUATION_HINT_TEMPLATE = "({index}/{total})"
 WECOM_SOFT_LIMIT = 3200
 FEISHU_BOT_SOFT_LIMIT = 6000
 FEISHU_APP_SOFT_LIMIT = 12000
@@ -104,14 +104,17 @@ def _build_feishu_app_messages(*, title: str, header: str, content: str, footer:
         return messages
 
     total = len(messages)
-    return [
-        ChannelMessage(
-            content=_join_blocks([f"**第 {index} / {total} 条**", message.content]),
-            format="interactive",
-            title=title,
+    softened: list[ChannelMessage] = []
+    for index, message in enumerate(messages, start=1):
+        prefix = CONTINUATION_HINT_TEMPLATE.format(index=index, total=total) if index > 1 else ""
+        softened.append(
+            ChannelMessage(
+                content=_join_blocks([prefix, message.content]),
+                format="interactive",
+                title=title,
+            )
         )
-        for index, message in enumerate(messages, start=1)
-    ]
+    return softened
 
 
 def _build_text_messages(
@@ -139,7 +142,7 @@ def _build_text_messages(
     total = len(packed_messages)
     result: list[ChannelMessage] = []
     for index, chunk in enumerate(packed_messages, start=1):
-        prefix = CONTINUATION_HINT_TEMPLATE.format(index=index, total=total)
+        prefix = CONTINUATION_HINT_TEMPLATE.format(index=index, total=total) if index > 1 else ""
         chunk_content = _join_blocks([prefix, chunk])
         result.append(
             ChannelMessage(
