@@ -1913,6 +1913,7 @@ def main() -> None:
             only_problem_feeds = st.toggle("仅看异常/无更新", value=False)
         with header_col3:
             stale_7d_only = st.toggle("仅看 7 天未更新", value=False)
+        active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
 
         if health_snapshot is None:
             st.info("当前还没有健康度缓存。点击“立即刷新健康度”后，控制台会生成第一份检查结果。")
@@ -2057,7 +2058,6 @@ def main() -> None:
     with tab4:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
         st.caption("日志已开启企业级轮转模式（自动保留 30 天，每日切割）。默认优先展示当前任务相关日志，便于快速排查。")
-        active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
         st.markdown(
             f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">当前任务: {active_task_name}</span>'
             f'<span class="ib-chip ib-chip-neutral">任务 ID: {selected_task_id or "未选择"}</span></div>',

@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 
 CONTINUATION_HINT_TEMPLATE = "({index}/{total})"
-WECOM_SOFT_LIMIT = 3200
+WECOM_SOFT_LIMIT_BYTES = 3800
 FEISHU_BOT_SOFT_LIMIT = 6000
 FEISHU_APP_SOFT_LIMIT = 12000
 
@@ -86,9 +86,10 @@ def _build_wecom_messages(*, title: str, header: str, content: str, footer: str)
     return _build_text_messages(
         title=title,
         blocks=[header, content, footer],
-        limit=WECOM_SOFT_LIMIT,
+        limit=WECOM_SOFT_LIMIT_BYTES,
         message_format="markdown",
         include_title=False,
+        byte_limit=True,
     )
 
 
@@ -124,12 +125,19 @@ def _build_text_messages(
     limit: int,
     message_format: str,
     include_title: bool,
+    byte_limit: bool = False,
 ) -> list[ChannelMessage]:
+    reserved_limit = limit
+    if byte_limit:
+        reserved_limit = max(
+            1,
+            limit - _content_size(CONTINUATION_HINT_TEMPLATE.format(index=99, total=99) + "\n\n", byte_limit=True),
+        )
     normalized_blocks: list[str] = []
     for block in blocks:
-        normalized_blocks.extend(_normalize_blocks(block, limit))
+        normalized_blocks.extend(_normalize_blocks(block, reserved_limit, byte_limit=byte_limit))
 
-    packed_messages = _pack_blocks(normalized_blocks, limit)
+    packed_messages = _pack_blocks(normalized_blocks, reserved_limit, byte_limit=byte_limit)
     if len(packed_messages) <= 1:
         return [
             ChannelMessage(
@@ -154,7 +162,13 @@ def _build_text_messages(
     return result
 
 
-def _normalize_blocks(markdown: str, limit: int) -> list[str]:
+def _content_size(text: str, *, byte_limit: bool) -> int:
+    if byte_limit:
+        return len(str(text).encode("utf-8"))
+    return len(str(text))
+
+
+def _normalize_blocks(markdown: str, limit: int, *, byte_limit: bool = False) -> list[str]:
     markdown = str(markdown or "").strip()
     if not markdown:
         return []
@@ -162,10 +176,10 @@ def _normalize_blocks(markdown: str, limit: int) -> list[str]:
     top_level_blocks = _split_preserving_sections(markdown)
     normalized: list[str] = []
     for block in top_level_blocks:
-        if len(block) <= limit:
+        if _content_size(block, byte_limit=byte_limit) <= limit:
             normalized.append(block)
             continue
-        normalized.extend(_split_oversized_block(block, limit))
+        normalized.extend(_split_oversized_block(block, limit, byte_limit=byte_limit))
     return normalized
 
 
@@ -174,23 +188,23 @@ def _split_preserving_sections(markdown: str) -> list[str]:
     return parts or [markdown.strip()]
 
 
-def _split_oversized_block(block: str, limit: int) -> list[str]:
+def _split_oversized_block(block: str, limit: int, *, byte_limit: bool = False) -> list[str]:
     paragraphs = [paragraph.strip() for paragraph in re.split(r"\n{2,}", block) if paragraph.strip()]
     if not paragraphs:
-        return _hard_split(block, limit)
+        return _hard_split(block, limit, byte_limit=byte_limit)
 
     chunks: list[str] = []
     current = ""
     for paragraph in paragraphs:
-        if len(paragraph) > limit:
+        if _content_size(paragraph, byte_limit=byte_limit) > limit:
             if current:
                 chunks.append(current)
                 current = ""
-            chunks.extend(_hard_split(paragraph, limit))
+            chunks.extend(_hard_split(paragraph, limit, byte_limit=byte_limit))
             continue
 
         candidate = _join_blocks([current, paragraph]) if current else paragraph
-        if len(candidate) <= limit:
+        if _content_size(candidate, byte_limit=byte_limit) <= limit:
             current = candidate
         else:
             if current:
@@ -202,9 +216,25 @@ def _split_oversized_block(block: str, limit: int) -> list[str]:
     return chunks
 
 
-def _hard_split(text: str, limit: int) -> list[str]:
+def _fit_prefix_by_size(text: str, limit: int, *, byte_limit: bool = False) -> str:
+    if _content_size(text, byte_limit=byte_limit) <= limit:
+        return text
+
+    low = 0
+    high = len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        candidate = text[:mid]
+        if _content_size(candidate, byte_limit=byte_limit) <= limit:
+            low = mid
+        else:
+            high = mid - 1
+    return text[:low]
+
+
+def _hard_split(text: str, limit: int, *, byte_limit: bool = False) -> list[str]:
     text = text.strip()
-    if len(text) <= limit:
+    if _content_size(text, byte_limit=byte_limit) <= limit:
         return [text]
 
     pieces: list[str] = []
@@ -212,30 +242,33 @@ def _hard_split(text: str, limit: int) -> list[str]:
     for line in text.splitlines():
         stripped = line.rstrip()
         candidate = f"{current}\n{stripped}".strip() if current else stripped
-        if candidate and len(candidate) <= limit:
+        if candidate and _content_size(candidate, byte_limit=byte_limit) <= limit:
             current = candidate
             continue
         if current:
             pieces.append(current)
-        if len(stripped) <= limit:
+        if _content_size(stripped, byte_limit=byte_limit) <= limit:
             current = stripped
             continue
-        start = 0
-        while start < len(stripped):
-            pieces.append(stripped[start:start + limit].strip())
-            start += limit
+        remainder = stripped
+        while remainder:
+            fitted = _fit_prefix_by_size(remainder, limit, byte_limit=byte_limit).strip()
+            if not fitted:
+                break
+            pieces.append(fitted)
+            remainder = remainder[len(fitted):].lstrip()
         current = ""
     if current:
         pieces.append(current)
     return [piece for piece in pieces if piece]
 
 
-def _pack_blocks(blocks: list[str], limit: int) -> list[str]:
+def _pack_blocks(blocks: list[str], limit: int, *, byte_limit: bool = False) -> list[str]:
     chunks: list[str] = []
     current = ""
     for block in blocks:
         candidate = _join_blocks([current, block]) if current else block
-        if not current or len(candidate) <= limit:
+        if not current or _content_size(candidate, byte_limit=byte_limit) <= limit:
             current = candidate
             continue
         chunks.append(current)

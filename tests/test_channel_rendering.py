@@ -1,6 +1,6 @@
 from insightbot.channel_rendering import (
     FEISHU_APP_SOFT_LIMIT,
-    WECOM_SOFT_LIMIT,
+    WECOM_SOFT_LIMIT_BYTES,
     build_delivery_plan,
 )
 from insightbot.channels import FeishuAppChannel, WeChatChannel
@@ -19,8 +19,10 @@ class TestDeliveryPlan:
         )
 
         assert len(plan.messages) >= 2
-        assert all(len(message.content) <= WECOM_SOFT_LIMIT for message in plan.messages)
+        assert all(len(message.content.encode("utf-8")) <= WECOM_SOFT_LIMIT_BYTES for message in plan.messages)
         assert plan.messages[0].format == "markdown"
+        assert not plan.messages[0].content.startswith("(")
+        assert plan.messages[1].content.startswith("(2/")
 
     def test_feishu_app_uses_interactive_messages(self):
         channel = FeishuAppChannel(
