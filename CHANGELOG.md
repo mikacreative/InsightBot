@@ -8,12 +8,14 @@
 - 为 `editorial-intelligence` 的搜索 adapter 补上 `baidu` provider，和当前腾讯云生产环境的默认搜索配置对齐
 - 新增 `python -m insightbot` 统一入口，并支持 `--webhook` 启动企业微信回调服务
 - 新增 `channel_rendering` 发送规划层：`wecom` 会按安全长度自动分片，`feishu_app` 会按卡片能力拆分多条连续消息
+- 修复 WeCom Markdown 分片按字符数估算导致中文内容在企业微信侧被截断的问题；现在按 UTF-8 字节预算分片，并为 `(2/2)` 续传提示预留字节
 
 ### Console
 
 - 控制台当前基线收敛为 7 个主标签页
 - 原 `AI 提示词调优` / `RSS 健康度` / `信源发现` 不再作为长期一级入口
 - Prompt Debug 能力继续收口到 `验证与调试` 页内联工作流
+- 修复 RSS 健康度 / No Push Diagnosis 路径中 `active_task_name` 先使用后赋值导致的 Streamlit 报错
 
 ### Schema And Docs
 
