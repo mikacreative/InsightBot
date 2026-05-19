@@ -37,7 +37,7 @@
 
 ### 当前发送策略
 
-- `wecom`：发送前会按安全长度自动分片，避免超长 Markdown 直接投递失败
+- `wecom`：发送前按 UTF-8 字节预算自动分片，避免中文 Markdown 在企业微信侧被截断
 - `feishu_app`：优先走 `interactive` 卡片；超长内容会拆成多张连续卡片
 - `feishu_bot`：保持轻量文本 fallback，适合作为兜底通知渠道
 
