@@ -1,5 +1,5 @@
 from insightbot.signal_desk.models import BriefingRoom
-from scripts.ui.signal_desk.briefs import build_brief_room_options
+from scripts.ui.signal_desk.briefs import build_brief_intent_options, build_brief_room_options
 from scripts.ui.signal_desk.signals import build_signal_workspace_rows
 
 
@@ -47,3 +47,12 @@ def test_build_brief_room_options_only_returns_rooms_with_saved_signals():
     ]
 
     assert build_brief_room_options(rooms, saved) == ["beauty_radar"]
+
+
+def test_build_brief_intent_options_uses_work_language():
+    assert build_brief_intent_options() == [
+        ("client_conversation", "Client conversation brief"),
+        ("proposal_angle", "Proposal angle brief"),
+        ("internal_inspiration", "Internal inspiration brief"),
+        ("trend_observation", "Trend observation brief"),
+    ]
