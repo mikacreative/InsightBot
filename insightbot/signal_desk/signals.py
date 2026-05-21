@@ -20,6 +20,27 @@ def _as_string_list(value: Any) -> list[str]:
     return []
 
 
+def _extract_source(candidate: dict[str, Any]) -> dict[str, str]:
+    raw_source = candidate.get("source")
+    source: dict[str, str] = {}
+    if isinstance(raw_source, dict):
+        for key in ("title", "url", "published_at"):
+            value = str(raw_source.get(key) or "").strip()
+            if value:
+                source[key] = value
+
+    for candidate_key, source_key in (
+        ("source_title", "title"),
+        ("url", "url"),
+        ("source_url", "url"),
+        ("published_at", "published_at"),
+    ):
+        value = str(candidate.get(candidate_key) or "").strip()
+        if value and source_key not in source:
+            source[source_key] = value
+    return source
+
+
 def _candidate_to_signal(
     room_id: str,
     run_id: str,
@@ -39,11 +60,7 @@ def _candidate_to_signal(
     if not signal_key:
         return None
 
-    source: dict[str, str] = {}
-    if source_url:
-        source["url"] = source_url
-    if candidate.get("published_at"):
-        source["published_at"] = str(candidate["published_at"])
+    source = _extract_source(candidate)
 
     client_relevance = str(candidate.get("client_relevance") or "").strip()
     if not client_relevance:
@@ -70,6 +87,25 @@ def _candidate_to_signal(
         save_tags=_as_string_list(candidate.get("save_tags")),
         raw_candidate_ref=candidate_id,
     )
+
+
+def _signals_from_candidates(
+    room_id: str,
+    run_id: str,
+    candidates: list[Any],
+    judgement_lens: str = "",
+) -> list[SignalItem]:
+    structured_signals: list[SignalItem] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        normalized_candidate = dict(candidate)
+        if judgement_lens and not normalized_candidate.get("judgement_lens"):
+            normalized_candidate["judgement_lens"] = [judgement_lens]
+        signal = _candidate_to_signal(room_id, run_id, normalized_candidate)
+        if signal is not None:
+            structured_signals.append(signal)
+    return structured_signals
 
 
 def _markdown_to_signal(room_id: str, run_id: str, final_markdown: str) -> SignalItem | None:
@@ -102,13 +138,26 @@ def signal_items_from_run_result(
     stage_results = run_result.get("stage_results")
     shortlist = stage_results.get("shortlist") if isinstance(stage_results, dict) else []
     if isinstance(shortlist, list):
-        structured_signals: list[SignalItem] = []
-        for candidate in shortlist:
-            if not isinstance(candidate, dict):
+        structured_signals = _signals_from_candidates(room_id, run_id, shortlist)
+        if structured_signals:
+            return structured_signals
+
+    section_assignments = (
+        stage_results.get("section_assignments") if isinstance(stage_results, dict) else {}
+    )
+    if isinstance(section_assignments, dict):
+        structured_signals = []
+        for section_name, candidates in section_assignments.items():
+            if not isinstance(candidates, list):
                 continue
-            signal = _candidate_to_signal(room_id, run_id, candidate)
-            if signal is not None:
-                structured_signals.append(signal)
+            structured_signals.extend(
+                _signals_from_candidates(
+                    room_id,
+                    run_id,
+                    candidates,
+                    judgement_lens=str(section_name),
+                )
+            )
         if structured_signals:
             return structured_signals
 

@@ -63,6 +63,62 @@ def test_signal_items_from_editorial_intelligence_candidate_shape_have_required_
     assert items[0].source["url"] == "https://example.com/ai-shopping"
 
 
+def test_signal_items_from_section_assignments_when_shortlist_missing():
+    run_result = {
+        "stage_results": {
+            "section_assignments": {
+                "Client Conversation Starters": [
+                    {
+                        "title": "Retailer launches AI shelf assistant",
+                        "summary": "A retailer is using AI to support in-store recommendations.",
+                        "why_it_matters": "It changes retail experience expectations.",
+                        "url": "https://example.com/retail-ai",
+                        "source_title": "Retail AI Report",
+                    }
+                ]
+            }
+        }
+    }
+
+    items = signal_items_from_run_result(
+        room_id="client_radar_retail",
+        run_id="run_assignments",
+        run_result=run_result,
+    )
+
+    assert len(items) == 1
+    assert items[0].what_happened == "Retailer launches AI shelf assistant"
+    assert items[0].judgement_lens == ["Client Conversation Starters"]
+    assert items[0].source == {
+        "title": "Retail AI Report",
+        "url": "https://example.com/retail-ai",
+    }
+
+
+def test_signal_items_preserve_nested_source_metadata():
+    run_result = {
+        "stage_results": {
+            "shortlist": [
+                {
+                    "title": "Brand pilots creator commerce",
+                    "summary": "The campaign combines creators and store conversion.",
+                    "source": {
+                        "title": "Campaign Source",
+                        "url": "https://example.com/creator-commerce",
+                        "published_at": "2026-05-20",
+                    },
+                }
+            ]
+        }
+    }
+
+    items = signal_items_from_run_result("client_radar_brand", "run_source", run_result)
+
+    assert items[0].source["title"] == "Campaign Source"
+    assert items[0].source["url"] == "https://example.com/creator-commerce"
+    assert items[0].source["published_at"] == "2026-05-20"
+
+
 def test_signal_items_fallback_to_final_markdown():
     run_result = {
         "final_markdown": "### Platform changes social search\nThis may affect content discovery.",
