@@ -180,12 +180,14 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
         st.caption(f"Status: {health_summary['status']}")
         st.markdown(
             f"Latest signals: **{health_summary['latest_signal_count']}** | "
-            f"Fallback signals: **{health_summary['fallback_signal_count']}**"
+            f"Fallback/manual review signals: **{health_summary['fallback_signal_count']}**"
         )
         for recommendation in health_summary["recommendations"]:
             st.markdown(f"- {recommendation}")
-        for recommendation in output_quality["recommendations"]:
-            st.markdown(f"- {recommendation}")
+        if output_quality["recommendations"]:
+            st.markdown("**Output quality recommendations**")
+            for recommendation in output_quality["recommendations"]:
+                st.markdown(f"- {recommendation}")
 
     with st.expander("Final markdown", expanded=False):
         st.markdown(result.get("final_markdown") or "No final markdown.")

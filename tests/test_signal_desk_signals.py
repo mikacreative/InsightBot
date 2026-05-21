@@ -156,6 +156,37 @@ def test_summarize_signal_output_quality_counts_fallback_and_missing_sources():
     }
 
 
+def test_summarize_signal_output_quality_empty_list_needs_refresh():
+    summary = summarize_signal_output_quality([])
+
+    assert summary["status"] == "no_data"
+    assert summary["signal_count"] == 0
+    assert summary["recommendations"] == [
+        "Refresh the room or inspect Control Center diagnostics; no signal cards were produced."
+    ]
+
+
+def test_summarize_signal_output_quality_fully_sourced_structured_signal_is_healthy():
+    signals = signal_items_from_run_result(
+        "room_quality",
+        "run_healthy",
+        {
+            "stage_results": {
+                "shortlist": [
+                    {"title": "Sourced signal", "url": "https://example.com/source"}
+                ]
+            }
+        },
+    )
+
+    summary = summarize_signal_output_quality(signals)
+
+    assert summary["status"] == "healthy"
+    assert summary["fallback_count"] == 0
+    assert summary["missing_source_count"] == 0
+    assert summary["recommendations"] == []
+
+
 def test_signal_items_fallback_to_final_markdown():
     run_result = {
         "final_markdown": "### Platform changes social search\nThis may affect content discovery.",
