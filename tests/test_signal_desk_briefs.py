@@ -93,6 +93,34 @@ def test_create_brief_raises_when_room_has_no_saved_signals(tmp_path):
         )
 
 
+def test_client_conversation_brief_uses_work_ready_sections(tmp_path):
+    artifact = create_brief_from_saved_signals(
+        make_room(),
+        [make_saved_signal()],
+        output_intent="client_conversation",
+        bot_dir=str(tmp_path),
+    )
+
+    assert "# Beauty Client Radar - Client Conversation Brief" in artifact.markdown
+    assert "## Executive takeaways" in artifact.markdown
+    assert "## Client conversation starters" in artifact.markdown
+    assert "## Source signals" in artifact.markdown
+    assert "It affects retail conversion." in artifact.markdown
+
+
+def test_proposal_angle_brief_uses_pitch_sections(tmp_path):
+    artifact = create_brief_from_saved_signals(
+        make_room(),
+        [make_saved_signal()],
+        output_intent="proposal_angle",
+        bot_dir=str(tmp_path),
+    )
+
+    assert "# Beauty Client Radar - Proposal Angle Brief" in artifact.markdown
+    assert "## Pitch angles" in artifact.markdown
+    assert "## Proof points" in artifact.markdown
+
+
 def test_list_briefs_skips_malformed_jsonl(tmp_path):
     artifact = create_brief_from_saved_signals(make_room(), [make_saved_signal()], bot_dir=str(tmp_path))
     path = signal_desk_briefs_file_path(str(tmp_path))
@@ -108,8 +136,8 @@ def test_list_briefs_skips_malformed_jsonl(tmp_path):
 def test_brief_markdown_contains_signal_fields(tmp_path):
     artifact = create_brief_from_saved_signals(make_room(), [make_saved_signal()], bot_dir=str(tmp_path))
 
-    assert "# Beauty Client Radar Brief" in artifact.markdown
-    assert "Source count: 1" in artifact.markdown
+    assert "# Beauty Client Radar - Client Conversation Brief" in artifact.markdown
+    assert "Source signals: 1" in artifact.markdown
     assert "Brand launches AI shopping assistant" in artifact.markdown
     assert "It affects retail conversion." in artifact.markdown
     assert "Use as a client conversation starter." in artifact.markdown

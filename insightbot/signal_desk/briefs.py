@@ -14,6 +14,41 @@ from insightbot.signal_desk.models import BriefArtifact, BriefingRoom
 _LOCK_RETRY_DELAY_SECONDS = 0.05
 _LOCK_TIMEOUT_SECONDS = 5.0
 
+BRIEF_INTENT_LABELS = {
+    "client_conversation": "Client Conversation Brief",
+    "proposal_angle": "Proposal Angle Brief",
+    "internal_inspiration": "Internal Inspiration Brief",
+    "trend_observation": "Trend Observation Brief",
+}
+
+BRIEF_INTENT_SECTIONS = {
+    "client_conversation": [
+        "Executive takeaways",
+        "Client conversation starters",
+        "Recommended next actions",
+        "Source signals",
+    ],
+    "proposal_angle": [
+        "Executive takeaways",
+        "Pitch angles",
+        "Proof points",
+        "Recommended next actions",
+        "Source signals",
+    ],
+    "internal_inspiration": [
+        "Executive takeaways",
+        "Inspiration hooks",
+        "Reusable references",
+        "Source signals",
+    ],
+    "trend_observation": [
+        "Executive takeaways",
+        "Trend observations",
+        "Implications",
+        "Source signals",
+    ],
+}
+
 
 @contextmanager
 def _jsonl_append_lock(path: str):
@@ -79,14 +114,14 @@ def create_brief_from_saved_signals(
     if not room_signals:
         raise ValueError(f"No saved signals for room: {room.id}")
 
-    title = f"{room.name} Brief"
+    title = room.name
     artifact = BriefArtifact(
         id=f"brief_{uuid.uuid4().hex[:12]}",
         room_id=room.id,
-        title=title,
+        title=f"{title} Brief",
         output_intent=output_intent,
         source_signal_ids=[str(item.get("id", "")) for item in room_signals],
-        markdown=_render_brief_markdown(title, room_signals),
+        markdown=_render_brief_markdown(title, room_signals, output_intent),
     )
     _append_jsonl(signal_desk_briefs_file_path(bot_dir), artifact.to_dict())
     return artifact
@@ -99,28 +134,49 @@ def list_briefs(room_id: str | None = None, bot_dir: str | None = None) -> list[
     return [item for item in items if item.get("room_id") == room_id]
 
 
-def _render_brief_markdown(title: str, saved_signals: list[dict]) -> str:
+def _signal_payload(item: dict) -> dict:
+    signal = item.get("signal", {})
+    return signal if isinstance(signal, dict) else {}
+
+
+def _render_brief_markdown(title: str, saved_signals: list[dict], output_intent: str) -> str:
+    intent_label = BRIEF_INTENT_LABELS.get(output_intent, "Signal Desk Brief")
+    sections = BRIEF_INTENT_SECTIONS.get(output_intent, BRIEF_INTENT_SECTIONS["client_conversation"])
+    heading = f"{title} - {intent_label}"
+    signals = [_signal_payload(item) for item in saved_signals]
+
     lines = [
-        f"# {title}",
+        f"# {heading}",
         "",
-        f"Source count: {len(saved_signals)}",
+        f"Source signals: {len(signals)}",
+        "",
+        f"## {sections[0]}",
     ]
-    for index, item in enumerate(saved_signals, start=1):
-        signal = item.get("signal", {})
-        if not isinstance(signal, dict):
-            signal = {}
+    for signal in signals:
+        lines.append(f"- {signal.get('what_happened', '')}: {signal.get('why_it_matters', '')}")
+
+    for section in sections[1:-1]:
+        lines.extend(["", f"## {section}"])
+        for signal in signals:
+            action = signal.get("suggested_action") or "Review with the account or strategy lead."
+            relevance = signal.get("client_relevance") or signal.get("why_it_matters", "")
+            lines.append(f"- {action} {relevance}".strip())
+
+    lines.extend(["", f"## {sections[-1]}"])
+    for index, signal in enumerate(signals, start=1):
         source = signal.get("source", {})
         if not isinstance(source, dict):
             source = {}
+        source_label = source.get("title") or source.get("url") or "Source not recorded"
         lines.extend(
             [
                 "",
-                f"## {index}. {signal.get('what_happened', '')}",
-                "",
-                f"- What happened: {signal.get('what_happened', '')}",
+                f"### {index}. {signal.get('what_happened', '')}",
                 f"- Why it matters: {signal.get('why_it_matters', '')}",
+                f"- Client relevance: {signal.get('client_relevance', '')}",
                 f"- Suggested action: {signal.get('suggested_action', '')}",
-                f"- Source URL: {source.get('url', '')}",
+                f"- Source: {source_label}",
+                f"- URL: {source.get('url', '')}",
             ]
         )
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).strip() + "\n"
