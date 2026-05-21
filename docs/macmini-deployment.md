@@ -20,7 +20,7 @@ pip install -r requirements.txt
 docker-compose up -d redis
 
 # 4. 手动测试任务
-python -m insightbot.cli --dry-run --task-id daily_brief
+python -m insightbot --task daily_brief --dry-run
 ```
 
 ## 目录结构

@@ -1,6 +1,6 @@
 # InsightBot / Signal Desk Agent Context
 
-> Updated: 2026-05-11
+> Updated: 2026-05-21
 
 ## Current Product Direction
 
@@ -16,9 +16,19 @@ The current strategic choice is **Human-first / Agent-ready / Autonomy-later**. 
 
 ## Current Branch And Scope
 
-- Main working branch for this phase: `codex/signal-desk-prd-mvp`.
+- Main working branch for this phase: `codex/signal-desk-main-sync`, syncing `codex/signal-desk-prd-mvp` with latest `origin/main`.
 - Current MVP focus: Signal Desk Alpha vertical slice: room refresh, selected signals, saved work assets, brief stub, pattern health, Agent Access routing, and clean documentation.
 - Keep existing `tasks.json`, scheduler, channels, and task runner as the execution base unless a task explicitly asks to replace them.
+
+## Current Production Shape
+
+- Production branch: `main`.
+- Production host: `ubuntu@111.229.166.6`.
+- Production path: `/root/marketing_bot`.
+- Production services:
+  - `insightbot-web.service` runs Streamlit on port `8501`.
+  - `insightbot-scheduler.service` runs the scheduler.
+- Production runtime files such as `tasks.json`, `channels.json`, `config.content.json`, `config.secrets.json`, and `data/` may differ from local Git state. Do not overwrite them blindly.
 
 ## Important Files
 
@@ -65,3 +75,9 @@ Streamlit smoke can be done with `streamlit.testing.v1.AppTest` or by opening th
   - `insightbot/wecom_callback 2.py`
 - Do not send real channel messages during tests. Use dry-run paths.
 - Treat `tasks.json`, `channels.json`, `.env.local`, and secret config files as local runtime state.
+
+## Production Incident Learnings
+
+- In `scripts/app.py`, define cross-section display variables immediately after task selection/state loading, before any conditional tab branches use them. A production Streamlit RSS health path failed on 2026-05-19 because `active_task_name` was referenced before assignment.
+- For WeCom Markdown, budget chunks by `len(content.encode("utf-8"))`, not `len(content)`. Chinese Markdown can exceed the WeCom payload budget by byte size even when character count looks safe.
+- When validating channel delivery, inspect the rendered payload before assuming the pipeline generated a broken final brief.

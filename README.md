@@ -22,6 +22,7 @@ Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是
 | 模块 | 说明 |
 |------|------|
 | `insightbot/channels.py` | Channel 抽象层（WeChatChannel、ChannelRegistry） |
+| `insightbot/channel_rendering.py` | 按频道能力渲染消息、企业微信分片、飞书卡片批次规划 |
 | `insightbot/scheduler.py` | 内置调度器（小时/分钟调度 + 70s 幂等保护） |
 | `insightbot/task_runner.py` | 任务执行引擎（dry_run / 真实发送） |
 | `insightbot/migrate.py` | v1 → v2 自动迁移 |
@@ -97,7 +98,13 @@ Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是
 > 对飞书来说，**推荐默认接入 `feishu_app`**。  
 > 它通过飞书应用鉴权后走官方消息 API，支持 `interactive` 卡片；`feishu_bot` 仍可用，但更适合作为 webhook 兜底通道。
 
-**`tasks.json`** — 任务定义（替代原来的内联配置）
+### 当前发送策略
+
+- `wecom`：发送前按 UTF-8 字节预算自动分片，避免中文 Markdown 在企业微信侧被截断。
+- `feishu_app`：优先走 `interactive` 卡片；超长内容会拆成多张连续卡片。
+- `feishu_bot`：保持轻量文本 fallback，适合作为兜底通知渠道。
+
+**`tasks.json`** — 任务定义（当前主结构）
 ```json
 {
   "tasks": {
@@ -105,7 +112,17 @@ Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是
       "name": "每日营销早报",
       "enabled": true,
       "pipeline": "editorial",
-      "feeds": { "💡 营销行业": { "rss": [...], "keywords": [], "prompt": "" } },
+      "sources": {
+        "rss": [{ "id": "marketing_feed", "url": "https://example.com/feed.xml", "enabled": true }],
+        "search": {
+          "enabled": true,
+          "provider": "bocha",
+          "queries": [{ "keywords": "AI 营销", "section_hints": ["数智前沿"], "max_results": 10 }]
+        }
+      },
+      "sections": {
+        "数智前沿": { "prompt": "...", "keywords": ["AI 营销"], "source_hints": ["marketing_feed"] }
+      },
       "pipeline_config": {},
       "channels": ["wecom_main"],
       "schedule": { "hour": 8, "minute": 0 }
@@ -113,6 +130,8 @@ Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是
   }
 }
 ```
+
+运行时内部仍会临时派生一份 `feeds` 视图，用于兼容 Prompt Debug、健康检查和少量 legacy 路径；长期主模型是 `sources + sections + pipeline_config`。
 
 ### 快速启动
 
@@ -122,7 +141,7 @@ Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pip install -e ./insightbot        # 将 insightbot 包安装为可编辑模式
+pip install -e ./insightbot
 ```
 
 2) 准备配置
@@ -141,7 +160,7 @@ cp config.secrets.example.json config.secrets.json
 3) 启动（首次自动迁移）
 
 ```bash
-streamlit run scripts/app.py \
+PYTHONPATH=. streamlit run scripts/app.py \
   --server.address 0.0.0.0 \
   --server.port 8501
 ```
@@ -149,21 +168,26 @@ streamlit run scripts/app.py \
 或命令行模式：
 
 ```bash
-python -m insightbot.cli
+python -m insightbot
 ```
 
 ### CLI 用法
 
 ```bash
 # 启动调度循环（阻塞）
-python -m insightbot.cli
+python -m insightbot
 
 # 运行指定任务（立即执行）
-python -m insightbot.cli --task daily_brief
+python -m insightbot --task daily_brief
 
 # Dry Run（仅面板展示，不发频道消息）
-python -m insightbot.cli --task daily_brief --dry-run
+python -m insightbot --task daily_brief --dry-run
+
+# 启动企业微信回调服务（端口 8080）
+python -m insightbot --webhook
 ```
+
+`python -m insightbot.cli` 仍可用，但推荐统一使用 `python -m insightbot`。
 
 ### 环境变量
 
@@ -189,9 +213,10 @@ python -m insightbot.cli --task daily_brief --dry-run
 
 ### 部署建议
 
-- 生产环境推荐把 `python -m insightbot.cli` 作为唯一常驻进程来守护
+- 生产环境推荐把 `python -m insightbot` 作为唯一常驻进程来守护
 - 不建议同时维护系统 `cron`，否则容易与应用内调度重复触发
 - 优先使用 `systemd`、`supervisord` 或容器自动重启策略来保证进程存活
+- 如果需要从企业微信回调触发任务，可额外守护 `python -m insightbot --webhook`
 
 ### 文档
 
@@ -205,5 +230,6 @@ python -m insightbot.cli --task daily_brief --dry-run
 - [Editorial Pipeline 设计文档](./docs/editorial_pipeline_design.md)
 - [Search 集成设计文档](./docs/search_integration_design.md)
 - [多任务架构说明](./docs/v2.0_architecture.md)
+- [Task Schema 重构：从 feeds 到 sources + sections](./docs/task_schema_sources_sections.md)
 - [本地测试指南](./LOCAL_TESTING_GUIDE.md)
 - [部署指南](./DEPLOYMENT_GUIDE.md)

@@ -10,9 +10,10 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
-from .channels import send_to_channel
+from .channel_rendering import ChannelMessage, build_delivery_plan
+from .channels import get_channel, send_message_to_channel
 from .run_history import append_run_record
 
 logger = logging.getLogger("TaskRunner")
@@ -41,16 +42,60 @@ def _estimate_counts(stage_results: dict) -> tuple[int, int]:
     return candidate_count, selected_count
 
 
-def _normalize_search_queries(queries: list) -> list[str]:
+def _normalize_search_queries(raw_queries: list[Any]) -> list[str]:
+    """Normalize task-level search query config into executable query strings."""
     normalized: list[str] = []
-    for query in queries:
-        if isinstance(query, dict):
-            value = str(query.get("keywords", "")).strip()
+    seen: set[str] = set()
+
+    for item in raw_queries or []:
+        if isinstance(item, dict):
+            query = str(item.get("keywords", "")).strip()
         else:
-            value = str(query).strip()
-        if value:
-            normalized.append(value)
+            query = str(item or "").strip()
+
+        if not query or query in seen:
+            continue
+        normalized.append(query)
+        seen.add(query)
+
     return normalized
+
+
+def _extract_search_config(config: dict) -> dict:
+    sources = config.get("sources", {}) or {}
+    if isinstance(sources.get("search"), dict):
+        return sources.get("search", {}) or {}
+    return config.get("search", {}) or {}
+
+
+def _collect_primary_sources(config: dict) -> list[str]:
+    sources = config.get("sources", {}) or {}
+    primary_sources: list[str] = []
+    seen: set[str] = set()
+    for item in sources.get("rss", []) or []:
+        if isinstance(item, dict):
+            raw_url = str(item.get("url", "")).strip()
+            enabled = bool(item.get("enabled", True))
+        else:
+            raw_url = str(item).strip()
+            enabled = True
+        if not enabled or not raw_url:
+            continue
+        if raw_url in seen:
+            continue
+        primary_sources.append(raw_url)
+        seen.add(raw_url)
+    return primary_sources
+
+
+def _build_goal_topic(config: dict) -> str:
+    sections = config.get("sections", {}) or {}
+    if sections:
+        return " / ".join(sections.keys())
+    feeds = config.get("feeds", {}) or {}
+    if feeds:
+        return " / ".join(feeds.keys())
+    return "营销情报"
 
 
 def _build_run_record(
@@ -107,17 +152,8 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
         logger.error("editorial-intelligence not installed: pip install -e editorial-intelligence/")
         return {"ok": False, "error": "editorial-intelligence not installed", "final_markdown": ""}
 
-    feeds = config.get("feeds", {})
-    search_config = config.get("search", {})
-
-    # Build primary_sources from feeds
-    primary_sources = []
-    for feed_id, feed_data in feeds.items():
-        rss_urls = feed_data.get("rss", [])
-        if isinstance(rss_urls, list):
-            for url in rss_urls:
-                if url:
-                    primary_sources.append(str(url))
+    search_config = _extract_search_config(config)
+    primary_sources = _collect_primary_sources(config)
 
     # Build search providers
     search_providers = {}
@@ -151,14 +187,14 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
                 enabled=True,
                 timeout_s=30,
             )
+        else:
+            logger.warning(f"editorial-intelligence: unsupported search provider '{provider_type}'")
 
     source_weight_config = SourceWeightConfig(search_providers=search_providers)
-
-    # Build goal from feeds structure
-    topic_parts = list(feeds.keys()) or ["营销情报"]
+    normalized_queries = _normalize_search_queries(search_config.get("queries", []))
     goal = BriefingGoal(
-        topic=" / ".join(topic_parts),
-        queries=_normalize_search_queries(search_config.get("queries", [])),
+        topic=_build_goal_topic(config),
+        queries=normalized_queries,
         description="",
     )
     # Pipeline expects dict-like goal, so convert dataclass to dict
@@ -174,7 +210,10 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
         search_enabled=search_config.get("enabled", False),
     )
 
-    editorial_policy = config.get("pipeline_config", {})
+    editorial_policy = {
+        **(config.get("pipeline_config", {}) or {}),
+        "sections": config.get("sections", {}) or {},
+    }
 
     ei_result = run_ei_pipeline(
         context={
@@ -312,8 +351,17 @@ def run_task(
     channel_results: list[dict] = []
     for channel_id in task_channels:
         try:
-            ok = _send_content_to_channel(channel_id, final_markdown, config)
-            channel_results.append({"channel_id": channel_id, "ok": ok})
+            channel = get_channel(channel_id)
+            plan = build_delivery_plan(channel=channel, content=final_markdown, config=config)
+            ok = _send_content_to_channel(channel_id, final_markdown, config, plan=plan)
+            channel_results.append(
+                {
+                    "channel_id": channel_id,
+                    "ok": ok,
+                    "message_count": len(plan.messages),
+                    "message_format": plan.messages[0].format if plan.messages else channel.delivery_profile.get("preferred_format"),
+                }
+            )
             logger.info(f"TaskRunner: sent to channel '{channel_id}': ok={ok}")
         except Exception as e:
             logger.error(f"TaskRunner: failed to send to '{channel_id}': {e}")
@@ -350,34 +398,28 @@ def run_task(
     return payload
 
 
-def _send_content_to_channel(channel_id: str, content: str, config: dict) -> bool:
+def _send_content_to_channel(channel_id: str, content: str, config: dict, plan=None) -> bool:
     """
-    Build the full message (header + content + footer/empty) and send via channel.
+    Build a channel-aware message plan and send it message by message.
     """
-    settings = config.get("settings", {})
-    today_str = datetime.now().strftime("%m-%d")
-    title_template = settings.get("report_title", "📅 营销情报早报 | {date}")
-    header_msg = f"# {title_template.replace('{date}', today_str)}\n> 正在为您通过 AI 融合检索定向信源与全网热词..."
+    channel = get_channel(channel_id)
+    plan = plan or build_delivery_plan(channel=channel, content=content, config=config)
 
-    if not content:
-        empty_msg = settings.get("empty_message", "📭 今日全网无重要更新。")
-        return send_to_channel(channel_id, empty_msg)
-
-    # Send header
-    if not send_to_channel(channel_id, header_msg):
-        return False
-    time.sleep(1)
-
-    # Send content blocks
-    if not send_to_channel(channel_id, content):
-        return False
-    time.sleep(1)
-
-    # Send footer
-    if settings.get("show_footer", False):
-        footer = f"\n{settings.get('footer_text', '')}"
-        if not send_to_channel(channel_id, footer):
+    for index, message in enumerate(plan.messages):
+        outbound = ChannelMessage(
+            content=message.content,
+            format=message.format,
+            title=message.title or plan.title,
+        )
+        if not send_message_to_channel(channel_id, outbound):
+            logger.error(
+                "TaskRunner: channel '%s' failed on message %s/%s",
+                channel_id,
+                index + 1,
+                len(plan.messages),
+            )
             return False
-        time.sleep(1)
+        if index < len(plan.messages) - 1:
+            time.sleep(1)
 
     return True

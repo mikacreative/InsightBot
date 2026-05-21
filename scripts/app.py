@@ -788,7 +788,7 @@ def main() -> None:
                 st.session_state["selected_task_id"] = active_task_id
                 selected_task = tasks_data["tasks"].get(selected_task_id, {})
                 selected_task_runtime_config = build_task_runtime_config(selected_task_id)
-                selected_task_feeds = deepcopy(selected_task.get("feeds", {}))
+                selected_task_feeds = deepcopy(selected_task_runtime_config.get("feeds", {}))
                 selected_task_categories = list(selected_task_feeds.keys())
                 selected_task_state = load_task_state(selected_task_id, bot_dir)
                 current_revision = build_task_revision(selected_task_runtime_config)
@@ -841,9 +841,9 @@ def main() -> None:
                         "name": quick_new_task_name or quick_new_task_id,
                         "enabled": False,
                         "pipeline": quick_new_task_pipeline,
-                        "feeds": deepcopy(selected_task_feeds or config.get("feeds", {})),
+                        "sources": deepcopy(get_task_sources(selected_task)),
+                        "sections": deepcopy(get_task_sections(selected_task)),
                         "pipeline_config": deepcopy(get_editorial_defaults()),
-                        "search": deepcopy((selected_task or {}).get("search", config.get("search", {}))),
                         "channels": deepcopy((selected_task or {}).get("channels", [])),
                         "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
                     }

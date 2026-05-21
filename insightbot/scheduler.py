@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from typing import Callable
 
-from .config import load_tasks, load_tasks_config
+from .config import load_tasks, load_tasks_config, normalize_task_definition
 from .logging_setup import build_logger
 from .paths import bot_log_file_path, default_bot_dir, tasks_file_path
 
@@ -37,9 +37,12 @@ class Task:
         self.channels = task_def.get("channels", [])
         self.schedule = task_def.get("schedule", {})
         self.pipeline = task_def.get("pipeline", "editorial")
-        self.feeds = task_def.get("feeds", {})
+        normalized = normalize_task_definition(task_def)
+        self.sources = normalized.get("sources", {})
+        self.sections = normalized.get("sections", {})
+        self.feeds = normalized.get("feeds", {})
         self.pipeline_config = task_def.get("pipeline_config", {})
-        self.search = task_def.get("search", {})
+        self.search = self.sources.get("search", {})
         self._config_loader = config_loader_fn
         self._last_run_at: datetime | None = None
 
@@ -95,9 +98,12 @@ class Scheduler:
     def __init__(self, bot_dir: str | None = None):
         self.bot_dir = bot_dir or default_bot_dir()
         self.tasks: dict[str, Task] = {}
-        self._config_loader_fn: Callable[[str], dict] = lambda task_id: {}
         self._log = logging.getLogger("Scheduler")
         self._load_tasks()
+
+    def _make_task_config_loader(self, task_id: str) -> Callable[[], dict]:
+        """Build a per-task config loader so CLI/systemd runs use the full task config."""
+        return lambda: load_tasks_config(task_id, self.bot_dir)
 
     def _load_tasks(self) -> None:
         """Load tasks from tasks.json."""
@@ -107,7 +113,7 @@ class Scheduler:
             self.tasks[task_id] = Task(
                 task_id,
                 task_def,
-                lambda tid=task_id: load_tasks_config(tid, self.bot_dir),
+                self._make_task_config_loader(task_id),
             )
         self._log.info(f"Loaded {len(self.tasks)} tasks from tasks.json")
 

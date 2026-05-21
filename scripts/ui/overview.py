@@ -23,6 +23,10 @@ def render_task_overview(
     render_operating_chip,
     render_diagnosis_card,
 ) -> None:
+    validation_summary = selected_task_validation.get("summary", {}) if selected_task_validation else {}
+    section_count = validation_summary.get("section_count", validation_summary.get("category_count", 0))
+    rss_source_count = validation_summary.get("rss_source_count", validation_summary.get("feed_count", 0))
+
     st.subheader("运营概览")
     active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
     st.caption(f"当前聚焦任务：{active_task_name}。优先看最近一次运行、异常摘要和最近调试动作。")
@@ -67,8 +71,8 @@ def render_task_overview(
             f"""
             <div class="ib-section-copy">
               {task_state_copy}<br/>
-              板块数：{selected_task_validation.get('summary', {}).get('category_count', 0)}<br/>
-              RSS 源数：{selected_task_validation.get('summary', {}).get('feed_count', 0)}<br/>
+              板块数：{section_count}<br/>
+              RSS 源数：{rss_source_count}<br/>
               异常 RSS 源：{health_counts.get('error', 0)}<br/>
               最近运行结果：{run_metrics.get('result_label', '未知')}
             </div>

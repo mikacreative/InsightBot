@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta
 from html import unescape
 from typing import Any, List, Optional
+from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 
 import feedparser
 import requests
@@ -57,11 +58,39 @@ DEFAULT_SYSTEM_PROMPT = """你是一个拥有 10 年经验的资深营销情报�
 剔除：低价值通稿、自媒体八卦、人事变动、娱乐新闻、算法学术论文、与营销无关的纯技术内容。"""
 
 
+def _is_search_landing_page(url: str) -> bool:
+    parsed = urlsplit(url.strip())
+    host = parsed.netloc.lower()
+    path = parsed.path.rstrip("/")
+
+    if host == "weixin.sogou.com" and path == "/weixin":
+        return True
+    if host in {"www.baidu.com", "m.baidu.com"} and path == "/s":
+        return True
+    return False
+
+
+def _normalize_result_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return ""
+
+    if _is_search_landing_page(url):
+        return ""
+
+    parsed = urlsplit(url)
+    safe_path = quote(parsed.path or "/", safe="/:@%+-._~")
+    safe_query = urlencode(parse_qs(parsed.query, keep_blank_values=True), doseq=True)
+    safe_fragment = quote(parsed.fragment, safe="")
+    normalized = urlunsplit((parsed.scheme, parsed.netloc, safe_path, safe_query, safe_fragment))
+    return normalized.strip()
+
+
 def _render_markdown(category: str, items: List[dict]) -> str:
     blocks = [f"## {category}\n"]
     for item in items:
         title = item.get("title", "").strip()
-        url = item.get("url", "").strip()
+        url = _normalize_result_url(item.get("url", ""))
         summary = item.get("summary", "").strip()
         if not url:
             continue
@@ -190,8 +219,8 @@ def _normalize_ai_items(items: List[dict], *, selection_settings: dict[str, int]
         if not isinstance(item, dict):
             continue
 
-        url = str(item.get("url", "")).strip()
-        if not url or not url.startswith(("http://", "https://")) or url in seen_urls:
+        url = _normalize_result_url(item.get("url", ""))
+        if not url or url in seen_urls:
             continue
 
         title = _truncate_text(item.get("title", ""), limit=title_max_len)

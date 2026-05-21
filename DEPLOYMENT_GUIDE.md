@@ -1,6 +1,6 @@
 # InsightBot 部署指南
 
-**更新日期**：2026-04-18（适配 v0.4.0 / Channels 扩展）
+**更新日期**：2026-04-29（适配当前 `dev-editorial` 基线）
 
 ---
 
@@ -10,9 +10,9 @@
 *   本地执行 `pytest tests/ -q` 全量通过（130+ 测试）。
 *   关键配置采用 `config.content.json` + `config.secrets.json` 或环境变量。
 *   在目标运行环境完成一次真实链路验证：
-    *   控制台能正常打开（tab1 任务管理、tab2 Channels、tab8 任务调试）
-    *   RSS 健康度面板能读取或刷新
-    *   `python -m insightbot.cli --task daily_brief --dry-run` 能完整跑通
+    *   控制台能正常打开（`🏠 概览`、`📋 任务管理`、`📡 Channels`、`🧪 验证与调试`、`🔬 任务调试`）
+    *   `验证与调试` 页能正常显示健康检查 / 日志摘要 / 板块调试
+    *   `python -m insightbot --task daily_brief --dry-run` 能完整跑通
     *   频道联通性测试（tab2）在控制台正常
     *   如启用飞书，至少验证一次 `feishu_app` 或 `feishu_bot` 渠道连通
     *   真实推送或 `INSIGHTBOT_DRY_RUN=1` 输出符合预期
@@ -93,7 +93,7 @@ pip install -r requirements.txt
 
 **方式 A：systemd 常驻进程（推荐）**
 
-> 当前正式版本开始，推荐只守护 `python -m insightbot.cli` 这个进程。
+> 当前正式版本开始，推荐只守护 `python -m insightbot` 这个进程。
 > 不需要再额外维护系统 `cron`，否则会和内置调度器形成双重触发。
 
 ```ini
@@ -106,7 +106,7 @@ Type=simple
 User=root
 WorkingDirectory=/root/marketing_bot
 EnvironmentFile=/root/marketing_bot/.env
-ExecStart=/root/marketing_bot/.venv/bin/python -m insightbot.cli
+ExecStart=/root/marketing_bot/.venv/bin/python -m insightbot
 Restart=always
 
 [Install]
@@ -123,7 +123,7 @@ systemctl status insightbot-scheduler
 
 ```bash
 pkill -f insightbot  # 停止旧进程
-nohup python3 -m insightbot.cli >> insightbot.log 2>&1 &
+nohup python3 -m insightbot >> insightbot.log 2>&1 &
 ```
 
 **方式 C：Docker Compose 部署**
@@ -156,10 +156,10 @@ docker-compose up -d
 
 ```bash
 # Dry Run 验证（不发送真实消息）
-python -m insightbot.cli --task daily_brief --dry-run
+python -m insightbot --task daily_brief --dry-run
 
 # 生产运行模型
-# 由 systemd 持续守护 python -m insightbot.cli
+# 由 systemd 持续守护 python -m insightbot
 # 不再单独配置 cron
 
 # 查看日志
@@ -174,6 +174,7 @@ tail -f /root/marketing_bot/logs/bot.log
 *   确认频道显示“配置完整”
 *   确认该频道已被目标任务引用
 *   再到 `🔬 任务调试` 跑一次 Dry Run 或真实发送
+*   如果需要排查 Prompt / 板块筛选问题，优先在 `🧪 验证与调试` 内联完成，而不是寻找旧的独立 Prompt Debug 标签页
 
 ---
 

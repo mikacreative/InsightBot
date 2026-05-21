@@ -31,6 +31,7 @@ from .smart_brief_runner import (
     _extract_entry_summary,
     _make_input_text,
     _normalize_ai_items,
+    _normalize_result_url,
     _parse_feed_url,
     _truncate_text,
     get_selection_settings,
@@ -81,6 +82,70 @@ DEFAULT_GLOBAL_SYSTEM_PROMPT = """你是一个资深营销情报官，站在"总
 """
 
 
+def _normalize_category_token(value: str) -> str:
+    """Normalize category labels so AI responses can omit emoji/punctuation."""
+    text = re.sub(r"[^\w\u4e00-\u9fff]+", "", str(value or ""))
+    return text.lower()
+
+
+def _resolve_category_name(raw_category: str, category_list: list[str]) -> str:
+    """Map AI-returned category names to the configured category key."""
+    normalized_raw = _normalize_category_token(raw_category)
+    if not normalized_raw:
+        return ""
+
+    normalized_map = {
+        category: _normalize_category_token(category)
+        for category in category_list
+    }
+
+    for category, normalized_category in normalized_map.items():
+        if normalized_raw == normalized_category:
+            return category
+
+    for category, normalized_category in normalized_map.items():
+        if normalized_raw in normalized_category or normalized_category in normalized_raw:
+            return category
+
+    return ""
+
+
+def _get_sections_config(config: dict) -> dict:
+    return (config.get("sections", {}) or {}) if config.get("sections") else (config.get("feeds", {}) or {})
+
+
+def _get_search_config(config: dict) -> dict:
+    sources = config.get("sources", {}) or {}
+    if isinstance(sources.get("search"), dict):
+        return sources.get("search", {}) or {}
+    return config.get("search", {}) or {}
+
+
+def _get_rss_sources(config: dict) -> list[dict]:
+    sources = config.get("sources", {}) or {}
+    rss_sources = sources.get("rss", [])
+    if rss_sources:
+        return [item for item in rss_sources if isinstance(item, dict)]
+
+    sections = _get_sections_config(config)
+    fallback: list[dict] = []
+    for category, feed_data in sections.items():
+        for raw_url in (feed_data or {}).get("rss", []) or []:
+            raw_text = str(raw_url).strip()
+            if not raw_text:
+                continue
+            fallback.append(
+                {
+                    "id": category,
+                    "url": raw_text,
+                    "enabled": True,
+                    "tags": [category],
+                    "section_hints": [category],
+                }
+            )
+    return fallback
+
+
 # ---------- Search: Global Candidate Supplementation ----------
 
 
@@ -91,7 +156,7 @@ def search_global_candidates(*, config: dict, logger) -> list[dict]:
 
     返回 list[GlobalCandidate]，格式与 RSS 候选完全一致。
     """
-    search_config = config.get("search", {})
+    search_config = _get_search_config(config)
     if not search_config.get("enabled", False):
         return []
 
@@ -99,8 +164,8 @@ def search_global_candidates(*, config: dict, logger) -> list[dict]:
     queries = search_config.get("queries", [])
     if not queries:
         # 自动从各板块 keywords 生成 queries
-        queries = _derive_queries_from_feeds(config)
-        logger.info(f"🔍 搜索 query 为空，已从板块 keywords 自动派生 {len(queries)} 条")
+        queries = _derive_queries_from_sections(config)
+        logger.info(f"🔍 搜索 query 为空，已从栏目 keywords 自动派生 {len(queries)} 条")
 
     all_results: list[dict] = []
     for q in queries:
@@ -108,7 +173,12 @@ def search_global_candidates(*, config: dict, logger) -> list[dict]:
         if not keywords:
             continue
         max_results = q.get("max_results", 10)
-        category_hint = q.get("category_hint", "")
+        section_hints = q.get("section_hints", [])
+        if isinstance(section_hints, str):
+            section_hints = [section_hints]
+        elif not isinstance(section_hints, list):
+            legacy_hint = str(q.get("category_hint", "")).strip()
+            section_hints = [legacy_hint] if legacy_hint else []
 
         try:
             if provider == "baidu":
@@ -120,8 +190,9 @@ def search_global_candidates(*, config: dict, logger) -> list[dict]:
                 continue
 
             for r in raw_results:
-                normalized = _normalize_search_result(r, category_hint=category_hint)
-                all_results.append(normalized)
+                normalized = _normalize_search_result(r, section_hints=section_hints)
+                if normalized:
+                    all_results.append(normalized)
             logger.info(f"🔍 [{provider}] 关键词「{keywords}」→ {len(raw_results)} 条")
         except Exception as e:
             logger.warning(f"⚠️ 搜索失败 [{keywords}]: {e}")
@@ -132,31 +203,33 @@ def search_global_candidates(*, config: dict, logger) -> list[dict]:
     return unique
 
 
-def _derive_queries_from_feeds(config: dict) -> list[dict]:
-    """从各板块 keywords 自动派生搜索 query。"""
+def _derive_queries_from_sections(config: dict) -> list[dict]:
+    """从各栏目 keywords 自动派生搜索 query。"""
     queries = []
-    feeds = config.get("feeds", {})
-    for category, feed_data in feeds.items():
-        keywords = feed_data.get("keywords", [])
+    sections = _get_sections_config(config)
+    for category, section_data in sections.items():
+        keywords = section_data.get("keywords", [])
         if not keywords:
             continue
-        prompt_snippet = feed_data.get("prompt", "")[:20].replace("\n", " ")
         keywords_str = " ".join(keywords)
         queries.append({
             "keywords": keywords_str,
-            "category_hint": category,
+            "section_hints": [category],
             "max_results": 10,
             "_auto_generated": True,
         })
     return queries
 
 
-def _normalize_search_result(raw: dict, *, category_hint: str = "") -> dict:
+def _normalize_search_result(raw: dict, *, section_hints: list[str] | None = None) -> dict | None:
     """将搜索引擎原始结果归一化为 GlobalCandidate 格式。"""
-    link = raw.get("link", "").strip()
+    link = _normalize_result_url(raw.get("link", ""))
     title = raw.get("title", "").strip()
     snippet = _clean_text(raw.get("snippet", ""))
     source_name = raw.get("source", "搜索结果")
+
+    if not link or not title:
+        return None
 
     candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, link)) if link else str(uuid.uuid4())
 
@@ -168,7 +241,8 @@ def _normalize_search_result(raw: dict, *, category_hint: str = "") -> dict:
         "published_at": "",                              # 搜索结果无时间
         "source_url": link,
         "source_name": source_name,
-        "source_category_hint": category_hint,
+        "source_category_hint": (section_hints or [""])[0] if section_hints else "",
+        "source_section_hints": section_hints or [],
         "source_type": "search",
     }
 
@@ -256,39 +330,50 @@ def build_global_candidates(*, config: dict, logger) -> list[dict]:
     只做工程清洗，不做板块判断。
     """
     all_candidates: list[dict] = []
-    feeds_config = config.get("feeds", {})
+    rss_sources = _get_rss_sources(config)
 
-    for category, feed_data in feeds_config.items():
-        rss_urls = feed_data.get("rss", [])
-        for raw_url in rss_urls:
-            url = str(raw_url).split("#")[0].strip()
-            if not url:
-                continue
-            try:
-                feed = _parse_feed_url(url)
-                for entry in feed.entries:
-                    # 时间窗过滤：24h 以内
-                    if hasattr(entry, "published_parsed") and entry.published_parsed:
-                        dt = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-                        if datetime.now() - dt > timedelta(hours=24):
-                            continue
+    for source in rss_sources:
+        raw_url = str(source.get("url", "")).strip()
+        url = raw_url.split("#")[0].strip()
+        if not url or not bool(source.get("enabled", True)):
+            continue
+        section_hints = [
+            str(v).strip()
+            for v in source.get("section_hints", []) or []
+            if str(v).strip()
+        ]
+        if not section_hints:
+            section_hints = [
+                str(v).strip()
+                for v in source.get("tags", []) or []
+                if str(v).strip()
+            ]
+        try:
+            feed = _parse_feed_url(url)
+            for entry in feed.entries:
+                # 时间窗过滤：24h 以内
+                if hasattr(entry, "published_parsed") and entry.published_parsed:
+                    dt = datetime.fromtimestamp(time.mktime(entry.published_parsed))
+                    if datetime.now() - dt > timedelta(hours=24):
+                        continue
 
-                    summary = _extract_entry_summary(entry)
-                    candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, entry.link or entry.title))
+                summary = _extract_entry_summary(entry)
+                candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, entry.link or entry.title))
 
-                    all_candidates.append({
-                        "id": candidate_id,
-                        "title": f"[RSS] {entry.title}",
-                        "link": entry.link,
-                        "summary": summary,
-                        "published_at": getattr(entry, "published", ""),
-                        "source_url": entry.link,
-                        "source_name": getattr(entry, "author_detail", {}).get("name", url),
-                        "source_category_hint": category,
-                    })
-                logger.info(f"✅ 全局抓取 [{category}] [{url}] — {len(feed.entries)} 条")
-            except Exception as e:
-                logger.warning(f"⚠️ 全局抓取失败 [{url}]: {e}")
+                all_candidates.append({
+                    "id": candidate_id,
+                    "title": f"[RSS] {entry.title}",
+                    "link": entry.link,
+                    "summary": summary,
+                    "published_at": getattr(entry, "published", ""),
+                    "source_url": entry.link,
+                    "source_name": getattr(entry, "author_detail", {}).get("name", url),
+                    "source_category_hint": section_hints[0] if section_hints else "",
+                    "source_section_hints": section_hints,
+                })
+            logger.info(f"✅ 全局抓取 [{source.get('id', url)}] [{url}] — {len(feed.entries)} 条")
+        except Exception as e:
+            logger.warning(f"⚠️ 全局抓取失败 [{url}]: {e}")
 
     # 搜索补充（并行）
     search_candidates = search_global_candidates(config=config, logger=logger)
@@ -599,7 +684,7 @@ def _normalize_global_items(items: list[dict], *, selection_settings: dict[str, 
     for item in items:
         if not isinstance(item, dict):
             continue
-        url = str(item.get("link", "")).strip()
+        url = _normalize_result_url(item.get("link", ""))
         if not url or url in seen_urls:
             continue
         title = _truncate_text(item.get("title", ""), limit=title_max_len)
@@ -619,9 +704,9 @@ def _normalize_global_items(items: list[dict], *, selection_settings: dict[str, 
 
 def _build_publication_scope_summary(config: dict) -> str:
     """从 config 构建刊物整体栏目定位摘要，注入全局初筛。"""
-    feeds = config.get("feeds", {})
+    sections = _get_sections_config(config)
     lines = []
-    for category, feed_data in feeds.items():
+    for category, feed_data in sections.items():
         prompt = feed_data.get("prompt", "")
         lines.append(f"【{category}】{prompt}")
     return "\n".join(lines)
@@ -647,7 +732,7 @@ def assign_candidates_to_categories(
     """
     editorial_config = (config.get("ai", {}) or {}).get("editorial_pipeline", {})
     allow_multi = editorial_config.get("allow_multi_assign", False)
-    feeds = config.get("feeds", {})
+    feeds = _get_sections_config(config)
 
     if not screened_candidates:
         return {
@@ -786,7 +871,7 @@ def _assign_batch_once(
 
     for assignment in assignments_raw:
         idx = assignment.get("candidate_index", 0) - 1
-        cat = assignment.get("assigned_category", "")
+        cat = _resolve_category_name(assignment.get("assigned_category", ""), category_list)
         if 0 <= idx < len(candidates) and cat in result_map:
             candidate = dict(candidates[idx])
             candidate["assignment_reason"] = assignment.get("reason", "")
@@ -830,7 +915,7 @@ def select_for_category(
     """板块最终精选（复用 run_prompt_debug）。"""
     from .smart_brief_runner import run_prompt_debug
 
-    feed_data = config.get("feeds", {}).get(category_name, {})
+    feed_data = _get_sections_config(config).get(category_name, {})
     category_prompt = feed_data.get("prompt", "")
 
     # 转换为 run_prompt_debug 期望的格式
@@ -909,7 +994,7 @@ def run_editorial_pipeline(*, config: dict, logger) -> dict:
     category_results = {}
     final_blocks = []
 
-    for category in config.get("feeds", {}).keys():
+    for category in _get_sections_config(config).keys():
         cat_candidates = assignment_result["category_candidate_map"].get(category, [])
         if not cat_candidates:
             logger.info(f"  🈳 【{category}】无候选，跳过")

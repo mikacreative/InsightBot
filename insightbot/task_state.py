@@ -8,8 +8,8 @@ from .paths import task_state_file_path
 
 def build_task_revision(runtime_config: dict[str, Any]) -> str:
     tracked = {
-        "feeds": runtime_config.get("feeds", {}),
-        "search": runtime_config.get("search", {}),
+        "sources": runtime_config.get("sources", {}),
+        "sections": runtime_config.get("sections", {}),
         "settings": runtime_config.get("settings", {}),
         "ai": {
             "system_prompt": (runtime_config.get("ai", {}) or {}).get("system_prompt", ""),
