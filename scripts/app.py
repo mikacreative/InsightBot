@@ -9,10 +9,14 @@ from datetime import datetime
 import streamlit as st
 from insightbot.channels import init_channels, test_channel_config, validate_channel_definition
 from insightbot.config import (
+    derive_feeds_from_sources_and_sections,
+    derive_sections_from_feeds,
+    derive_sources_from_feeds_and_search,
     load_channels,
     load_runtime_config,
     load_tasks,
     load_tasks_config,
+    normalize_task_definition,
     save_channels,
     save_tasks,
 )
@@ -57,12 +61,53 @@ from insightbot.editorial_pipeline import (
 
 def _normalize_editable_search_query(query):
     if isinstance(query, dict):
+        section_hints = query.get("section_hints")
+        if isinstance(section_hints, list) and section_hints:
+            category_hint = str(section_hints[0])
+        else:
+            category_hint = str(query.get("category_hint", ""))
         return {
             "keywords": str(query.get("keywords", "")),
-            "category_hint": str(query.get("category_hint", "")),
+            "category_hint": category_hint,
             "max_results": int(query.get("max_results", 10) or 10),
         }
     return {"keywords": str(query or ""), "category_hint": "", "max_results": 10}
+
+
+def _get_task_sources(task_def: dict | None) -> dict:
+    normalized = normalize_task_definition(task_def or {})
+    return deepcopy(normalized.get("sources", {}))
+
+
+def _get_task_sections(task_def: dict | None) -> dict:
+    normalized = normalize_task_definition(task_def or {})
+    return deepcopy(normalized.get("sections", {}))
+
+
+def _get_task_feeds_view(task_def: dict | None) -> dict:
+    normalized = normalize_task_definition(task_def or {})
+    return derive_feeds_from_sources_and_sections(
+        normalized.get("sources", {}),
+        normalized.get("sections", {}),
+    )
+
+
+def _get_task_search_config(task_def: dict | None) -> dict:
+    return deepcopy(_get_task_sources(task_def).get("search", {}))
+
+
+def _apply_task_editor_payload(
+    task_def: dict,
+    *,
+    feeds_editor: dict,
+    search_config: dict,
+) -> dict:
+    updated = deepcopy(task_def)
+    updated.pop("feeds", None)
+    updated.pop("search", None)
+    updated["sources"] = derive_sources_from_feeds_and_search(feeds_editor, search_config)
+    updated["sections"] = derive_sections_from_feeds(feeds_editor)
+    return normalize_task_definition(updated)
 
 
 try:
@@ -729,7 +774,7 @@ def main() -> None:
     tasks_data = get_tasks_data()
     selected_task_id, selected_task = get_selected_task(tasks_data)
     selected_task_runtime_config = build_task_runtime_config(selected_task_id)
-    selected_task_feeds = deepcopy(selected_task.get("feeds", {})) if selected_task else {}
+    selected_task_feeds = deepcopy(selected_task_runtime_config.get("feeds", {})) if selected_task else {}
     selected_task_categories = list(selected_task_feeds.keys())
     selected_task_state = load_task_state(selected_task_id, bot_dir) if selected_task_id else {}
     if selected_task_id:
@@ -841,8 +886,8 @@ def main() -> None:
                         "name": quick_new_task_name or quick_new_task_id,
                         "enabled": False,
                         "pipeline": quick_new_task_pipeline,
-                        "sources": deepcopy(get_task_sources(selected_task)),
-                        "sections": deepcopy(get_task_sections(selected_task)),
+                        "sources": deepcopy(_get_task_sources(selected_task)),
+                        "sections": deepcopy(_get_task_sections(selected_task)),
                         "pipeline_config": deepcopy(get_editorial_defaults()),
                         "channels": deepcopy((selected_task or {}).get("channels", [])),
                         "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
@@ -902,6 +947,7 @@ def main() -> None:
         latest_success_record,
         selected_task_state,
     )
+    active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
 
     if product_mode == "Signal Desk":
         workspace_rooms, workspace_signals, workspace_saved, workspace_briefs = st.tabs([
@@ -1045,7 +1091,7 @@ def main() -> None:
             )
 
             st.markdown("**内容板块与 RSS**")
-            feeds_editor = deepcopy(task_def.get("feeds", {}))
+            feeds_editor = _get_task_feeds_view(task_def)
             category_to_delete = None
             for category, feed_data in feeds_editor.items():
                 with st.expander(f"📂 {category}", expanded=False):
@@ -1082,7 +1128,11 @@ def main() -> None:
 
             if category_to_delete:
                 feeds_editor.pop(category_to_delete, None)
-                task_def["feeds"] = feeds_editor
+                task_def = _apply_task_editor_payload(
+                    task_def,
+                    feeds_editor=feeds_editor,
+                    search_config=_get_task_search_config(task_def),
+                )
                 save_task_definition(selected_task_id, task_def)
                 st.success(f"已删除板块：{category_to_delete}")
                 st.rerun()
@@ -1101,14 +1151,18 @@ def main() -> None:
                             new_category_name.strip(),
                             {"rss": [], "keywords": [], "prompt": ""},
                         )
-                        task_def["feeds"] = feeds_editor
+                        task_def = _apply_task_editor_payload(
+                            task_def,
+                            feeds_editor=feeds_editor,
+                            search_config=_get_task_search_config(task_def),
+                        )
                         save_task_definition(selected_task_id, task_def)
                         st.success(f"已添加板块：{new_category_name.strip()}")
                         st.rerun()
 
             st.divider()
             st.markdown("**搜索补充**")
-            search_config = deepcopy(task_def.get("search", {}))
+            search_config = _get_task_search_config(task_def)
             search_enabled = st.toggle(
                 "启用搜索补充",
                 value=search_config.get("enabled", False),
@@ -1330,13 +1384,16 @@ def main() -> None:
                     task_def["enabled"] = new_enabled
                     task_def["pipeline"] = new_pipeline
                     task_def["channels"] = selected_channels
-                    task_def["feeds"] = feeds_editor
                     task_def["pipeline_config"] = pipeline_config
-                    task_def["search"] = {
-                        "enabled": search_enabled,
-                        "provider": search_provider,
-                        "queries": [q for q in search_queries if q.get("keywords", "").strip()],
-                    }
+                    task_def = _apply_task_editor_payload(
+                        task_def,
+                        feeds_editor=feeds_editor,
+                        search_config={
+                            "enabled": search_enabled,
+                            "provider": search_provider,
+                            "queries": [q for q in search_queries if q.get("keywords", "").strip()],
+                        },
+                    )
                     task_def["schedule"] = {"hour": int(new_hour), "minute": int(new_min)}
                     if selected_day_value is not None:
                         task_def["schedule"]["day_of_week"] = selected_day_value
@@ -1990,7 +2047,6 @@ def main() -> None:
     with tab6:
         st.subheader("🕵️‍♂️ 深度运行日志追踪")
         st.caption("日志已开启企业级轮转模式（自动保留 30 天，每日切割）。默认优先展示当前任务相关日志，便于快速排查。")
-        active_task_name = selected_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
         st.markdown(
             f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">当前任务: {active_task_name}</span>'
             f'<span class="ib-chip ib-chip-neutral">任务 ID: {selected_task_id or "未选择"}</span></div>',
