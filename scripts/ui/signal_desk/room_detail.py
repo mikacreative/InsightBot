@@ -13,7 +13,7 @@ from insightbot.signal_desk.feedback import (
 )
 from insightbot.signal_desk.health import build_pattern_health_summary
 from insightbot.signal_desk.models import BriefingRoom, SignalItem
-from insightbot.signal_desk.signals import signal_items_from_run_result
+from insightbot.signal_desk.signals import signal_items_from_run_result, summarize_signal_output_quality
 from insightbot.task_runner import run_task
 
 FEEDBACK_ACTION_LABELS = {
@@ -150,6 +150,13 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
         run_id=result.get("_signal_desk_run_id") or result.get("task_id") or room.compiled_task_id,
         run_result=result,
     )
+    output_quality = summarize_signal_output_quality(signals)
+    st.caption(
+        f"Output quality: {output_quality['status']} | "
+        f"Structured: {output_quality['structured_count']} | "
+        f"Fallback: {output_quality['fallback_count']} | "
+        f"Missing source: {output_quality['missing_source_count']}"
+    )
     st.markdown("#### Signal cards")
     if not signals:
         st.warning("No signal cards could be extracted from this run result.")
@@ -176,6 +183,8 @@ def render_room_detail(room: BriefingRoom, bot_dir: str, load_task_config) -> No
             f"Fallback signals: **{health_summary['fallback_signal_count']}**"
         )
         for recommendation in health_summary["recommendations"]:
+            st.markdown(f"- {recommendation}")
+        for recommendation in output_quality["recommendations"]:
             st.markdown(f"- {recommendation}")
 
     with st.expander("Final markdown", expanded=False):

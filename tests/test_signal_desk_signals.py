@@ -1,4 +1,7 @@
-from insightbot.signal_desk.signals import signal_items_from_run_result
+from insightbot.signal_desk.signals import (
+    signal_items_from_run_result,
+    summarize_signal_output_quality,
+)
 
 
 def test_signal_items_from_structured_shortlist():
@@ -117,6 +120,40 @@ def test_signal_items_preserve_nested_source_metadata():
     assert items[0].source["title"] == "Campaign Source"
     assert items[0].source["url"] == "https://example.com/creator-commerce"
     assert items[0].source["published_at"] == "2026-05-20"
+
+
+def test_summarize_signal_output_quality_counts_fallback_and_missing_sources():
+    structured = signal_items_from_run_result(
+        "room_quality",
+        "run_quality",
+        {
+            "stage_results": {
+                "shortlist": [
+                    {"title": "Signal with source", "url": "https://example.com/source"},
+                    {"title": "Signal without source"},
+                ]
+            }
+        },
+    )
+    fallback = signal_items_from_run_result(
+        "room_quality",
+        "run_fallback",
+        {"stage_results": {}, "final_markdown": "## Fallback signal"},
+    )
+
+    summary = summarize_signal_output_quality(structured + fallback)
+
+    assert summary == {
+        "signal_count": 3,
+        "fallback_count": 1,
+        "missing_source_count": 2,
+        "structured_count": 2,
+        "status": "needs_attention",
+        "recommendations": [
+            "Review fallback cards before saving; structured shortlist was incomplete.",
+            "Add or repair source metadata for signals without source URLs.",
+        ],
+    }
 
 
 def test_signal_items_fallback_to_final_markdown():

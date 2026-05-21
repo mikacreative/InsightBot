@@ -166,3 +166,37 @@ def signal_items_from_run_result(
     if fallback_signal is None:
         return []
     return [fallback_signal]
+
+
+def summarize_signal_output_quality(signals: list[SignalItem]) -> dict[str, Any]:
+    fallback_count = sum(
+        1
+        for signal in signals
+        if signal.confidence.lower() == "low"
+        and ("fallback" in signal.save_tags or "manual_review" in signal.judgement_lens)
+    )
+    missing_source_count = sum(1 for signal in signals if not signal.source.get("url"))
+    structured_count = max(len(signals) - fallback_count, 0)
+    recommendations: list[str] = []
+    if fallback_count:
+        recommendations.append("Review fallback cards before saving; structured shortlist was incomplete.")
+    if missing_source_count:
+        recommendations.append("Add or repair source metadata for signals without source URLs.")
+    if not signals:
+        recommendations.append("Refresh the room or inspect Control Center diagnostics; no signal cards were produced.")
+
+    if not signals:
+        status = "no_data"
+    elif fallback_count or missing_source_count:
+        status = "needs_attention"
+    else:
+        status = "healthy"
+
+    return {
+        "signal_count": len(signals),
+        "fallback_count": fallback_count,
+        "missing_source_count": missing_source_count,
+        "structured_count": structured_count,
+        "status": status,
+        "recommendations": recommendations,
+    }
