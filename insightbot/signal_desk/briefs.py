@@ -139,6 +139,68 @@ def _signal_payload(item: dict) -> dict:
     return signal if isinstance(signal, dict) else {}
 
 
+def _clean_text(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
+
+
+def _signal_title(signal: dict) -> str:
+    return _clean_text(signal.get("what_happened")) or _clean_text(signal.get("title")) or "Untitled signal"
+
+
+def _source_payload(signal: dict) -> dict:
+    source = signal.get("source", {})
+    return source if isinstance(source, dict) else {}
+
+
+def _source_label(signal: dict) -> str:
+    source = _source_payload(signal)
+    return _clean_text(source.get("title")) or _clean_text(source.get("url")) or "Source not recorded"
+
+
+def _append_unique_bullet(lines: list[str], seen: set[str], text: str) -> None:
+    bullet = _clean_text(text)
+    if not bullet or bullet in seen:
+        return
+    seen.add(bullet)
+    lines.append(f"- {bullet}")
+
+
+def _section_bullet(section: str, signal: dict) -> str:
+    title = _signal_title(signal)
+    why_it_matters = _clean_text(signal.get("why_it_matters"))
+    client_relevance = _clean_text(signal.get("client_relevance"))
+    suggested_action = _clean_text(signal.get("suggested_action"))
+    source_label = _source_label(signal)
+
+    if section == "Executive takeaways":
+        if not _clean_text(signal.get("what_happened")) and not why_it_matters:
+            return ""
+        return f"{title}: {why_it_matters}" if why_it_matters else title
+    if section == "Client conversation starters":
+        relevance = client_relevance or why_it_matters or "Review potential client relevance with the account lead."
+        return f"{title}: {relevance}"
+    if section == "Recommended next actions":
+        return suggested_action or f"Review with the account or strategy lead: {title}"
+    if section == "Pitch angles":
+        action = suggested_action or "Explore as a pitch angle"
+        return f"Angle: {action} Build from {title}."
+    if section == "Proof points":
+        evidence = why_it_matters or "No implication recorded"
+        return f"{title}: {evidence} Evidence source: {source_label}."
+    if section == "Inspiration hooks":
+        hook = client_relevance or why_it_matters or "Review for reusable creative or strategic inspiration."
+        return f"Inspiration hook from {title}: {hook}"
+    if section == "Reusable references":
+        return f"Reuse reference: {title}. Source: {source_label}."
+    if section == "Trend observations":
+        observation = why_it_matters or "Track whether this develops into a broader market pattern."
+        return f"Observation: {title}. {observation}"
+    if section == "Implications":
+        implication = client_relevance or why_it_matters or "Review implications with the account or strategy lead."
+        return f"Implication from {title}: {implication}"
+    return ""
+
+
 def _render_brief_markdown(title: str, saved_signals: list[dict], output_intent: str) -> str:
     intent_label = BRIEF_INTENT_LABELS.get(output_intent, "Signal Desk Brief")
     sections = BRIEF_INTENT_SECTIONS.get(output_intent, BRIEF_INTENT_SECTIONS["client_conversation"])
@@ -152,31 +214,34 @@ def _render_brief_markdown(title: str, saved_signals: list[dict], output_intent:
         "",
         f"## {sections[0]}",
     ]
+    seen: set[str] = set()
     for signal in signals:
-        lines.append(f"- {signal.get('what_happened', '')}: {signal.get('why_it_matters', '')}")
+        _append_unique_bullet(lines, seen, _section_bullet(sections[0], signal))
 
     for section in sections[1:-1]:
         lines.extend(["", f"## {section}"])
+        seen = set()
         for signal in signals:
-            action = signal.get("suggested_action") or "Review with the account or strategy lead."
-            relevance = signal.get("client_relevance") or signal.get("why_it_matters", "")
-            lines.append(f"- {action} {relevance}".strip())
+            _append_unique_bullet(lines, seen, _section_bullet(section, signal))
 
     lines.extend(["", f"## {sections[-1]}"])
     for index, signal in enumerate(signals, start=1):
-        source = signal.get("source", {})
-        if not isinstance(source, dict):
-            source = {}
-        source_label = source.get("title") or source.get("url") or "Source not recorded"
-        lines.extend(
-            [
-                "",
-                f"### {index}. {signal.get('what_happened', '')}",
-                f"- Why it matters: {signal.get('why_it_matters', '')}",
-                f"- Client relevance: {signal.get('client_relevance', '')}",
-                f"- Suggested action: {signal.get('suggested_action', '')}",
-                f"- Source: {source_label}",
-                f"- URL: {source.get('url', '')}",
-            ]
-        )
+        source = _source_payload(signal)
+        detail_lines = [
+            "",
+            f"### {index}. {_signal_title(signal)}",
+        ]
+        for label, value in [
+            ("Why it matters", signal.get("why_it_matters")),
+            ("Client relevance", signal.get("client_relevance")),
+            ("Suggested action", signal.get("suggested_action")),
+        ]:
+            text = _clean_text(value)
+            if text:
+                detail_lines.append(f"- {label}: {text}")
+        detail_lines.append(f"- Source: {_source_label(signal)}")
+        url = _clean_text(source.get("url"))
+        if url:
+            detail_lines.append(f"- URL: {url}")
+        lines.extend(detail_lines)
     return "\n".join(lines).strip() + "\n"

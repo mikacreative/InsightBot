@@ -38,6 +38,18 @@ def make_saved_signal(
     }
 
 
+def section_bullets(markdown: str, heading: str) -> list[str]:
+    lines = markdown.splitlines()
+    start = lines.index(f"## {heading}") + 1
+    bullets = []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        if line.startswith("- "):
+            bullets.append(line)
+    return bullets
+
+
 def test_signal_desk_briefs_file_path_uses_default_and_env_override(tmp_path, monkeypatch):
     assert signal_desk_briefs_file_path(str(tmp_path)) == str(tmp_path / "data" / "signal_desk" / "briefs.jsonl")
 
@@ -119,6 +131,41 @@ def test_proposal_angle_brief_uses_pitch_sections(tmp_path):
     assert "# Beauty Client Radar - Proposal Angle Brief" in artifact.markdown
     assert "## Pitch angles" in artifact.markdown
     assert "## Proof points" in artifact.markdown
+
+
+def test_proposal_angle_pitch_and_proof_bullets_are_distinct(tmp_path):
+    artifact = create_brief_from_saved_signals(
+        make_room(),
+        [make_saved_signal()],
+        output_intent="proposal_angle",
+        bot_dir=str(tmp_path),
+    )
+
+    pitch_bullets = section_bullets(artifact.markdown, "Pitch angles")
+    proof_bullets = section_bullets(artifact.markdown, "Proof points")
+
+    assert pitch_bullets
+    assert proof_bullets
+    assert pitch_bullets != proof_bullets
+
+
+def test_sparse_saved_signal_payloads_do_not_render_empty_rows(tmp_path):
+    room = make_room()
+
+    artifact = create_brief_from_saved_signals(
+        room,
+        [
+            {"id": "saved_string", "room_id": room.id, "signal": "not a dict"},
+            {"id": "saved_minimal", "room_id": room.id, "signal": {"what_happened": "Minimal signal title"}},
+        ],
+        output_intent="client_conversation",
+        bot_dir=str(tmp_path),
+    )
+
+    assert "- :" not in artifact.markdown
+    assert "Untitled signal" in artifact.markdown
+    assert "Minimal signal title" in artifact.markdown
+    assert "- URL: " not in artifact.markdown
 
 
 def test_list_briefs_skips_malformed_jsonl(tmp_path):
