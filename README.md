@@ -44,7 +44,8 @@ Signal Desk 是面向营销传播团队的动态情报工作台；InsightBot 是
 - **Agent Access routing**：把自然语言或结构化参数解析成 `pattern_id`、`time_window`、`output_intent` 和 `result_mode`；默认返回精选 signals，只有明确请求才进入 raw feed 或 brief output。
 - **Alpha 完整路径**：用户可以从 room refresh 得到 selected signal cards，保存为 work assets，再生成 brief stub，并查看 pattern health summary。
 - **反馈上下文**：反馈记录已带 `pattern_id` 和 room intent context，后续可用于 pattern tuning。
-- **下一阶段重点**：强化 structured signal card output contract，把 saved signals 生成的 brief 从 stub 推进到 work-ready internal artifact。
+- **输出合同强化**：Signal cards 优先来自 structured shortlist / section assignments，并显示 fallback 与 source metadata 质量。
+- **Work-ready briefs**：Saved signals 可生成按 client conversation / proposal angle / inspiration / trend observation 区分的 brief markdown。
 - **自动迁移与运行底座**：仍支持旧配置迁移、任务调度、channels 和 CLI 运行。
 
 ### 产品入口

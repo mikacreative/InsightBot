@@ -17,7 +17,7 @@ The current strategic choice is **Human-first / Agent-ready / Autonomy-later**. 
 ## Current Branch And Scope
 
 - Main working branch for this phase: `codex/signal-desk-prd-mvp`.
-- Current MVP focus: Signal Desk Alpha output hardening: structured signal card contract, work-ready briefs, output quality review, and clean handoff from room refresh to saved work assets.
+- Current MVP focus: Signal Desk Alpha output hardening is implemented locally: structured signal card contract, work-ready briefs, output quality review, and clean handoff from room refresh to saved work assets.
 - Keep existing `tasks.json`, scheduler, channels, and task runner as the execution base unless a task explicitly asks to replace them.
 
 ## Current Production Shape
@@ -49,7 +49,7 @@ The current strategic choice is **Human-first / Agent-ready / Autonomy-later**. 
 - `docs/superpowers/plans/2026-05-04-signal-desk-product-shell-pattern-contracts.md`: implementation plan for product shell and pattern contracts.
 - `docs/superpowers/plans/2026-05-11-signal-desk-agent-access-routing.md`: implementation plan for Agent Access routing.
 - `docs/superpowers/plans/2026-05-11-signal-desk-alpha-vertical-slice.md`: implementation plan for the Alpha end-to-end path.
-- `docs/superpowers/plans/2026-05-21-signal-desk-output-contract-brief-quality.md`: next implementation plan for output contract hardening and work-ready briefs.
+- `docs/superpowers/plans/2026-05-21-signal-desk-output-contract-brief-quality.md`: implementation plan and review trail for output contract hardening and work-ready briefs.
 
 ## Verification
 

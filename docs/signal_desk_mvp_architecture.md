@@ -761,6 +761,18 @@ Deliverables:
 - map `BriefingResult.shortlist` and `section_assignments` into signal cards
 - tests for standard output fields
 
+Implemented Slice 5 path:
+
+```text
+Run result
+  -> shortlist / section assignment normalization
+  -> stable signal card contract
+  -> output quality summary
+  -> work-ready brief markdown
+```
+
+The product layer now prefers structured output and only falls back to markdown extraction when structured cards are unavailable.
+
 ## 13. Verification Plan
 
 Doc-only verification:
