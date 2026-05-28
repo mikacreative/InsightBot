@@ -1,4 +1,3 @@
-import json
 import re
 import time
 from datetime import datetime, timedelta
@@ -9,6 +8,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 import feedparser
 import requests
 
+from .ai_json import extract_json_object
 from .ai import chat_completion
 
 # ---------- constants ----------
@@ -284,15 +284,19 @@ def fetch_recent_candidates(*, feed_data: dict, logger) -> List[dict]:
 def _validate_and_repair(raw: str, *, selection_settings: dict[str, int] | None = None) -> List[dict]:
     selection_settings = selection_settings or DEFAULT_SELECTION_SETTINGS
     try:
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        text = match.group(1) if match else raw.strip()
-        data = json.loads(text)
+        data = extract_json_object(raw)
+        if data is None:
+            return []
         items = data.get("items", [])
         if not isinstance(items, list):
             return []
         return _normalize_ai_items(items, selection_settings=selection_settings)
     except Exception:
         return []
+
+
+def _is_parseable_json_object(raw: str) -> bool:
+    return extract_json_object(raw) is not None
 
 
 def _call_selection_once(
@@ -338,6 +342,14 @@ def _call_selection_once(
             batch_record["raw_response"] = raw
             batch_record["parsed_items"] = items
             batch_record["status"] = "success" if items else "empty"
+            if not items and not _is_parseable_json_object(raw):
+                batch_record["status"] = "invalid_json"
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(
+                        f"⚠️ AI 返回无法解析的 JSON，重试 [{category_name} / {stage_label} #{batch_no}]"
+                    )
+                    time.sleep(RETRY_DELAY_S)
+                    continue
             return {
                 "ok": True,
                 "record": batch_record,

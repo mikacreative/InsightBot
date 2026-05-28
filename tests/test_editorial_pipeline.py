@@ -24,8 +24,10 @@ sys.modules['requests'] = _mock_requests
 
 from insightbot.editorial_pipeline import (
     _build_publication_scope_summary,
+    _call_global_screen_once,
     _normalize_search_result,
     _normalize_global_items,
+    _parse_assignment_response,
     _validate_global_screen,
     assign_candidates_to_categories,
     build_global_candidates,
@@ -360,6 +362,43 @@ class TestValidateGlobalScreen:
         })
         assert items == []
 
+    def test_extracts_json_from_surrounding_text(self):
+        raw = '结果如下：{"items":[{"title":"标题","link":"https://example.com/1","summary":"摘要","priority_score":0.8}]}'
+        items = _validate_global_screen(raw, selection_settings={
+            "max_selected_items": 10, "title_max_len": 50, "summary_max_len": 60
+        })
+        assert len(items) == 1
+        assert items[0]["link"] == "https://example.com/1"
+
+    def test_retries_invalid_json_before_returning_items(self):
+        raw = json.dumps({
+            "items": [
+                {
+                    "title": "标题",
+                    "link": "https://example.com/1",
+                    "summary": "摘要",
+                    "priority_score": 0.8,
+                    "editorial_note": "理由",
+                }
+            ]
+        }, ensure_ascii=False)
+        with patch("insightbot.editorial_pipeline.chat_completion", side_effect=["not json", raw]) as mock_ai:
+            with patch("insightbot.editorial_pipeline.time.sleep"):
+                result = _call_global_screen_once(
+                    config=_editorial_config(),
+                    news_list=[{"title": "新闻", "link": "https://example.com/1", "summary": "摘要"}],
+                    system_prompt="只输出JSON",
+                    selection_settings={
+                        "max_selected_items": 10,
+                        "title_max_len": 50,
+                        "summary_max_len": 60,
+                    },
+                    stage_label="global_full",
+                    batch_no=1,
+                )
+        assert mock_ai.call_count == 2
+        assert result["items"][0]["link"] == "https://example.com/1"
+
 
 class TestNormalizeGlobalItems:
     """测试全局初筛结果标准化"""
@@ -449,6 +488,13 @@ class TestAssignCandidatesToCategories:
 
         assert len(result["unassigned"]) == 1
         assert result["unassigned"][0]["link"] == "https://example.com/irrelevant"
+
+    def test_assignment_parser_extracts_json_from_surrounding_text(self):
+        raw = '输出：{"assignments":[{"candidate_index":1,"assigned_category":"💡 营销行业","reason":"匹配"}]}'
+        assignments = _parse_assignment_response(raw)
+        assert assignments == [
+            {"candidate_index": 1, "assigned_category": "💡 营销行业", "reason": "匹配"}
+        ]
 
 
 class TestBuildPublicationScopeSummary:

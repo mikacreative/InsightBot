@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from insightbot.smart_brief_runner import (
+    _call_selection_once,
     _render_markdown,
     _ai_process_category,
     _validate_and_repair,
@@ -57,6 +58,11 @@ class TestJsonRepair:
 
     def test_returns_empty_for_invalid_json(self):
         assert _validate_and_repair("not json") == []
+
+    def test_extracts_json_from_surrounding_text(self):
+        raw = '这里是结果：{"items":[{"title":"标题","url":"https://example.com/1","summary":"摘要"}]}'
+        items = _validate_and_repair(raw)
+        assert items == [{"title": "标题", "url": "https://example.com/1", "summary": "摘要"}]
 
     def test_filters_invalid_urls(self):
         raw = json.dumps(
@@ -230,6 +236,33 @@ class TestPromptDebug:
         assert result["status"] == "success"
         assert "## 营销板块" in result["preview_markdown"]
         assert "### [营销新闻标题](https://example.com/1)" in result["preview_markdown"]
+
+    def test_retries_invalid_json_before_accepting_empty(self, silent_logger):
+        news_list = [{"title": "营销新闻", "link": "https://example.com/1"}]
+        valid = json.dumps(
+            {"items": [{"title": "营销新闻标题", "url": "https://example.com/1", "summary": "摘要"}]},
+            ensure_ascii=False,
+        )
+        with patch("insightbot.smart_brief_runner.chat_completion", side_effect=["not json", valid]) as mock_ai:
+            with patch("insightbot.smart_brief_runner.time.sleep"):
+                result = _call_selection_once(
+                    config=self._base_config(),
+                    category_name="营销板块",
+                    news_list=news_list,
+                    category_prompt="",
+                    logger=silent_logger,
+                    selection_settings={
+                        "max_selected_items": 5,
+                        "title_max_len": 50,
+                        "summary_max_len": 30,
+                        "full_context_threshold_chars": 18000,
+                        "batch_size": 15,
+                    },
+                    stage_label="full",
+                    batch_no=1,
+                )
+        assert mock_ai.call_count == 2
+        assert result["items"][0]["title"] == "营销新闻标题"
 
     def test_preview_markdown_encodes_unsafe_url_chars(self):
         markdown = _render_markdown(
