@@ -7,7 +7,6 @@ Stage 3: assign_candidates_to_categories — 单归属板块分配
 Stage 4: select_for_category       — 板块最终精选与改写（复用现有逻辑）
 """
 
-import json
 import logging
 from datetime import datetime
 
@@ -23,6 +22,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .ai import chat_completion
+from .ai_json import extract_json_object
 from .smart_brief_runner import (
     _build_system_prompt,
     _call_selection_once,
@@ -437,9 +437,9 @@ def _build_global_system_prompt(
 def _validate_global_screen(raw: str, *, selection_settings: dict[str, int]) -> list[dict]:
     """解析全局初筛的 AI 返回，提取 priority_score + editorial_note。"""
     try:
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        text = match.group(1) if match else raw.strip()
-        data = json.loads(text)
+        data = extract_json_object(raw)
+        if data is None:
+            return []
         items = data.get("items", [])
         if not isinstance(items, list):
             return []
@@ -473,6 +473,10 @@ def _validate_global_screen(raw: str, *, selection_settings: dict[str, int]) -> 
         return normalized
     except Exception:
         return []
+
+
+def _is_parseable_json_object(raw: str) -> bool:
+    return extract_json_object(raw) is not None
 
 
 def screen_global_candidates(
@@ -648,6 +652,11 @@ def _call_global_screen_once(
             batch_record["raw_response"] = raw
             batch_record["parsed_items"] = items
             batch_record["status"] = "success" if items else "empty"
+            if not items and not _is_parseable_json_object(raw):
+                batch_record["status"] = "invalid_json"
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY_S)
+                    continue
             return {
                 "ok": True,
                 "record": batch_record,
@@ -852,8 +861,13 @@ def _assign_batch_once(
                 json_mode=True,
             )
             batch_record["raw_response"] = raw
-            batch_record["status"] = "success"
             assignments_raw = _parse_assignment_response(raw)
+            batch_record["status"] = "success"
+            if not assignments_raw and not _is_parseable_json_object(raw):
+                batch_record["status"] = "invalid_json"
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY_S)
+                    continue
             break
         except Exception as e:
             batch_record["status"] = "error"
@@ -890,9 +904,9 @@ def _assign_batch_once(
 def _parse_assignment_response(raw: str) -> list[dict]:
     """解析板块分配 AI 返回。"""
     try:
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        text = match.group(1) if match else raw.strip()
-        data = json.loads(text)
+        data = extract_json_object(raw)
+        if data is None:
+            return []
         items = data.get("assignments", [])
         if isinstance(items, list):
             return items
