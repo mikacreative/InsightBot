@@ -734,12 +734,12 @@ class TestSelectForCategory:
         assert len(result["selected_items"]) == 1
         assert result["selected_items"][0]["title"] == "上海市网信办通报13品牌违规收集个人信息"
 
-    def test_digital_final_gate_requires_platform_or_ai_signal(self, silent_logger):
+    def test_digital_final_gate_requires_product_or_ai_signal(self, silent_logger):
         candidates = [
             {
                 "title": "当你没有付费，你可能就是产品本身",
                 "link": "https://example.com/free-product",
-                "summary": "免费商业模式反映用户价值交换。",
+                "summary": "互联网平台免费服务背后用户成为产品，数据与注意力被商业化利用。",
                 "assignment_reason": "平台数据议题",
                 "priority_score": 0.91,
             },
@@ -762,6 +762,27 @@ class TestSelectForCategory:
 
         assert len(result["selected_items"]) == 1
         assert result["selected_items"][0]["title"] == "亚马逊搜索全面 AI 化"
+
+    def test_digital_final_gate_allows_platform_product_changes(self, silent_logger):
+        candidates = [
+            {
+                "title": "小红书买下世界杯版权",
+                "link": "https://example.com/rednote-worldcup",
+                "summary": "小红书通过版权内容拓展平台内容供给。",
+                "priority_score": 0.88,
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 平台内容摘要"):
+            result = select_for_category(
+                config=config,
+                category_name="🤖 数智前沿",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert len(result["selected_items"]) == 1
 
     def test_marketing_final_gate_drops_pure_tech_expo(self, silent_logger):
         candidates = [

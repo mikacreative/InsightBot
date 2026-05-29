@@ -364,12 +364,22 @@ def _category_final_gate_allowed(candidate: dict, category_name: str) -> bool:
         )
         return _contains_any_marker(text, policy_final_markers)
     if "数智" in normalized_category:
-        digital_final_markers = (
-            "ai", "人工智能", "大模型", "算法", "搜索", "电商", "平台", "小红书",
-            "抖音", "亚马逊", "openai", "claude", "agent", "生成", "智能",
-            "数字化", "社交媒体", "内容平台", "rufu", "rufus",
+        digital_strong_markers = (
+            "ai", "人工智能", "大模型", "算法", "搜索", "电商", "亚马逊",
+            "openai", "claude", "agent", "生成", "智能", "数字化",
+            "社交媒体", "内容平台", "rufu", "rufus",
         )
-        return _contains_any_marker(text, digital_final_markers)
+        platform_product_markers = ("小红书", "抖音", "微信", "微博", "快手", "b站")
+        platform_change_markers = (
+            "功能", "机制", "算法", "搜索", "版权", "产品", "工具", "开放",
+            "上线", "更新", "接入", "模型", "流量分发", "推荐",
+        )
+        if _contains_any_marker(text, digital_strong_markers):
+            return True
+        return (
+            _contains_any_marker(text, platform_product_markers)
+            and _contains_any_marker(text, platform_change_markers)
+        )
     if "营销" in normalized_category:
         non_marketing_markers = (
             "具身智能", "机器人", "人工智能计量", "智博会", "产业博览会",
