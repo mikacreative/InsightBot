@@ -5,7 +5,7 @@ test_editorial_pipeline.py — insightbot.editorial_pipeline 核心逻辑测试
   - Stage 1: build_global_candidates — 全量源汇总、链接去重
   - Stage 2: screen_global_candidates — 3x倍率、全量 vs 分片模式
   - Stage 3: assign_candidates_to_categories — 单归属、空板块允许
-  - Stage 4: select_for_category — 复用 run_prompt_debug
+  - Stage 4: select_for_category — 代码生成 Markdown，AI 只改写摘要
   - run_editorial_pipeline — 完整流水线编排、灰度开关
 """
 import json
@@ -28,6 +28,7 @@ from insightbot.editorial_pipeline import (
     _resolve_category_name,
     _normalize_search_result,
     _normalize_global_items,
+    _parse_assignment_lines,
     _parse_assignment_response,
     _validate_global_screen,
     assign_candidates_to_categories,
@@ -371,24 +372,21 @@ class TestValidateGlobalScreen:
         assert len(items) == 1
         assert items[0]["link"] == "https://example.com/1"
 
-    def test_retries_invalid_json_before_returning_items(self):
-        raw = json.dumps({
-            "items": [
-                {
-                    "title": "标题",
-                    "link": "https://example.com/1",
-                    "summary": "摘要",
-                    "priority_score": 0.8,
-                    "editorial_note": "理由",
-                }
-            ]
-        }, ensure_ascii=False)
+    def test_retries_invalid_text_before_returning_items(self):
+        raw = "C001 | 0.80 | 理由"
         with patch("insightbot.editorial_pipeline.chat_completion", side_effect=["not json", raw]) as mock_ai:
             with patch("insightbot.editorial_pipeline.time.sleep"):
                 result = _call_global_screen_once(
                     config=_editorial_config(),
-                    news_list=[{"title": "新闻", "link": "https://example.com/1", "summary": "摘要"}],
-                    system_prompt="只输出JSON",
+                    news_list=[
+                        {
+                            "title": "新闻",
+                            "link": "https://example.com/1",
+                            "summary": "摘要",
+                            "source_section_hints": ["💡 营销行业"],
+                        }
+                    ],
+                    system_prompt="只输出行协议",
                     selection_settings={
                         "max_selected_items": 10,
                         "title_max_len": 50,
@@ -399,6 +397,8 @@ class TestValidateGlobalScreen:
                 )
         assert mock_ai.call_count == 2
         assert result["items"][0]["link"] == "https://example.com/1"
+        assert result["items"][0]["title"] == "新闻"
+        assert result["items"][0]["priority_score"] == 0.8
 
 
 class TestNormalizeGlobalItems:
@@ -501,15 +501,7 @@ class TestAssignCandidatesToCategories:
         ]
         config = _editorial_config()
 
-        raw_response = json.dumps({
-            "assignments": [
-                {
-                    "candidate_index": 1,
-                    "assigned_category": "营销行业",
-                    "reason": "匹配营销案例",
-                }
-            ]
-        }, ensure_ascii=False)
+        raw_response = "C001 | 营销行业 | 匹配营销案例"
 
         with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw_response):
             result = assign_candidates_to_categories(
@@ -520,11 +512,42 @@ class TestAssignCandidatesToCategories:
         assert result["category_candidate_map"]["💡 营销行业"][0]["assignment_reason"] == "匹配营销案例"
         assert result["unassigned"] == []
 
+    def test_assignment_prefers_source_section_hints(self, silent_logger):
+        candidates = [
+            {
+                "title": "AI营销文章",
+                "link": "https://example.com/ai",
+                "summary": "摘要",
+                "source_section_hints": ["🤖 数智前沿"],
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion") as mock_ai:
+            result = assign_candidates_to_categories(
+                config=config, screened_candidates=candidates, logger=silent_logger
+            )
+
+        mock_ai.assert_not_called()
+        assert len(result["category_candidate_map"]["🤖 数智前沿"]) == 1
+        assert result["category_candidate_map"]["🤖 数智前沿"][0]["assignment_reason"] == "source_section_hints"
+
     def test_assignment_parser_extracts_json_from_surrounding_text(self):
         raw = '输出：{"assignments":[{"candidate_index":1,"assigned_category":"💡 营销行业","reason":"匹配"}]}'
         assignments = _parse_assignment_response(raw)
         assert assignments == [
             {"candidate_index": 1, "assigned_category": "💡 营销行业", "reason": "匹配"}
+        ]
+
+    def test_assignment_line_parser_extracts_minimal_contract(self):
+        assignments = _parse_assignment_lines(
+            "C001 | 营销行业 | 匹配\nC002 | 数智前沿 | AI应用",
+            {"C001", "C002"},
+            ["💡 营销行业", "🤖 数智前沿"],
+        )
+        assert assignments == [
+            {"ref": "C001", "assigned_category": "💡 营销行业", "reason": "匹配"},
+            {"ref": "C002", "assigned_category": "🤖 数智前沿", "reason": "AI应用"},
         ]
 
 
@@ -544,10 +567,10 @@ class TestBuildPublicationScopeSummary:
 
 
 class TestSelectForCategory:
-    """测试板块最终精选（复用 run_prompt_debug）"""
+    """测试板块最终输出：代码拥有标题、链接和 Markdown，AI 只改写摘要"""
 
-    def test_converts_candidate_format_for_run_prompt_debug(self, silent_logger):
-        """应该将全局候选格式转换为 run_prompt_debug 期望的格式"""
+    def test_uses_code_owned_title_url_and_ai_summary(self, silent_logger):
+        """标题、链接和 Markdown 应该由代码生成，AI 只提供摘要。"""
         candidates = [
             {
                 "title": "测试标题",
@@ -559,14 +582,7 @@ class TestSelectForCategory:
         ]
         config = _editorial_config()
 
-        mock_result = {
-            "status": "success",
-            "selected_items": [{"title": "标题", "url": "https://example.com/1", "summary": "摘要"}],
-            "preview_markdown": "## 板块\n### [标题](https://example.com/1)",
-        }
-
-        # run_prompt_debug is imported inside select_for_category from .smart_brief_runner
-        with patch("insightbot.smart_brief_runner.run_prompt_debug", return_value=mock_result) as mock_debug:
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 改写后的摘要") as mock_ai:
             result = select_for_category(
                 config=config,
                 category_name="💡 营销行业",
@@ -574,28 +590,47 @@ class TestSelectForCategory:
                 logger=silent_logger,
             )
 
-        mock_debug.assert_called_once()
-        call_kwargs = mock_debug.call_args[1]
-        assert call_kwargs["category_name"] == "💡 营销行业"
-        # 验证格式转换：news_list 应该包含 title, link, summary
-        assert len(call_kwargs["news_list"]) == 1
-        assert call_kwargs["news_list"][0]["title"] == "测试标题"
-        assert call_kwargs["news_list"][0]["link"] == "https://example.com/1"
+        mock_ai.assert_called_once()
+        assert mock_ai.call_args[1]["json_mode"] is False
+        assert result["status"] == "success"
+        assert result["selected_items"] == [
+            {"title": "测试标题", "url": "https://example.com/1", "summary": "改写后的摘要"}
+        ]
+        assert "### [测试标题](https://example.com/1)" in result["preview_markdown"]
 
     def test_returns_empty_when_no_candidates(self, silent_logger):
         """空候选时返回空结果，不崩溃"""
         config = _editorial_config()
-        with patch("insightbot.smart_brief_runner.run_prompt_debug", return_value={
-            "status": "empty_candidates",
-            "selected_items": [],
-        }) as mock_debug:
+        result = select_for_category(
+            config=config,
+            category_name="💡 营销行业",
+            candidates=[],
+            logger=silent_logger,
+        )
+        assert result["status"] == "empty_candidates"
+
+    def test_falls_back_to_original_summary_when_ai_rewrite_fails(self, silent_logger):
+        candidates = [
+            {
+                "title": "测试标题",
+                "link": "https://example.com/1",
+                "summary": "原始摘要内容",
+                "priority_score": 0.8,
+            }
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", side_effect=TimeoutError("timeout")):
             result = select_for_category(
                 config=config,
                 category_name="💡 营销行业",
-                candidates=[],
+                candidates=candidates,
                 logger=silent_logger,
             )
-        assert result["status"] == "empty_candidates"
+
+        assert result["status"] == "success"
+        assert result["selected_items"][0]["summary"] == "原始摘要内容"
+        assert result["batches"][0]["status"] == "error"
 
 
 # ---------- Orchestration: run_editorial_pipeline ----------

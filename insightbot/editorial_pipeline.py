@@ -4,10 +4,9 @@ Editorial Pipeline — 双阶段编辑流水线
 Stage 1: build_global_candidates   — 聚合所有 RSS 候选，形成统一候选池
 Stage 2: screen_global_candidates   — 全局初筛，站在"总编辑"视角做一轮精选
 Stage 3: assign_candidates_to_categories — 单归属板块分配
-Stage 4: select_for_category       — 板块最终精选与改写（复用现有逻辑）
+Stage 4: select_for_category       — 板块最终排序与摘要改写
 """
 
-import logging
 from datetime import datetime
 
 import re
@@ -24,15 +23,12 @@ from bs4 import BeautifulSoup
 from .ai import chat_completion
 from .ai_json import extract_json_object
 from .smart_brief_runner import (
-    _build_system_prompt,
-    _call_selection_once,
     _clean_text,
     _deduplicate_candidates,
     _extract_entry_summary,
-    _make_input_text,
-    _normalize_ai_items,
     _normalize_result_url,
     _parse_feed_url,
+    _render_markdown,
     _truncate_text,
     get_selection_settings,
 )
@@ -61,24 +57,6 @@ DEFAULT_GLOBAL_SYSTEM_PROMPT = """你是一个资深营销情报官，站在"总
 - 低价值通稿、自媒体八卦、人事变动、娱乐新闻
 - 与营销/品牌传播完全无关的纯技术论文
 - 标题含有"震惊""重磅""突发"等虚假修饰词的内容
-
-【输出要求】
-返回 JSON 对象，最多 {max_selected_items} 条：
-{{
-  "items": [
-    {{
-      "title": "原始标题",
-      "link": "原文链接",
-      "summary": "原始摘要",
-      "priority_score": 0.0-1.0,
-      "editorial_note": "简短的全局初筛理由"
-    }}
-  ]
-}}
-
-【关键规则】
-- 宁缺毋滥，没有符合标准的内容返回 {{"items": []}}
-- 不要输出任何解释，只输出 JSON
 """
 
 
@@ -108,6 +86,158 @@ def _resolve_category_name(raw_category: str, category_list: list[str]) -> str:
             return category
 
     return ""
+
+
+def _candidate_ref(index: int) -> str:
+    return f"C{index + 1:03d}"
+
+
+def _candidate_ref_map(candidates: list[dict]) -> dict[str, dict]:
+    return {_candidate_ref(i): item for i, item in enumerate(candidates)}
+
+
+def _make_candidate_ref_input(candidates: list[dict]) -> str:
+    lines = []
+    for i, news in enumerate(candidates):
+        ref = _candidate_ref(i)
+        clean_title = str(news.get("title", "")).replace("\n", " ").strip()
+        clean_summary = str(news.get("summary", "")).replace("\n", " ").strip()
+        source_hint = news.get("source_category_hint") or ",".join(news.get("source_section_hints", []) or [])
+        source_name = str(news.get("source_name", "")).replace("\n", " ").strip()
+        lines.append(
+            f"{ref} | title: {clean_title} | summary: {clean_summary} | "
+            f"source: {source_name} | source_hint: {source_hint}"
+        )
+    return "【候选列表】\n" + "\n".join(lines)
+
+
+def _parse_score_lines(raw: str, valid_refs: set[str]) -> list[dict]:
+    """Parse line output: C001 | 0.90 | reason."""
+    parsed: list[dict] = []
+    seen: set[str] = set()
+    for line in str(raw or "").splitlines():
+        match = re.search(
+            r"\b(?P<ref>C\d{3})\b\s*(?:[|,，:：\-]\s*)?"
+            r"(?P<score>0(?:\.\d+)?|1(?:\.0+)?|\.\d+)\s*(?:[|,，:：\-]\s*)?(?P<reason>.*)",
+            line.strip(),
+        )
+        if not match:
+            continue
+        ref = match.group("ref")
+        if ref not in valid_refs or ref in seen:
+            continue
+        try:
+            score = float(match.group("score"))
+        except ValueError:
+            continue
+        if not 0 <= score <= 1:
+            continue
+        parsed.append({
+            "ref": ref,
+            "score": score,
+            "reason": match.group("reason").strip(),
+        })
+        seen.add(ref)
+    return parsed
+
+
+def _parse_assignment_lines(raw: str, valid_refs: set[str], category_list: list[str]) -> list[dict]:
+    """Parse line output: C001 | category | reason."""
+    parsed: list[dict] = []
+    seen: set[str] = set()
+    for line in str(raw or "").splitlines():
+        parts = [part.strip() for part in re.split(r"\s*[|]\s*", line.strip(), maxsplit=2)]
+        if len(parts) < 2:
+            continue
+        ref = parts[0].lstrip("-* ").strip()
+        if ref not in valid_refs or ref in seen:
+            continue
+        category = _resolve_category_name(parts[1], category_list)
+        if not category:
+            continue
+        parsed.append({
+            "ref": ref,
+            "assigned_category": category,
+            "reason": parts[2] if len(parts) > 2 else "",
+        })
+        seen.add(ref)
+    return parsed
+
+
+def _parse_summary_lines(raw: str, valid_refs: set[str], *, summary_max_len: int) -> dict[str, str]:
+    """Parse line output: C001 | rewritten summary."""
+    summaries: dict[str, str] = {}
+    for line in str(raw or "").splitlines():
+        parts = [part.strip() for part in re.split(r"\s*[|]\s*", line.strip(), maxsplit=1)]
+        if len(parts) != 2:
+            continue
+        ref = parts[0].lstrip("-* ").strip()
+        if ref in valid_refs and ref not in summaries:
+            summaries[ref] = _truncate_text(parts[1], limit=summary_max_len)
+    return summaries
+
+
+def _is_explicit_empty_ai_response(raw: str) -> bool:
+    text = str(raw or "").strip().lower()
+    return text in {"none", "no", "empty", "无", "无合格内容", "没有符合内容"}
+
+
+def _parse_global_screen_response(
+    raw: str,
+    news_list: list[dict],
+    *,
+    selection_settings: dict[str, int],
+) -> list[dict]:
+    """Map minimal AI score lines back to code-owned candidates."""
+    ref_map = _candidate_ref_map(news_list)
+    parsed = _parse_score_lines(raw, set(ref_map))
+    items: list[dict] = []
+    max_items = selection_settings["max_selected_items"]
+
+    for entry in parsed:
+        candidate = dict(ref_map[entry["ref"]])
+        candidate["priority_score"] = entry["score"]
+        candidate["editorial_note"] = entry["reason"]
+        items.append(candidate)
+        if len(items) >= max_items:
+            break
+
+    return _normalize_global_items(items, selection_settings=selection_settings)
+
+
+def _resolve_source_hint_category(candidate: dict, category_list: list[str]) -> str:
+    """Resolve a category using source_section_hints before asking AI."""
+    raw_hints: list[str] = []
+    if candidate.get("source_category_hint"):
+        raw_hints.append(str(candidate.get("source_category_hint", "")))
+    hints = candidate.get("source_section_hints", []) or []
+    if isinstance(hints, str):
+        raw_hints.append(hints)
+    elif isinstance(hints, list):
+        raw_hints.extend(str(hint) for hint in hints)
+
+    for hint in raw_hints:
+        category = _resolve_category_name(hint, category_list)
+        if category:
+            return category
+    return ""
+
+
+def _get_final_selection_settings(config: dict) -> dict[str, int]:
+    """Use existing final-selection settings; fall back to editorial settings if needed."""
+    settings = get_selection_settings(config)
+    ai_config = config.get("ai", {}) or {}
+    if ai_config.get("selection"):
+        return settings
+    editorial_settings = (
+        (ai_config.get("editorial_pipeline", {}) or {}).get("selection", {})
+    )
+    if isinstance(editorial_settings, dict):
+        for key in ("max_selected_items", "title_max_len", "summary_max_len"):
+            value = editorial_settings.get(key)
+            if isinstance(value, int) and value > 0:
+                settings[key] = value
+    return settings
 
 
 def _get_sections_config(config: dict) -> dict:
@@ -401,36 +531,22 @@ def _build_global_system_prompt(
     publication_scope: str = "",
 ) -> str:
     max_selected_items = selection_settings["max_selected_items"]
-    title_max_len = selection_settings["title_max_len"]
-    summary_max_len = selection_settings["summary_max_len"]
+    _ = base_system_prompt
 
-    prompt = (base_system_prompt or DEFAULT_GLOBAL_SYSTEM_PROMPT).strip()
-    prompt = prompt.format(
-        max_selected_items=max_selected_items,
-        title_max_len=title_max_len,
-        summary_max_len=summary_max_len,
-    )
+    prompt = DEFAULT_GLOBAL_SYSTEM_PROMPT.strip()
 
     if publication_scope:
         prompt += f"\n\n【刊物整体栏目定位】：\n{publication_scope}"
 
     prompt += f"""
 【输出格式】
-返回 JSON，最多 {max_selected_items} 条：
-{{
-  "items": [
-    {{
-      "title": "标题",
-      "link": "链接",
-      "summary": "摘要",
-      "priority_score": 0.0-1.0,
-      "editorial_note": "理由"
-    }}
-  ]
-}}
+最多 {max_selected_items} 行，每行固定为：
+C001 | 0.90 | 简短筛选理由
 
-- 没有符合内容时返回 {{"items": []}}
-- 只输出 JSON，不输出任何解释"""
+【关键限制】
+- 只输出候选 ID、0-1 分数、理由
+- 不要输出标题、链接、摘要、JSON、Markdown
+- 没有符合内容时只输出 NONE"""
     return prompt
 
 
@@ -473,10 +589,6 @@ def _validate_global_screen(raw: str, *, selection_settings: dict[str, int]) -> 
         return normalized
     except Exception:
         return []
-
-
-def _is_parseable_json_object(raw: str) -> bool:
-    return extract_json_object(raw) is not None
 
 
 def screen_global_candidates(
@@ -536,7 +648,7 @@ def screen_global_candidates(
         selection_settings=selection_settings,
         publication_scope=publication_scope,
     )
-    input_text = _make_input_text(candidates)
+    input_text = _make_candidate_ref_input(candidates)
 
     threshold = selection_settings["full_context_threshold_chars"]
     batch_size = selection_settings["batch_size"]
@@ -571,6 +683,7 @@ def screen_global_candidates(
         # 分片模式
         logger.info(f"🤖 全局初筛 — 分片模式（{len(candidates)} 条，{len(input_text)} chars）")
         stage_one_selected: list[dict] = []
+        failed_batches: list[str] = []
         for start in range(0, len(candidates), batch_size):
             batch_news = candidates[start:start + batch_size]
             batch_no = start // batch_size + 1
@@ -584,15 +697,10 @@ def screen_global_candidates(
             )
             batch_results.append(result["record"])
             if not result["ok"]:
-                return {
-                    "ok": False,
-                    "screened": [],
-                    "global_shortlist_size": 0,
-                    "selection_mode": "chunked",
-                    "batches": batch_results,
-                    "system_prompt": system_prompt,
-                    "error": result["error"],
-                }
+                failed_batches.append(f"batch {batch_no}: {result['error']}")
+                logger.warning(f"⚠️ 全局初筛批次 {batch_no} 失败，跳过该批次：{result['error']}")
+                time.sleep(3)
+                continue
             stage_one_selected.extend(result["items"])
             time.sleep(3)
 
@@ -602,6 +710,16 @@ def screen_global_candidates(
         deduped.sort(key=lambda x: x.get("priority_score", 0), reverse=True)
         screened = deduped[:target_shortlist]
         selection_mode = "chunked"
+        if not screened and failed_batches:
+            return {
+                "ok": False,
+                "screened": [],
+                "global_shortlist_size": 0,
+                "selection_mode": selection_mode,
+                "batches": batch_results,
+                "system_prompt": system_prompt,
+                "error": "; ".join(failed_batches),
+            }
 
     logger.info(f"✅ 全局初筛完成：通过 {len(screened)} 条（模式: {selection_mode}）")
     return {
@@ -625,7 +743,7 @@ def _call_global_screen_once(
     batch_no: int,
 ) -> dict:
     """对一批候选做全局初筛单次调用。"""
-    input_text = _make_input_text(news_list)
+    input_text = _make_candidate_ref_input(news_list)
     batch_record = {
         "stage": stage_label,
         "batch_no": batch_no,
@@ -646,17 +764,27 @@ def _call_global_screen_once(
                 user_text=input_text,
                 temperature=0.1,
                 timeout_s=120,
-                json_mode=True,
+                json_mode=False,
             )
-            items = _validate_global_screen(raw, selection_settings=selection_settings)
+            items = _parse_global_screen_response(
+                raw,
+                news_list,
+                selection_settings=selection_settings,
+            )
             batch_record["raw_response"] = raw
             batch_record["parsed_items"] = items
             batch_record["status"] = "success" if items else "empty"
-            if not items and not _is_parseable_json_object(raw):
-                batch_record["status"] = "invalid_json"
+            if not items and not _is_explicit_empty_ai_response(raw):
+                batch_record["status"] = "invalid_text"
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(RETRY_DELAY_S)
                     continue
+                return {
+                    "ok": False,
+                    "record": batch_record,
+                    "items": [],
+                    "error": "AI output did not match score-line contract",
+                }
             return {
                 "ok": True,
                 "record": batch_record,
@@ -700,13 +828,15 @@ def _normalize_global_items(items: list[dict], *, selection_settings: dict[str, 
         summary = _truncate_text(item.get("summary", ""), limit=summary_max_len)
         if not title:
             continue
-        normalized.append({
+        normalized_item = dict(item)
+        normalized_item.update({
             "title": title,
             "link": url,
             "summary": summary,
             "priority_score": float(item.get("priority_score", 0.5)),
             "editorial_note": str(item.get("editorial_note", "")),
         })
+        normalized.append(normalized_item)
         seen_urls.add(url)
     return normalized
 
@@ -755,9 +885,20 @@ def assign_candidates_to_categories(
     batch_size = editorial_config.get("assignment_batch_size", 20)
     category_map: dict[str, list[dict]] = {cat: [] for cat in feeds}
     unassigned: list[dict] = []
+    unresolved_candidates: list[dict] = []
+    category_list = list(feeds.keys())
 
-    for start in range(0, len(screened_candidates), batch_size):
-        batch = screened_candidates[start:start + batch_size]
+    for candidate in screened_candidates:
+        resolved_category = _resolve_source_hint_category(candidate, category_list)
+        if resolved_category:
+            assigned_candidate = dict(candidate)
+            assigned_candidate.setdefault("assignment_reason", "source_section_hints")
+            category_map[resolved_category].append(assigned_candidate)
+        else:
+            unresolved_candidates.append(candidate)
+
+    for start in range(0, len(unresolved_candidates), batch_size):
+        batch = unresolved_candidates[start:start + batch_size]
         batch_no = start // batch_size + 1
         logger.info(f"🔀 板块分配批次 {batch_no}（{len(batch)} 条）")
 
@@ -796,19 +937,12 @@ def _assign_batch_once(
     batch_no: int,
 ) -> dict:
     """单批次板块分配。"""
+    _ = allow_multi
     category_list = list(feeds.keys())
     if not category_list:
         return {"assignments": {}, "unassigned": candidates}
 
-    input_lines = []
-    for i, c in enumerate(candidates):
-        clean_title = c.get("title", "").replace("\n", " ").strip()
-        clean_summary = c.get("summary", "").replace("\n", " ").strip()
-        input_lines.append(
-            f"{i+1}. [{clean_title}]({c.get('link', '')}) | {clean_summary} | "
-            f"source_hint: {c.get('source_category_hint', '未知')}"
-        )
-    input_text = "【待分配候选】：\n" + "\n".join(input_lines)
+    input_text = _make_candidate_ref_input(candidates)
 
     category_lines = []
     for cat in category_list:
@@ -826,18 +960,14 @@ def _assign_batch_once(
 - 根据板块的筛选标准，选择最匹配的板块
 - 如果内容与所有板块都不匹配，返回空分配
 
-【输出格式】返回 JSON：
-{{
-  "assignments": [
-    {{
-      "candidate_index": 1,
-      "assigned_category": "板块名称",
-      "reason": "分配理由"
-    }}
-  ]
-}}
+【输出格式】
+每行固定为：
+C001 | 板块名称 | 简短分配理由
 
-只输出 JSON，不要解释。"""
+【关键限制】
+- 只输出候选 ID、板块名称、理由
+- 不要输出标题、链接、摘要、JSON、Markdown
+- 没有可分配内容时只输出 NONE"""
 
     batch_record = {
         "stage": "assignment",
@@ -858,13 +988,17 @@ def _assign_batch_once(
                 user_text=input_text,
                 temperature=0.1,
                 timeout_s=120,
-                json_mode=True,
+                json_mode=False,
             )
             batch_record["raw_response"] = raw
-            assignments_raw = _parse_assignment_response(raw)
-            batch_record["status"] = "success"
-            if not assignments_raw and not _is_parseable_json_object(raw):
-                batch_record["status"] = "invalid_json"
+            assignments_raw = _parse_assignment_lines(
+                raw,
+                set(_candidate_ref_map(candidates)),
+                category_list,
+            )
+            batch_record["status"] = "success" if assignments_raw else "empty"
+            if not assignments_raw and not _is_explicit_empty_ai_response(raw):
+                batch_record["status"] = "invalid_text"
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(RETRY_DELAY_S)
                     continue
@@ -882,9 +1016,10 @@ def _assign_batch_once(
     # 构建分配映射
     result_map: dict[str, list[dict]] = {cat: [] for cat in category_list}
     assigned_indices = set()
+    ref_to_index = {ref: idx for idx, ref in enumerate(_candidate_ref_map(candidates))}
 
     for assignment in assignments_raw:
-        idx = assignment.get("candidate_index", 0) - 1
+        idx = ref_to_index.get(assignment.get("ref", ""), -1)
         cat = _resolve_category_name(assignment.get("assigned_category", ""), category_list)
         if 0 <= idx < len(candidates) and cat in result_map:
             candidate = dict(candidates[idx])
@@ -916,7 +1051,6 @@ def _parse_assignment_response(raw: str) -> list[dict]:
 
 
 # ---------- Stage 4: Per-Category Final Selection ----------
-# 复用 smart_brief_runner.run_prompt_debug
 
 
 def select_for_category(
@@ -926,25 +1060,144 @@ def select_for_category(
     candidates: list[dict],
     logger,
 ):
-    """板块最终精选（复用 run_prompt_debug）。"""
-    from .smart_brief_runner import run_prompt_debug
+    """板块最终输出：代码排序、代码生成 Markdown，AI 只改写摘要。"""
+    settings = _get_final_selection_settings(config)
+    max_items = settings["max_selected_items"]
+    title_max_len = settings["title_max_len"]
+    summary_max_len = settings["summary_max_len"]
 
-    feed_data = _get_sections_config(config).get(category_name, {})
-    category_prompt = feed_data.get("prompt", "")
+    if not candidates:
+        return {
+            "status": "empty_candidates",
+            "selected_items": [],
+            "preview_markdown": "",
+            "candidate_count": 0,
+            "batches": [],
+            "selection_mode": "code_rank",
+        }
 
-    # 转换为 run_prompt_debug 期望的格式
-    news_list = [
-        {"title": c.get("title", ""), "link": c.get("link", ""), "summary": c.get("summary", "")}
-        for c in candidates
-    ]
+    ranked_candidates = sorted(
+        candidates,
+        key=lambda c: float(c.get("priority_score", 0.5) or 0.5),
+        reverse=True,
+    )
 
-    return run_prompt_debug(
+    selected_candidates: list[dict] = []
+    for candidate in ranked_candidates:
+        normalized_url = _normalize_result_url(candidate.get("link", ""))
+        title = _truncate_text(candidate.get("title", ""), limit=title_max_len)
+        if not normalized_url or not title:
+            continue
+        item = dict(candidate)
+        item["title"] = title
+        item["link"] = normalized_url
+        selected_candidates.append(item)
+        if len(selected_candidates) >= max_items:
+            break
+
+    if not selected_candidates:
+        return {
+            "status": "empty",
+            "selected_items": [],
+            "preview_markdown": "",
+            "candidate_count": len(candidates),
+            "batches": [],
+            "selection_mode": "code_rank",
+        }
+
+    summaries, summary_record = _rewrite_category_summaries(
         config=config,
         category_name=category_name,
-        news_list=news_list,
-        category_prompt=category_prompt,
-        logger=logger,
+        candidates=selected_candidates,
+        summary_max_len=summary_max_len,
     )
+
+    selected_items = []
+    for i, candidate in enumerate(selected_candidates):
+        ref = _candidate_ref(i)
+        summary = summaries.get(ref) or _truncate_text(
+            candidate.get("summary", ""),
+            limit=summary_max_len,
+        )
+        selected_items.append({
+            "title": candidate["title"],
+            "url": candidate["link"],
+            "summary": summary,
+        })
+
+    preview_markdown = _render_markdown(category_name, selected_items)
+    logger.info(f"  🧩 【{category_name}】代码生成输出 {len(selected_items)} 条")
+
+    return {
+        "status": "success" if selected_items else "empty",
+        "selected_items": selected_items,
+        "preview_markdown": preview_markdown,
+        "candidate_count": len(candidates),
+        "batches": [summary_record],
+        "system_prompt": summary_record.get("system_prompt", ""),
+        "selection_mode": "code_rank",
+    }
+
+
+def _rewrite_category_summaries(
+    *,
+    config: dict,
+    category_name: str,
+    candidates: list[dict],
+    summary_max_len: int,
+) -> tuple[dict[str, str], dict]:
+    """Ask AI only for summary rewrites. Formatting and links stay code-owned."""
+    input_text = _make_candidate_ref_input(candidates)
+    system_prompt = f"""你只负责把候选摘要改写为简体中文短句。
+
+【当前板块】
+{category_name}
+
+【输出格式】
+每行固定为：
+C001 | {summary_max_len}字以内摘要
+
+【关键限制】
+- 不要筛选，不要排序，不要改变候选 ID
+- 不要输出标题、链接、JSON、Markdown
+- 摘要只写“发生了什么 + 对营销人的启示/影响”
+- 如果无法改写，输出 NONE"""
+
+    record = {
+        "stage": "summary_rewrite",
+        "batch_no": 1,
+        "candidate_count": len(candidates),
+        "input_chars": len(input_text),
+        "raw_response": "",
+        "parsed_items": {},
+        "status": "pending",
+        "system_prompt": system_prompt,
+    }
+
+    try:
+        raw = chat_completion(
+            api_url=config["ai"]["api_url"],
+            api_key=config["ai"]["api_key"],
+            model=config["ai"]["model"],
+            system_prompt=system_prompt,
+            user_text=input_text,
+            temperature=0.2,
+            timeout_s=90,
+            json_mode=False,
+        )
+        summaries = _parse_summary_lines(
+            raw,
+            set(_candidate_ref_map(candidates)),
+            summary_max_len=summary_max_len,
+        )
+        record["raw_response"] = raw
+        record["parsed_items"] = summaries
+        record["status"] = "success" if summaries else "empty"
+        return summaries, record
+    except Exception as e:
+        record["status"] = "error"
+        record["error"] = str(e)
+        return {}, record
 
 
 # ---------- Orchestration ----------

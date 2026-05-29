@@ -90,6 +90,29 @@ assert len(message.content.encode("utf-8")) <= WECOM_SOFT_LIMIT_BYTES
 - When validating a real Chinese brief, inspect both character length and byte length. A 1,700 character Chinese brief can already be around 3,600 bytes before headers.
 - If a production push is clipped mid-sentence, check delivery rendering first, then task config. Do not assume the pipeline generated a broken final brief until the sent payload sizes are known.
 
+## Editorial AI Output Contract
+
+- Do not let AI own final Markdown, source links, source names, section headings, or candidate titles in `insightbot/editorial_pipeline.py`.
+- Stage 2 global screening should ask AI only for minimal score lines:
+
+```text
+C001 | 0.90 | reason
+```
+
+- Stage 3 section assignment should first use `source_section_hints` / `source_category_hint`; call AI only for candidates without a reliable source hint. AI assignment output should stay minimal:
+
+```text
+C001 | section name | reason
+```
+
+- Stage 4 should rank candidates in code and generate Markdown via `_render_markdown()`. AI may only rewrite summaries:
+
+```text
+C001 | rewritten summary
+```
+
+- Keep JSON parsers only for compatibility tests or old utilities. New production editorial pipeline paths should not depend on AI returning valid JSON.
+
 ## Local Verification Commands
 
 Focused tests for channel delivery and task runner:
