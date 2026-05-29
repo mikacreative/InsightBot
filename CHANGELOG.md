@@ -2,6 +2,15 @@
 
 ## Unreleased (2026-04-29)
 
+### Editorial Pipeline
+
+- 将生产 editorial pipeline 的 AI 输出契约收紧为最小行格式：全局初筛只返回候选 ID、分数和理由；板块分配只返回候选 ID、板块和理由；摘要改写只返回候选 ID 和短摘要
+- 最终标题、链接、板块、Markdown 和输出数量均由代码生成，不再依赖 AI 返回 JSON 或拼接 Markdown
+- Stage 4 新增最终发布 gate：`max_selected_items` 仅作为上限，不再为了填满每个板块而降质补齐
+- `数智前沿` 收紧为 AI、电商搜索、平台产品/机制变化、内容平台机制和营销可落地 AI 应用；泛平台商业模式、硬科技、芯片、量子、通信试验、算力基础设施默认排除
+- `政策导向` 收紧为“政策动作 + 企业/品牌/消费/数据/AI/城市商业相关性”；仅有官方来源或一般政策发布不再自动入选
+- 增加对 `NONE`、Markdown 残留、原文长摘录的清洗和兜底摘要，避免最终推送出现格式紊乱或原文片段泄漏
+
 ### Runtime
 
 - 修复 `editorial-intelligence` 路径下 task-level `search.queries` 的执行链：运行时会先把控制台保存的 query 规范化成真正可执行的字符串列表

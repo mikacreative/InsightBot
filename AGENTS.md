@@ -8,6 +8,7 @@ This project is Mika's marketing intelligence bot. Default communication with th
 - Production host: `ubuntu@111.229.166.6`
 - Production path: `/root/marketing_bot`
 - Production branch: `main`
+- Latest verified production commit: `e1d4037`
 - Production services:
   - `insightbot-web.service` runs Streamlit on port `8501`
   - `insightbot-scheduler.service` runs the scheduler
@@ -113,6 +114,26 @@ C001 | rewritten summary
 ```
 
 - Keep JSON parsers only for compatibility tests or old utilities. New production editorial pipeline paths should not depend on AI returning valid JSON.
+
+## Editorial Final Gate Rules
+
+- Treat `max_selected_items` as an upper bound only. Do not backfill a section to 5 items if the candidates do not pass the final quality gate.
+- Stage 4 final gates should use stable factual fields only: title, original summary, source name, and source URL. Do not use AI-provided `assignment_reason` or `editorial_note` as final evidence.
+- `🤖 数智前沿` should keep AI, ecommerce search, platform product changes, content platform mechanisms, and practical marketing-facing AI use cases.
+- `🤖 数智前沿` should reject generic platform/business-model essays such as "users are the product" unless they include a concrete product, algorithm, search, ecommerce, or platform mechanism change.
+- `🤖 数智前沿` should reject hard-tech or infrastructure-only items such as chips, quantum, trusted communication, compute, and foundational security unless they clearly land in marketing, ecommerce, content, search, or platform usage.
+- `📢 政策导向` requires both a policy/action signal and business relevance. Official-source items are not enough by themselves.
+- `📢 政策导向` should keep rules that affect enterprises, brands, advertising, public relations, consumer rights, data security, AI tools, platform operations, city/commercial space, or brand reputation.
+- `💡 营销行业` should reject pure tech expo, robotics, hard AI infrastructure, and broad governance items unless there is an explicit marketing, brand, consumer, ecommerce, content, campaign, or platform angle.
+
+## Known Source Health Issues
+
+The latest production dry-runs on 2026-05-29 still showed source-layer warnings that are independent from editorial filtering:
+
+- `https://madbrief.com/feed` fails SSL verification because of a self-signed certificate.
+- Some local aggregation endpoints under `http://localhost:1200`, including `mittrchina/index` and `gov/zhengce/zuixin`, may timeout or return `503`.
+
+Do not treat these warnings as editorial pipeline failures. Track them separately as source-health work.
 
 ## Local Verification Commands
 

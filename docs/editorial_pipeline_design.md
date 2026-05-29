@@ -1,9 +1,9 @@
 # InsightBot Editorial Pipeline Design
 
 > Branch: `dev-editorial`  
-> Status: Draft + Search Extension  
+> Status: Implemented in production `main`
 > Date: 2026-04-08  
-> Updated: 2026-04-13
+> Updated: 2026-05-29
 
 ## 1. Goal
 
@@ -29,13 +29,13 @@
 
 ## 3. Proposed Flow
 
-建议的新流水线：
+当前生产流水线：
 
 1. 全量抓取所有订阅源候选
 2. 全局初筛
 3. 板块分配
-4. 板块精选与改写
-5. 板块输出与推送
+4. 板块最终 gate、排序与摘要改写
+5. 代码生成板块 Markdown 并交给发送层推送
 
 数据流：
 
@@ -86,11 +86,13 @@ all feeds
 
 这一层不直接决定板块归属。
 
-建议输出：
+当前生产输出契约为最小行格式：
 
-- `items`
-- `reason` 或 `editorial_value`
-- 可选 `priority_score`
+```text
+C001 | 0.90 | reason
+```
+
+代码负责把候选 ID 映射回原始标题、链接、来源和摘要。低于 `min_priority_score` 的候选会被丢弃。
 
 ### 4.3 Category Assignment
 
@@ -109,25 +111,33 @@ all feeds
 
 建议输出：
 
-- `candidate_id`
-- `assigned_category`
-- `assignment_reason`
+```text
+C001 | section name | reason
+```
+
+生产实现会优先使用 `source_section_hints` / `source_category_hint` 做预分配；只有来源 hint 不可靠或无法解析时才调用 AI。最终发布 gate 不使用 AI 的 `assignment_reason` 作为证据。
 
 ### 4.4 Category Final Selection
 
 板块层只对已经被分配进来的候选做二次精选与改写。
 
-这一层仍然保留当前板块 prompt 的定位：
+这一层不再让 AI 决定最终条数、标题、链接或 Markdown。代码先做最终 gate 和排序，AI 只改写摘要。
 
-- 选什么
-- 不选什么
+AI 摘要输出契约：
 
-板块层不再负责处理全局海量候选，只负责：
+```text
+C001 | rewritten summary
+```
+
+板块层只负责：
 
 - 该板块候选内部排序
-- 标题重写
-- 摘要生成
+- 最终发布 gate
+- 摘要改写
 - 板块最终条数裁剪
+- 代码生成 Markdown
+
+`max_selected_items` 只是上限。若候选未通过最终 gate，板块可以少于上限甚至为空。
 
 ## 5. Design Decisions
 
@@ -172,7 +182,24 @@ all feeds
 - 保持板块语义稳定
 - 避免“为了填满栏目而把全局边缘内容硬塞进去”
 
-### 5.4 Debug Entrypoints
+### 5.4 Final Gate Boundaries
+
+当前生产实现中，Stage 4 的最终 gate 只使用稳定事实字段：
+
+- 标题
+- 原始摘要
+- 来源名
+- 来源 URL
+
+不使用 AI 生成的 `assignment_reason` 或 `editorial_note` 作为最终证据。
+
+板块边界：
+
+- `💡 营销行业`：保留品牌、广告、公关、消费、电商、内容、活动、平台营销案例；排除纯科技展、机器人、硬 AI 基建和泛治理内容，除非有明确营销角度。
+- `🤖 数智前沿`：保留 AI、电商搜索、平台产品/机制变化、内容平台机制和营销可落地 AI 应用；排除泛平台商业模式讨论、芯片、量子、通信试验、算力和基础设施，除非明确落到营销、电商、内容、搜索或平台应用。
+- `📢 政策导向`：必须同时具备政策动作和企业/品牌/消费/数据/AI/城市商业相关性；官方来源本身不足以入选。
+
+### 5.5 Debug Entrypoints
 
 这个方案下，调试入口至少需要两个：
 
