@@ -30,6 +30,7 @@ from insightbot.editorial_pipeline import (
     _normalize_global_items,
     _parse_assignment_lines,
     _parse_assignment_response,
+    _parse_global_screen_response,
     _validate_global_screen,
     assign_candidates_to_categories,
     build_global_candidates,
@@ -400,6 +401,24 @@ class TestValidateGlobalScreen:
         assert result["items"][0]["title"] == "新闻"
         assert result["items"][0]["priority_score"] == 0.8
 
+    def test_global_screen_filters_low_score_rejected_items(self):
+        candidates = [
+            {"title": "保留", "link": "https://example.com/keep", "summary": "摘要"},
+            {"title": "排除", "link": "https://example.com/drop", "summary": "摘要"},
+        ]
+        result = _parse_global_screen_response(
+            "C001 | 0.75 | 有价值\nC002 | 0.10 | 排除",
+            candidates,
+            selection_settings={
+                "max_selected_items": 10,
+                "title_max_len": 50,
+                "summary_max_len": 60,
+                "min_priority_score": 0.5,
+            },
+        )
+
+        assert [item["link"] for item in result] == ["https://example.com/keep"]
+
 
 class TestNormalizeGlobalItems:
     """测试全局初筛结果标准化"""
@@ -573,7 +592,7 @@ class TestSelectForCategory:
         """标题、链接和 Markdown 应该由代码生成，AI 只提供摘要。"""
         candidates = [
             {
-                "title": "测试标题",
+                "title": "[RSS] 文章频道 - 测试标题",
                 "link": "https://example.com/1",
                 "summary": "测试摘要",
                 "priority_score": 0.8,

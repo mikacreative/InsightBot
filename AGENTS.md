@@ -99,6 +99,7 @@ assert len(message.content.encode("utf-8")) <= WECOM_SOFT_LIMIT_BYTES
 C001 | 0.90 | reason
 ```
 
+- Treat low-score lines as rejected. The production path should ignore Stage 2 items below the configured minimum score, default `0.50`.
 - Stage 3 section assignment should first use `source_section_hints` / `source_category_hint`; call AI only for candidates without a reliable source hint. AI assignment output should stay minimal:
 
 ```text

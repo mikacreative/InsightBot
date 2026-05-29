@@ -44,6 +44,7 @@ DEFAULT_GLOBAL_SELECTION_SETTINGS = {
     "summary_max_len": 60,
     "full_context_threshold_chars": 20000,
     "batch_size": 20,
+    "min_priority_score": 0.5,
 }
 
 DEFAULT_GLOBAL_SYSTEM_PROMPT = """你是一个资深营销情报官，站在"总编辑"视角对全局候选做初筛。
@@ -100,7 +101,7 @@ def _make_candidate_ref_input(candidates: list[dict]) -> str:
     lines = []
     for i, news in enumerate(candidates):
         ref = _candidate_ref(i)
-        clean_title = str(news.get("title", "")).replace("\n", " ").strip()
+        clean_title = _clean_output_title(news.get("title", "")).replace("\n", " ").strip()
         clean_summary = str(news.get("summary", "")).replace("\n", " ").strip()
         source_hint = news.get("source_category_hint") or ",".join(news.get("source_section_hints", []) or [])
         source_name = str(news.get("source_name", "")).replace("\n", " ").strip()
@@ -109,6 +110,14 @@ def _make_candidate_ref_input(candidates: list[dict]) -> str:
             f"source: {source_name} | source_hint: {source_hint}"
         )
     return "【候选列表】\n" + "\n".join(lines)
+
+
+def _clean_output_title(value: str) -> str:
+    """Remove transport/source prefixes from titles before final rendering."""
+    title = re.sub(r"\s+", " ", str(value or "")).strip()
+    title = re.sub(r"^\[(RSS|搜索)\]\s*", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"^(文章频道|项目频道|招聘频道|案例频道)\s*[-－]\s*", "", title)
+    return title.strip()
 
 
 def _parse_score_lines(raw: str, valid_refs: set[str]) -> list[dict]:
@@ -193,8 +202,11 @@ def _parse_global_screen_response(
     parsed = _parse_score_lines(raw, set(ref_map))
     items: list[dict] = []
     max_items = selection_settings["max_selected_items"]
+    min_score = float(selection_settings.get("min_priority_score", 0.5))
 
     for entry in parsed:
+        if entry["score"] < min_score:
+            continue
         candidate = dict(ref_map[entry["ref"]])
         candidate["priority_score"] = entry["score"]
         candidate["editorial_note"] = entry["reason"]
@@ -546,6 +558,7 @@ C001 | 0.90 | 简短筛选理由
 【关键限制】
 - 只输出候选 ID、0-1 分数、理由
 - 不要输出标题、链接、摘要、JSON、Markdown
+- 只输出分数 >= 0.50 的内容；被排除内容不要输出
 - 没有符合内容时只输出 NONE"""
     return prompt
 
@@ -615,7 +628,9 @@ def screen_global_candidates(
     if isinstance(raw_settings, dict):
         for key, default in DEFAULT_GLOBAL_SELECTION_SETTINGS.items():
             value = raw_settings.get(key)
-            if isinstance(value, int) and value > 0:
+            if isinstance(default, int) and isinstance(value, int) and value > 0:
+                selection_settings[key] = value
+            elif isinstance(default, float) and isinstance(value, (int, float)) and value > 0:
                 selection_settings[key] = value
 
     # 计算 shortlist 目标数量：3x 全局倍率
@@ -1085,7 +1100,7 @@ def select_for_category(
     selected_candidates: list[dict] = []
     for candidate in ranked_candidates:
         normalized_url = _normalize_result_url(candidate.get("link", ""))
-        title = _truncate_text(candidate.get("title", ""), limit=title_max_len)
+        title = _truncate_text(_clean_output_title(candidate.get("title", "")), limit=title_max_len)
         if not normalized_url or not title:
             continue
         item = dict(candidate)
