@@ -300,9 +300,18 @@ def _source_hint_auto_assign_allowed(candidate: dict, category: str) -> bool:
         "政策", "监管", "法规", "规定", "条例", "合规", "标准", "治理", "意见",
         "办法", "规划", "通知", "通报", "国家", "国务院", "发改委", "工信部",
         "市场监管", "网信", "生态环境部", "央行", "证监会", "商务部", "教育部",
-        "消费者权益", "gov", "miit",
+        "消费者权益", "高考", "涉考", "限时上锁", "限制", "两部门", "计量",
+        "gov", "miit",
     )
     return any(marker.lower() in text for marker in policy_markers)
+
+
+def _category_final_gate_allowed(candidate: dict, category_name: str) -> bool:
+    """Apply hard category gates before final publication."""
+    normalized_category = _normalize_category_token(category_name)
+    if "政策" in normalized_category:
+        return _source_hint_auto_assign_allowed(candidate, category_name)
+    return True
 
 
 def _get_final_selection_settings(config: dict) -> dict[str, int]:
@@ -1181,6 +1190,8 @@ def select_for_category(
 
     selected_candidates: list[dict] = []
     for candidate in ranked_candidates:
+        if not _category_final_gate_allowed(candidate, category_name):
+            continue
         priority_score = float(candidate.get("priority_score", 0.5) or 0.5)
         if priority_score < final_min_score:
             continue

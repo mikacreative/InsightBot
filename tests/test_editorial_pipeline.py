@@ -678,6 +678,34 @@ class TestSelectForCategory:
         assert len(result["selected_items"]) == 2
         assert [item["title"] for item in result["selected_items"]] == ["苹果推出新广告", "耐克发布跑步社群计划"]
 
+    def test_policy_final_gate_drops_non_policy_items(self, silent_logger):
+        candidates = [
+            {
+                "title": "智博会观察：具身智能独立成馆",
+                "link": "https://example.com/embodied-ai",
+                "summary": "具身智能产业地位提升。",
+                "priority_score": 0.9,
+            },
+            {
+                "title": "中国两部门系统布局人工智能计量能力建设",
+                "link": "https://example.com/ai-measurement",
+                "summary": "两部门联合印发人工智能计量体系文件。",
+                "priority_score": 0.86,
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | AI计量摘要"):
+            result = select_for_category(
+                config=config,
+                category_name="📢 政策导向",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert len(result["selected_items"]) == 1
+        assert result["selected_items"][0]["title"] == "中国两部门系统布局人工智能计量能力建设"
+
     def test_summary_parser_rejects_none_and_strips_markdown(self):
         parsed = _parse_summary_lines(
             "C001 | NONE\nC002 | 💡 *有效摘要内容*",
