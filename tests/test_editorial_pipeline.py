@@ -559,6 +559,7 @@ class TestAssignCandidatesToCategories:
                 "title": "China Robotaxi Firms Expand Fleet",
                 "link": "https://example.com/robotaxi",
                 "summary": "Robotaxi companies expand commercial operations.",
+                "source_url": "https://www.chinanews.com.cn/cj/2026/05-29/example.shtml",
                 "source_section_hints": ["📢 政策导向"],
             },
         ]

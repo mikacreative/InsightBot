@@ -300,7 +300,7 @@ def _source_hint_auto_assign_allowed(candidate: dict, category: str) -> bool:
         "政策", "监管", "法规", "规定", "条例", "合规", "标准", "治理", "意见",
         "办法", "规划", "通知", "通报", "国家", "国务院", "发改委", "工信部",
         "市场监管", "网信", "生态环境部", "央行", "证监会", "商务部", "教育部",
-        "gov", "miit", "chinanews.com.cn", "people.com.cn",
+        "消费者权益", "gov", "miit",
     )
     return any(marker.lower() in text for marker in policy_markers)
 
