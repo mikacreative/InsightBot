@@ -739,7 +739,7 @@ class TestSelectForCategory:
             {
                 "title": "当你没有付费，你可能就是产品本身",
                 "link": "https://example.com/free-product",
-                "summary": "互联网平台免费服务背后用户成为产品，数据与注意力被商业化利用。",
+                "summary": "互联网平台免费服务背后用户成为产品，AI时代数据与注意力被商业化利用。",
                 "assignment_reason": "平台数据议题",
                 "priority_score": 0.91,
             },
