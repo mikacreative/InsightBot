@@ -812,6 +812,34 @@ class TestSelectForCategory:
 
         assert len(result["selected_items"]) == 1
 
+    def test_digital_final_gate_drops_hard_tech_without_marketing_application(self, silent_logger):
+        candidates = [
+            {
+                "title": "中国首创基于国产抗量子芯片的AI多智能体可信通信试验",
+                "link": "https://example.com/quantum-chip",
+                "summary": "国产抗量子芯片完成AI多智能体可信通信试验。",
+                "priority_score": 0.91,
+            },
+            {
+                "title": "AI做电商视频的8个稳定出片问题",
+                "link": "https://example.com/ai-video",
+                "summary": "AI电商视频面临商品一致性与生成稳定性挑战。",
+                "priority_score": 0.86,
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | AI视频摘要"):
+            result = select_for_category(
+                config=config,
+                category_name="🤖 数智前沿",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert len(result["selected_items"]) == 1
+        assert result["selected_items"][0]["title"] == "AI做电商视频的8个稳定出片问题"
+
     def test_marketing_final_gate_drops_pure_tech_expo(self, silent_logger):
         candidates = [
             {

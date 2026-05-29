@@ -382,12 +382,19 @@ def _category_final_gate_allowed(candidate: dict, category_name: str) -> bool:
             "上线", "更新", "接入", "模型", "流量分发", "推荐", "电商",
             "供应链", "视频生成",
         )
+        hard_tech_markers = ("芯片", "量子", "通信试验", "可信通信", "算力", "基础设施")
+        marketing_application_markers = (
+            "营销", "广告", "电商", "内容", "搜索", "社交媒体", "平台", "用户",
+            "购物", "视频", "客服", "投放", "创意",
+        )
         digital_strong_markers = (
             "ai", "人工智能", "大模型", "算法", "搜索", "电商", "亚马逊",
             "openai", "claude", "agent", "生成", "智能", "数字化",
             "社交媒体", "内容平台", "rufu", "rufus",
         )
         platform_product_markers = ("小红书", "抖音", "微信", "微博", "快手", "b站")
+        if _contains_any_marker(text, hard_tech_markers):
+            return _contains_any_marker(text, marketing_application_markers)
         if _contains_any_marker(text, generic_platform_markers):
             return _contains_any_marker(text, product_change_markers)
         if _contains_any_marker(text, digital_strong_markers):
