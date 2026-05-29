@@ -706,6 +706,62 @@ class TestSelectForCategory:
         assert len(result["selected_items"]) == 1
         assert result["selected_items"][0]["title"] == "中国两部门系统布局人工智能计量能力建设"
 
+    def test_policy_final_gate_ignores_broad_governance_terms(self, silent_logger):
+        candidates = [
+            {
+                "title": "王毅出席全球治理之友小组会议",
+                "link": "https://example.com/global-governance",
+                "summary": "国际会议讨论全球治理合作。",
+                "priority_score": 0.92,
+            },
+            {
+                "title": "上海市网信办通报13品牌违规收集个人信息",
+                "link": "https://example.com/privacy",
+                "summary": "消费品牌需关注个人信息合规。",
+                "priority_score": 0.88,
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 数据合规摘要"):
+            result = select_for_category(
+                config=config,
+                category_name="📢 政策导向",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert len(result["selected_items"]) == 1
+        assert result["selected_items"][0]["title"] == "上海市网信办通报13品牌违规收集个人信息"
+
+    def test_digital_final_gate_requires_platform_or_ai_signal(self, silent_logger):
+        candidates = [
+            {
+                "title": "当你没有付费，你可能就是产品本身",
+                "link": "https://example.com/free-product",
+                "summary": "免费商业模式反映用户价值交换。",
+                "priority_score": 0.91,
+            },
+            {
+                "title": "亚马逊搜索全面 AI 化",
+                "link": "https://example.com/amazon-ai-search",
+                "summary": "电商搜索被AI重构。",
+                "priority_score": 0.86,
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | AI搜索摘要"):
+            result = select_for_category(
+                config=config,
+                category_name="🤖 数智前沿",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert len(result["selected_items"]) == 1
+        assert result["selected_items"][0]["title"] == "亚马逊搜索全面 AI 化"
+
     def test_summary_parser_rejects_none_and_strips_markdown(self):
         parsed = _parse_summary_lines(
             "C001 | NONE\nC002 | 💡 *有效摘要内容*",

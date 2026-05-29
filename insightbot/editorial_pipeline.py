@@ -289,16 +289,13 @@ def _resolve_source_hint_category(candidate: dict, category_list: list[str]) -> 
 def _source_hint_auto_assign_allowed(candidate: dict, category: str) -> bool:
     """Use source hints as defaults, but require semantic evidence for broad policy feeds."""
     normalized_category = _normalize_category_token(category)
-    text = " ".join(
-        str(candidate.get(key, ""))
-        for key in ("title", "summary", "source_name", "source_url")
-    ).lower()
+    text = _candidate_search_text(candidate)
     if "政策" not in normalized_category:
         return True
 
     policy_markers = (
-        "政策", "监管", "法规", "规定", "条例", "合规", "标准", "治理", "意见",
-        "办法", "规划", "通知", "通报", "国家", "国务院", "发改委", "工信部",
+        "政策", "监管", "法规", "规定", "条例", "合规", "标准", "意见",
+        "办法", "规划", "通知", "通报", "国务院", "发改委", "工信部",
         "市场监管", "网信", "生态环境部", "央行", "证监会", "商务部", "教育部",
         "消费者权益", "高考", "涉考", "限时上锁", "限制", "两部门", "计量",
         "gov", "miit",
@@ -306,11 +303,45 @@ def _source_hint_auto_assign_allowed(candidate: dict, category: str) -> bool:
     return any(marker.lower() in text for marker in policy_markers)
 
 
+def _candidate_search_text(candidate: dict) -> str:
+    """Combine stable candidate fields for category gate checks."""
+    return " ".join(
+        str(candidate.get(key, ""))
+        for key in (
+            "title",
+            "summary",
+            "editorial_note",
+            "assignment_reason",
+            "source_name",
+            "source_url",
+        )
+    ).lower()
+
+
+def _contains_any_marker(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker.lower() in text for marker in markers)
+
+
 def _category_final_gate_allowed(candidate: dict, category_name: str) -> bool:
     """Apply hard category gates before final publication."""
     normalized_category = _normalize_category_token(category_name)
+    text = _candidate_search_text(candidate)
     if "政策" in normalized_category:
-        return _source_hint_auto_assign_allowed(candidate, category_name)
+        policy_final_markers = (
+            "国务院", "发改委", "工信部", "市场监管", "网信", "生态环境部",
+            "央行", "证监会", "商务部", "教育部", "两部门", "官方",
+            "印发", "通报", "通知", "意见", "办法", "条例", "法规", "监管",
+            "合规", "标准", "规划", "政策", "限制", "涉考", "高考", "限时上锁",
+            "消费者权益", "个人信息", "数据安全", "计量",
+        )
+        return _contains_any_marker(text, policy_final_markers)
+    if "数智" in normalized_category:
+        digital_final_markers = (
+            "ai", "人工智能", "大模型", "算法", "搜索", "电商", "平台", "小红书",
+            "抖音", "亚马逊", "openai", "claude", "agent", "生成", "智能",
+            "数字化", "社交媒体", "内容平台", "rufu", "rufus",
+        )
+        return _contains_any_marker(text, digital_final_markers)
     return True
 
 
