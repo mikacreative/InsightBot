@@ -134,6 +134,36 @@ def _clean_summary_text(value: str, *, limit: int) -> str:
     return _truncate_text(text, limit=limit).strip("*_` \t")
 
 
+def _summary_looks_like_raw_excerpt(value: str, *, limit: int) -> bool:
+    """Detect source excerpts that should not leak into final publication."""
+    text = str(value or "").strip()
+    if len(text) > limit:
+        return True
+    raw_markers = ("中新网", "记者", "编辑：", "作者：", "为什么", "这几年", "今年 ")
+    return any(marker in text for marker in raw_markers)
+
+
+def _build_code_summary(candidate: dict, category_name: str, *, limit: int) -> str:
+    """Deterministic fallback when AI summary rewrite is missing or unusable."""
+    title = _clean_output_title(candidate.get("title", ""))
+    normalized_category = _normalize_category_token(category_name)
+    if "政策" in normalized_category:
+        suffix = "需关注其对企业合规与品牌声誉管理的影响"
+    elif "数智" in normalized_category:
+        suffix = "需关注其对AI营销与平台运营的影响"
+    else:
+        suffix = "需关注其对品牌传播与消费沟通的影响"
+    return _truncate_text(f"{title}，{suffix}。", limit=limit)
+
+
+def _fallback_summary(candidate: dict, category_name: str, *, limit: int) -> str:
+    """Prefer clean source summaries, otherwise use code-owned fallback copy."""
+    summary = _clean_summary_text(candidate.get("summary", ""), limit=limit)
+    if summary and not _summary_looks_like_raw_excerpt(candidate.get("summary", ""), limit=limit):
+        return summary
+    return _build_code_summary(candidate, category_name, limit=limit)
+
+
 def _title_similarity_key(value: str) -> set[str]:
     """Small, dependency-free near-duplicate key for Chinese/English titles."""
     text = _normalize_category_token(_clean_output_title(value))
@@ -310,8 +340,6 @@ def _candidate_search_text(candidate: dict) -> str:
         for key in (
             "title",
             "summary",
-            "editorial_note",
-            "assignment_reason",
             "source_name",
             "source_url",
         )
@@ -342,6 +370,18 @@ def _category_final_gate_allowed(candidate: dict, category_name: str) -> bool:
             "数字化", "社交媒体", "内容平台", "rufu", "rufus",
         )
         return _contains_any_marker(text, digital_final_markers)
+    if "营销" in normalized_category:
+        non_marketing_markers = (
+            "具身智能", "机器人", "人工智能计量", "智博会", "产业博览会",
+            "全球治理", "两部门", "监管", "法规", "政策",
+        )
+        marketing_markers = (
+            "营销", "品牌", "广告", "传播", "公关", "消费者", "消费", "用户",
+            "小红书", "抖音", "淘宝", "电商", "包装", "发布会", "联名", "内容",
+            "创意", "campaign", "世界杯", "平台",
+        )
+        if _contains_any_marker(text, non_marketing_markers):
+            return _contains_any_marker(text, marketing_markers)
     return True
 
 
@@ -1259,8 +1299,9 @@ def select_for_category(
     selected_items = []
     for i, candidate in enumerate(selected_candidates):
         ref = _candidate_ref(i)
-        summary = summaries.get(ref) or _clean_summary_text(
-            candidate.get("summary", ""),
+        summary = summaries.get(ref) or _fallback_summary(
+            candidate,
+            category_name,
             limit=summary_max_len,
         )
         if not summary:

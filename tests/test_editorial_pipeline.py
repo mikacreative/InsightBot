@@ -740,6 +740,7 @@ class TestSelectForCategory:
                 "title": "当你没有付费，你可能就是产品本身",
                 "link": "https://example.com/free-product",
                 "summary": "免费商业模式反映用户价值交换。",
+                "assignment_reason": "平台数据议题",
                 "priority_score": 0.91,
             },
             {
@@ -761,6 +762,55 @@ class TestSelectForCategory:
 
         assert len(result["selected_items"]) == 1
         assert result["selected_items"][0]["title"] == "亚马逊搜索全面 AI 化"
+
+    def test_marketing_final_gate_drops_pure_tech_expo(self, silent_logger):
+        candidates = [
+            {
+                "title": "智博会观察：具身智能独立成馆",
+                "link": "https://example.com/embodied-ai",
+                "summary": "人工智能产业博览会展示具身智能技术进展。",
+                "priority_score": 0.91,
+            },
+            {
+                "title": "六神把发布会开成蚊学院",
+                "link": "https://example.com/sixgod",
+                "summary": "品牌通过场景化发布会强化新品传播。",
+                "priority_score": 0.86,
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 发布会摘要"):
+            result = select_for_category(
+                config=config,
+                category_name="💡 营销行业",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert len(result["selected_items"]) == 1
+        assert result["selected_items"][0]["title"] == "六神把发布会开成蚊学院"
+
+    def test_raw_excerpt_fallback_uses_code_owned_summary(self, silent_logger):
+        candidates = [
+            {
+                "title": "淘小宝勇闯异世界",
+                "link": "https://example.com/pet",
+                "summary": "这几年被大量铲屎官们加倍宠爱的，非异宠们莫属了！今年5月7日-10日，在上海国家会展中心举办活动。",
+                "priority_score": 0.88,
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="NONE"):
+            result = select_for_category(
+                config=config,
+                category_name="💡 营销行业",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert result["selected_items"][0]["summary"] == "淘小宝勇闯异世界，需关注其对品牌传播与消费沟通的影响。"
 
     def test_summary_parser_rejects_none_and_strips_markdown(self):
         parsed = _parse_summary_lines(
