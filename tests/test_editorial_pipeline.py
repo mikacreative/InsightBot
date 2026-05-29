@@ -734,6 +734,34 @@ class TestSelectForCategory:
         assert len(result["selected_items"]) == 1
         assert result["selected_items"][0]["title"] == "上海市网信办通报13品牌违规收集个人信息"
 
+    def test_policy_final_gate_requires_business_relevance(self, silent_logger):
+        candidates = [
+            {
+                "title": "生态环境部印发海湾清洁指数评价技术方法",
+                "link": "https://example.com/bay-cleanliness",
+                "summary": "生态环境部印发海湾清洁指数评价技术方法试行文件。",
+                "priority_score": 0.9,
+            },
+            {
+                "title": "高考临近多家AI平台涉考功能限时上锁",
+                "link": "https://example.com/ai-exam",
+                "summary": "高考期间多家AI平台限制涉考功能。",
+                "priority_score": 0.88,
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | AI合规摘要"):
+            result = select_for_category(
+                config=config,
+                category_name="📢 政策导向",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert len(result["selected_items"]) == 1
+        assert result["selected_items"][0]["title"] == "高考临近多家AI平台涉考功能限时上锁"
+
     def test_digital_final_gate_requires_product_or_ai_signal(self, silent_logger):
         candidates = [
             {

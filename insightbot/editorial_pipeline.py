@@ -355,14 +355,23 @@ def _category_final_gate_allowed(candidate: dict, category_name: str) -> bool:
     normalized_category = _normalize_category_token(category_name)
     text = _candidate_search_text(candidate)
     if "政策" in normalized_category:
-        policy_final_markers = (
+        policy_action_markers = (
             "国务院", "发改委", "工信部", "市场监管", "网信", "生态环境部",
             "央行", "证监会", "商务部", "教育部", "两部门", "官方",
             "印发", "通报", "通知", "意见", "办法", "条例", "法规", "监管",
             "合规", "标准", "规划", "政策", "限制", "涉考", "高考", "限时上锁",
             "消费者权益", "个人信息", "数据安全", "计量",
         )
-        return _contains_any_marker(text, policy_final_markers)
+        policy_relevance_markers = (
+            "企业", "品牌", "营销", "广告", "公关", "消费", "消费者", "服务体验",
+            "消费者权益", "个人信息", "数据安全", "平台", "ai", "人工智能",
+            "涉考", "高考", "城市更新", "商业", "市场监管", "网信", "计量",
+            "算力", "基础设施", "合规", "声誉",
+        )
+        return (
+            _contains_any_marker(text, policy_action_markers)
+            and _contains_any_marker(text, policy_relevance_markers)
+        )
     if "数智" in normalized_category:
         generic_platform_markers = (
             "没有付费", "用户成为产品", "免费服务", "注意力", "商业化利用",
