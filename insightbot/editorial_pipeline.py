@@ -45,6 +45,7 @@ DEFAULT_GLOBAL_SELECTION_SETTINGS = {
     "full_context_threshold_chars": 20000,
     "batch_size": 20,
     "min_priority_score": 0.5,
+    "final_min_priority_score": 0.7,
 }
 
 DEFAULT_GLOBAL_SYSTEM_PROMPT = """你是一个资深营销情报官，站在"总编辑"视角对全局候选做初筛。
@@ -120,6 +121,54 @@ def _clean_output_title(value: str) -> str:
     return title.strip()
 
 
+def _clean_summary_text(value: str, *, limit: int) -> str:
+    """Normalize AI summary lines and reject explicit non-answers."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"^[>\-\s]*", "", text).strip()
+    text = re.sub(r"^💡\s*", "", text).strip()
+    text = text.strip("*_` \t")
+    if _is_explicit_empty_ai_response(text):
+        return ""
+    if not text:
+        return ""
+    return _truncate_text(text, limit=limit).strip("*_` \t")
+
+
+def _title_similarity_key(value: str) -> set[str]:
+    """Small, dependency-free near-duplicate key for Chinese/English titles."""
+    text = _normalize_category_token(_clean_output_title(value))
+    if len(text) <= 1:
+        return {text} if text else set()
+    return {text[i:i + 2] for i in range(len(text) - 1)}
+
+
+def _shared_topic_markers(left: str, right: str) -> bool:
+    marker_groups = (
+        ("小红书", "世界杯"),
+        ("claude",),
+        ("openai",),
+        ("豆包",),
+        ("六神",),
+    )
+    left_lower = str(left or "").lower()
+    right_lower = str(right or "").lower()
+    return any(
+        all(marker in left_lower and marker in right_lower for marker in group)
+        for group in marker_groups
+    )
+
+
+def _is_similar_title(left: str, right: str, *, threshold: float = 0.7) -> bool:
+    if _shared_topic_markers(left, right):
+        return True
+    left_key = _title_similarity_key(left)
+    right_key = _title_similarity_key(right)
+    if not left_key or not right_key:
+        return False
+    overlap = len(left_key & right_key)
+    return overlap / max(1, min(len(left_key), len(right_key))) >= threshold
+
+
 def _parse_score_lines(raw: str, valid_refs: set[str]) -> list[dict]:
     """Parse line output: C001 | 0.90 | reason."""
     parsed: list[dict] = []
@@ -182,7 +231,9 @@ def _parse_summary_lines(raw: str, valid_refs: set[str], *, summary_max_len: int
             continue
         ref = parts[0].lstrip("-* ").strip()
         if ref in valid_refs and ref not in summaries:
-            summaries[ref] = _truncate_text(parts[1], limit=summary_max_len)
+            summary = _clean_summary_text(parts[1], limit=summary_max_len)
+            if summary:
+                summaries[ref] = summary
     return summaries
 
 
@@ -230,16 +281,43 @@ def _resolve_source_hint_category(candidate: dict, category_list: list[str]) -> 
 
     for hint in raw_hints:
         category = _resolve_category_name(hint, category_list)
-        if category:
+        if category and _source_hint_auto_assign_allowed(candidate, category):
             return category
     return ""
+
+
+def _source_hint_auto_assign_allowed(candidate: dict, category: str) -> bool:
+    """Use source hints as defaults, but require semantic evidence for broad policy feeds."""
+    normalized_category = _normalize_category_token(category)
+    text = " ".join(
+        str(candidate.get(key, ""))
+        for key in ("title", "summary", "source_name", "source_url")
+    ).lower()
+    if "政策" not in normalized_category:
+        return True
+
+    policy_markers = (
+        "政策", "监管", "法规", "规定", "条例", "合规", "标准", "治理", "意见",
+        "办法", "规划", "通知", "通报", "国家", "国务院", "发改委", "工信部",
+        "市场监管", "网信", "生态环境部", "央行", "证监会", "商务部", "教育部",
+        "gov", "miit", "chinanews.com.cn", "people.com.cn",
+    )
+    return any(marker.lower() in text for marker in policy_markers)
 
 
 def _get_final_selection_settings(config: dict) -> dict[str, int]:
     """Use existing final-selection settings; fall back to editorial settings if needed."""
     settings = get_selection_settings(config)
+    settings.setdefault(
+        "final_min_priority_score",
+        DEFAULT_GLOBAL_SELECTION_SETTINGS["final_min_priority_score"],
+    )
     ai_config = config.get("ai", {}) or {}
     if ai_config.get("selection"):
+        raw_selection = ai_config.get("selection") or {}
+        value = raw_selection.get("final_min_priority_score")
+        if isinstance(value, (int, float)) and value > 0:
+            settings["final_min_priority_score"] = float(value)
         return settings
     editorial_settings = (
         (ai_config.get("editorial_pipeline", {}) or {}).get("selection", {})
@@ -249,6 +327,9 @@ def _get_final_selection_settings(config: dict) -> dict[str, int]:
             value = editorial_settings.get(key)
             if isinstance(value, int) and value > 0:
                 settings[key] = value
+        value = editorial_settings.get("final_min_priority_score")
+        if isinstance(value, (int, float)) and value > 0:
+            settings["final_min_priority_score"] = float(value)
     return settings
 
 
@@ -1080,6 +1161,7 @@ def select_for_category(
     max_items = settings["max_selected_items"]
     title_max_len = settings["title_max_len"]
     summary_max_len = settings["summary_max_len"]
+    final_min_score = float(settings.get("final_min_priority_score", 0.7))
 
     if not candidates:
         return {
@@ -1099,9 +1181,14 @@ def select_for_category(
 
     selected_candidates: list[dict] = []
     for candidate in ranked_candidates:
+        priority_score = float(candidate.get("priority_score", 0.5) or 0.5)
+        if priority_score < final_min_score:
+            continue
         normalized_url = _normalize_result_url(candidate.get("link", ""))
         title = _truncate_text(_clean_output_title(candidate.get("title", "")), limit=title_max_len)
         if not normalized_url or not title:
+            continue
+        if any(_is_similar_title(title, existing.get("title", "")) for existing in selected_candidates):
             continue
         item = dict(candidate)
         item["title"] = title
@@ -1130,10 +1217,12 @@ def select_for_category(
     selected_items = []
     for i, candidate in enumerate(selected_candidates):
         ref = _candidate_ref(i)
-        summary = summaries.get(ref) or _truncate_text(
+        summary = summaries.get(ref) or _clean_summary_text(
             candidate.get("summary", ""),
             limit=summary_max_len,
         )
+        if not summary:
+            continue
         selected_items.append({
             "title": candidate["title"],
             "url": candidate["link"],
@@ -1215,6 +1304,29 @@ C001 | {summary_max_len}字以内摘要
         return {}, record
 
 
+def _remove_cross_category_duplicates(result: dict, seen_titles: list[str], category_name: str) -> dict:
+    """Avoid repeating the same topic across sections in the final brief."""
+    selected_items = []
+    dropped = 0
+    for item in result.get("selected_items", []) or []:
+        title = item.get("title", "")
+        if any(_is_similar_title(title, seen_title) for seen_title in seen_titles):
+            dropped += 1
+            continue
+        selected_items.append(item)
+        seen_titles.append(title)
+
+    if dropped == 0:
+        return result
+
+    filtered_result = dict(result)
+    filtered_result["selected_items"] = selected_items
+    filtered_result["preview_markdown"] = _render_markdown(category_name, selected_items) if selected_items else ""
+    filtered_result["dedupe_dropped"] = dropped
+    filtered_result["status"] = "success" if selected_items else "empty"
+    return filtered_result
+
+
 # ---------- Orchestration ----------
 
 
@@ -1275,6 +1387,7 @@ def run_editorial_pipeline(*, config: dict, logger) -> dict:
     logger.info("✂️  Stage 4: 板块最终精选")
     category_results = {}
     final_blocks = []
+    seen_final_titles: list[str] = []
 
     for category in _get_sections_config(config).keys():
         cat_candidates = assignment_result["category_candidate_map"].get(category, [])
@@ -1289,6 +1402,7 @@ def run_editorial_pipeline(*, config: dict, logger) -> dict:
             candidates=cat_candidates,
             logger=logger,
         )
+        result = _remove_cross_category_duplicates(result, seen_final_titles, category)
         category_results[category] = result
 
         if result.get("status") == "success" and result.get("preview_markdown"):

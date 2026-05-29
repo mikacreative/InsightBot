@@ -31,6 +31,8 @@ from insightbot.editorial_pipeline import (
     _parse_assignment_lines,
     _parse_assignment_response,
     _parse_global_screen_response,
+    _parse_summary_lines,
+    _remove_cross_category_duplicates,
     _validate_global_screen,
     assign_candidates_to_categories,
     build_global_candidates,
@@ -551,6 +553,31 @@ class TestAssignCandidatesToCategories:
         assert len(result["category_candidate_map"]["🤖 数智前沿"]) == 1
         assert result["category_candidate_map"]["🤖 数智前沿"][0]["assignment_reason"] == "source_section_hints"
 
+    def test_policy_hint_requires_policy_evidence(self, silent_logger):
+        candidates = [
+            {
+                "title": "China Robotaxi Firms Expand Fleet",
+                "link": "https://example.com/robotaxi",
+                "summary": "Robotaxi companies expand commercial operations.",
+                "source_section_hints": ["📢 政策导向"],
+            },
+        ]
+        config = _editorial_config()
+        config["sections"]["📢 政策导向"] = {
+            "keywords": [],
+            "source_hints": ["policy"],
+            "prompt": "政策导向",
+        }
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="NONE") as mock_ai:
+            result = assign_candidates_to_categories(
+                config=config, screened_candidates=candidates, logger=silent_logger
+            )
+
+        mock_ai.assert_called_once()
+        assert result["category_candidate_map"]["📢 政策导向"] == []
+        assert result["unassigned"][0]["link"] == "https://example.com/robotaxi"
+
     def test_assignment_parser_extracts_json_from_surrounding_text(self):
         raw = '输出：{"assignments":[{"candidate_index":1,"assigned_category":"💡 营销行业","reason":"匹配"}]}'
         assignments = _parse_assignment_response(raw)
@@ -616,6 +643,64 @@ class TestSelectForCategory:
             {"title": "测试标题", "url": "https://example.com/1", "summary": "改写后的摘要"}
         ]
         assert "### [测试标题](https://example.com/1)" in result["preview_markdown"]
+
+    def test_does_not_fill_to_five_below_final_quality_threshold(self, silent_logger):
+        candidates = [
+            {
+                "title": title,
+                "link": f"https://example.com/{i}",
+                "summary": "摘要",
+                "priority_score": score,
+            }
+            for i, (title, score) in enumerate(
+                [
+                    ("苹果推出新广告", 0.91),
+                    ("耐克发布跑步社群计划", 0.82),
+                    ("普通行业消息", 0.69),
+                    ("低价值消息", 0.6),
+                    ("边缘消息", 0.55),
+                ],
+                start=1,
+            )
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 摘要一\nC002 | 摘要二"):
+            result = select_for_category(
+                config=config,
+                category_name="💡 营销行业",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert result["status"] == "success"
+        assert len(result["selected_items"]) == 2
+        assert [item["title"] for item in result["selected_items"]] == ["苹果推出新广告", "耐克发布跑步社群计划"]
+
+    def test_summary_parser_rejects_none_and_strips_markdown(self):
+        parsed = _parse_summary_lines(
+            "C001 | NONE\nC002 | 💡 *有效摘要内容*",
+            {"C001", "C002"},
+            summary_max_len=50,
+        )
+        assert parsed == {"C002": "有效摘要内容"}
+
+    def test_cross_category_dedupe_drops_repeated_topics(self):
+        result = {
+            "status": "success",
+            "selected_items": [
+                {"title": "小红书买下世界杯版权", "url": "https://example.com/1", "summary": "摘要"},
+                {"title": "完全不同标题", "url": "https://example.com/2", "summary": "摘要"},
+            ],
+            "preview_markdown": "old",
+        }
+        filtered = _remove_cross_category_duplicates(
+            result,
+            seen_titles=["2026世界杯，为什么小红书买了"],
+            category_name="🤖 数智前沿",
+        )
+        assert filtered["dedupe_dropped"] == 1
+        assert [item["title"] for item in filtered["selected_items"]] == ["完全不同标题"]
 
     def test_returns_empty_when_no_candidates(self, silent_logger):
         """空候选时返回空结果，不崩溃"""
