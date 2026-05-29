@@ -1,8 +1,6 @@
 import json
 import logging
 import os
-import subprocess
-import sys
 from copy import deepcopy
 from datetime import datetime
 
@@ -860,10 +858,18 @@ def main() -> None:
             elif quick_new_task_id in tasks:
                 st.error("任务 ID 已存在。")
 
-        if st.button("▶️ 立即手动运行", type="primary", use_container_width=True):
+        if st.button("▶️ 立即手动运行", type="primary", use_container_width=True, disabled=not bool(selected_task_id)):
             with st.spinner("AI 正在全网检索并撰写简报..."):
-                subprocess.run([sys.executable, "-m", "insightbot.cli"])
-                st.success("运行指令已发送，请查看企业微信或日志。")
+                try:
+                    result = scheduler.run_task_by_id(selected_task_id, dry_run=False)
+                    if result.get("ok"):
+                        st.success("运行完成，已按任务频道配置发送。")
+                    else:
+                        st.error(f"运行失败：{result.get('error') or '未知错误'}")
+                    with st.expander("查看本次运行结果", expanded=not bool(result.get("ok"))):
+                        st.json(result)
+                except Exception as exc:
+                    st.error(f"运行失败：{exc}")
 
         st.divider()
         st.header("⏳ 调度器状态")
