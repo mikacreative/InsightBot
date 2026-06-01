@@ -228,6 +228,36 @@ class TestRunTaskReal:
 
         assert result["channel_results"][0]["ok"] is False
 
+    def test_real_run_does_not_send_when_pipeline_fails(self):
+        from insightbot.task_runner import run_task
+
+        fake_config = {
+            "_task_pipeline": "editorial",
+            "_task_channels": ["wecom_main"],
+            "feeds": {},
+            "ai": {"api_url": "...", "api_key": "...", "model": "..."},
+            "settings": {"empty_message": "empty should not send"},
+        }
+        fake_loader = lambda: fake_config
+
+        with patch("insightbot.task_runner._run_editorial_pipeline") as mock_ep:
+            mock_ep.return_value = {
+                "ok": False,
+                "final_markdown": "",
+                "error": "pipeline failed",
+            }
+            with patch("insightbot.task_runner.get_channel") as mock_channel, \
+                 patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
+                 patch("insightbot.task_runner.append_run_record") as mock_history:
+                result = run_task("daily_brief", fake_loader, dry_run=False)
+
+        assert result["ok"] is False
+        assert result["channel_results"] == []
+        assert result["error"] == "pipeline failed"
+        mock_channel.assert_not_called()
+        mock_send.assert_not_called()
+        mock_history.assert_called_once()
+
 
 class TestEditorialIntelligenceSearchConfig:
     def test_normalizes_task_search_queries_to_plain_strings(self):

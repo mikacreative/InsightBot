@@ -65,7 +65,7 @@
 | `feishu_app` | 飞书应用鉴权后通过 OpenAPI 发送，支持 richer message 卡片 | 推荐 |
 | `feishu_bot` | 飞书群机器人 webhook，适合作为轻量 fallback | 可选 |
 
-> 对飞书来说，默认推荐 `feishu_app`。  
+> 对飞书来说，默认推荐 `feishu_app`。
 > 它通过飞书应用鉴权后走官方消息 API，支持 `interactive` 卡片；`feishu_bot` 更适合作为 webhook 兜底通道。
 
 ### 数据模型

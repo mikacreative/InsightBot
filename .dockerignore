@@ -1,0 +1,41 @@
+# Git / local metadata
+.git
+.gitignore
+.DS_Store
+
+# Local environment and runtime config
+.env
+.env.*
+!.env.example
+!.env.local.example
+config.json
+config.content.json
+config.secrets.json
+config.local.json
+config.local.content.json
+config.local.secrets.json
+tasks.json
+channels.json
+
+# Runtime artifacts and backups
+back-up/
+backup/
+data/
+logs/
+logs_local/
+*.log
+dry_run_report*.md
+
+# Python local state
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+pytest-of-mikawang/
+
+# Editor / agent local state
+.claude/

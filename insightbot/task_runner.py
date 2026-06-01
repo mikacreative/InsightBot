@@ -353,8 +353,39 @@ def run_task(
             logger.warning(f"TaskRunner: failed to write run history: {exc}")
         return payload
 
-    # Real run — send to all configured channels
     channel_results: list[dict] = []
+    if not pipeline_ok:
+        payload = {
+            "ok": False,
+            "task_id": task_id,
+            "pipeline": task_pipeline,
+            "dry_run": False,
+            "final_markdown": final_markdown,
+            "channel_results": channel_results,
+            "stage_results": stage_results,
+            "error": pipeline_error,
+        }
+        try:
+            append_run_record(
+                None,
+                _build_run_record(
+                    task_id=task_id,
+                    config=config,
+                    task_pipeline=task_pipeline,
+                    started_at=started_at,
+                    ended_at=datetime.now(),
+                    dry_run=False,
+                    ok=False,
+                    stage_results=stage_results,
+                    channel_results=channel_results,
+                    error=pipeline_error,
+                ),
+            )
+        except Exception as exc:
+            logger.warning(f"TaskRunner: failed to write run history: {exc}")
+        return payload
+
+    # Real run — send to all configured channels
     for channel_id in task_channels:
         try:
             channel = get_channel(channel_id)
