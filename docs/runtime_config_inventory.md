@@ -1,7 +1,7 @@
 # Runtime Config Inventory
 
-Status: dev planning inventory  
-Date: 2026-06-01  
+Status: dev cleanup baseline
+Date: 2026-06-01
 Scope: local `dev` after syncing Tencent Cloud trusted production configs
 
 This document records the current runtime configuration shape before restructuring. It is an inventory and cleanup plan only; it does not change runtime behavior.
@@ -12,12 +12,11 @@ This document records the current runtime configuration shape before restructuri
 | --- | --- | --- | --- |
 | `tasks.json` | ignored | Task definitions and per-task source/section/pipeline settings | Current production truth for `Daily_brief`. |
 | `channels.json` | ignored | Channel registry and delivery bindings | Current production channel points to `wecom_main`. |
-| `config.content.json` | tracked today | Base runtime content config, including AI/settings and legacy source config | In practice this is environment-specific. It should become runtime-only or be replaced by a tracked example in a later cleanup. |
+| `config.content.json` | ignored runtime | Base runtime content config, including AI/settings and legacy source config | Environment-specific. Tracked examples now live under `config/examples/`. |
 | `config.secrets.json` | ignored | Secrets and credentials | Must never be committed. |
-| `config.local.content.json` | ignored | Local-only content override | Overlaps with runtime config and should be deprecated or archived after examples are in place. |
-| `config.local.secrets.json` | ignored | Local-only secrets override | Keep local-only if still needed. |
-| `config.local.example.json` | tracked | Legacy local example | Candidate to move into a clearer `config/examples/` layout. |
-| `config.secrets.example.json` | tracked | Secret skeleton | Keep, but align naming with the target config layout. |
+| `config.local.content.json` | archived legacy | Old local-only content override | Moved to ignored `back-up/local-config-legacy-20260601-structure-cleanup/`. |
+| `config.local.secrets.json` | archived legacy | Old local-only secrets override | Moved to ignored `back-up/local-config-legacy-20260601-structure-cleanup/`. |
+| `config/examples/*.example.json` | tracked | Safe bootstrap examples | Canonical source for sample runtime config. |
 | `.env.local` | ignored | Local environment overrides | Keep local-only. |
 | `.env.example` / `.env.local.example` | tracked | Environment examples | Keep, but ensure they do not duplicate JSON examples unnecessarily. |
 
@@ -101,7 +100,7 @@ config.content.json
 config.secrets.json
 ```
 
-Introduce a clearer tracked example area:
+Tracked examples now live in:
 
 ```text
 config/
@@ -113,7 +112,7 @@ config/
   README.md
 ```
 
-Target responsibilities:
+Responsibilities:
 
 - Root JSON files are runtime-only and environment-specific.
 - `config/examples/` contains safe, tracked examples.
@@ -124,8 +123,8 @@ Target responsibilities:
 ## Cleanup Phases
 
 1. Inventory only: document the current state and avoid changing behavior.
-2. Add examples: move or copy safe sample configs into `config/examples/` and update docs.
-3. Make `config.content.json` runtime-only: add it to `.gitignore`, preserve a safe example, and remove tracked runtime drift.
+2. Add examples: move safe sample configs into `config/examples/` and update docs. Done on local `dev`.
+3. Make `config.content.json` runtime-only: add it to `.gitignore`, preserve a safe example, and remove tracked runtime drift. Done on local `dev`.
 4. Normalize task id policy: decide whether production remains `Daily_brief` or migrates to `daily_brief`, then document or implement aliases.
 5. Retire legacy wording: migrate UI/debug/docs from `feeds` terminology to `sources` / `sections`.
 6. Reduce compatibility paths only after production and local dev both run cleanly on canonical config.

@@ -1,13 +1,13 @@
 # InsightBot 本地测试环境搭建与开发指南
 
-**更新日期**：2026-04-29（适配当前 `dev-editorial` 基线）
+**更新日期**：2026-06-01（适配当前 `dev` runtime 配置结构）
 
 ---
 
 ## 1. 环境隔离策略
 
 本地测试环境的核心原则是**与生产环境完全隔离**：
-- **配置隔离**：使用 `.env.local`、`config.local.content.json` 和 `config.local.secrets.json`，不读取生产配置。
+- **配置隔离**：使用 `.env.local` 和根目录 runtime JSON；本地 runtime 文件不提交 Git。
 - **日志隔离**：所有本地运行日志输出到 `logs_local/` 目录。
 - **推送隔离**：提供 `INSIGHTBOT_DRY_RUN=1` 模式（强制所有频道发送进入测试模式），或配置专用的测试企业微信 Agent ID。
 
@@ -27,7 +27,7 @@ pip install -r requirements.txt
 
 ### 2.2 初始化本地配置
 
-项目根目录已提供模板文件，直接复制并修改：
+安全模板统一放在 `config/examples/`，复制到根目录后再修改：
 
 1. **环境变量配置**：
    ```bash
@@ -37,15 +37,22 @@ pip install -r requirements.txt
 
 2. **内容配置**：
    ```bash
-   cp config.content.json config.local.content.json
+   cp config/examples/config.content.example.json config.content.json
    ```
-   这是一个可安全纳入版本控制的配置，包含用于测试的 RSS 源、版式与 Prompt。
+   根目录 `config.content.json` 是本地 runtime 文件，不提交 Git。
 
 3. **敏感信息配置**：
    ```bash
-   cp config.secrets.example.json config.local.secrets.json
+   cp config/examples/config.secrets.example.json config.secrets.json
    ```
-   打开 `config.local.secrets.json`，填入测试用 API Key 和企业微信凭证；或完全通过 `.env.local` 中的环境变量提供。
+   打开 `config.secrets.json`，填入测试用 API Key 和企业微信凭证；或完全通过 `.env.local` 中的环境变量提供。
+
+4. **任务与频道配置**：
+   ```bash
+   cp config/examples/tasks.example.json tasks.json
+   cp config/examples/channels.example.json channels.json
+   ```
+   这两个文件同样是本地 runtime 文件，不提交 Git。已有生产配置同步到本地时，不要用样例覆盖。
 
 ---
 
@@ -131,7 +138,7 @@ set -a; source .env.local; set +a
 PYTHONPATH=. streamlit run scripts/app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-管理台读取 `config.local.content.json`，敏感信息来自 `config.local.secrets.json` 或环境变量，不影响生产配置。
+管理台读取根目录 runtime JSON；敏感信息来自 `config.secrets.json` 或环境变量。本地 runtime 文件已在 `.gitignore` 中忽略，不影响生产配置。
 
 **当前管理台主标签页**：
 

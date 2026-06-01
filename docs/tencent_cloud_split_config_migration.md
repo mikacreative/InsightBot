@@ -1,8 +1,10 @@
 # Tencent Cloud 生产机迁移清单
 
+> 历史迁移文档。当前版本已经进一步切到 task-centric runtime 配置：根目录 `tasks.json` / `channels.json` / `config.content.json` / `config.secrets.json` 都按环境管理，Git 只保留 `config/examples/` 下的安全样例。
+
 目标：将生产环境从旧版单文件 `config.json` 迁移到新版双层配置：
 
-- `config.content.json`：可纳入 Git，保存 feeds、settings、prompt、非敏感 AI 配置
+- `config.content.json`：保存 settings、prompt、非敏感 AI 配置；当前按 runtime 文件管理，不再直接纳入 Git
 - `config.secrets.json`：本机保留，不入 Git，保存企业微信凭证和 AI Key
 
 适用分支：`dev`
@@ -51,7 +53,7 @@ python3 scripts/split_config.py \
 先复制模板：
 
 ```bash
-cp /root/marketing_bot/config.secrets.example.json /root/marketing_bot/config.secrets.json
+cp /root/marketing_bot/config/examples/config.secrets.example.json /root/marketing_bot/config.secrets.json
 ```
 
 编辑 `/root/marketing_bot/config.secrets.json`，填入：
