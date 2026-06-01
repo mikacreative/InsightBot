@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased (2026-04-29)
+## Unreleased (2026-06-01)
+
+### Runtime Config Baseline
+
+- `dev` 已完成 runtime config 结构整理：root-level `tasks.json`、`channels.json`、`config.content.json`、`config.secrets.json` 改为环境相关运行文件，不再作为 Git 交付物提交
+- 安全样例统一迁入 `config/examples/`，并新增 `docs/runtime_config_inventory.md` 记录当前 runtime config 读写路径、生产任务口径和后续清理阶段
+- 新增 `.dockerignore`，避免 Docker build context 带入 `.env.local`、runtime JSON、`data/`、`logs/`、本地虚拟环境和备份目录
+- `.env.example` 与 `.env.local.example` 统一使用实际生效的 `INSIGHTBOT_DRY_RUN`，避免本地测试误以为 dry-run 但仍触发真实 channel send
+- `task_runner` 在 pipeline 失败时不再进入真实发送循环，避免发送空报告或误导性的“无更新”消息
+- 修正 scheduler idempotency 测试，让测试真实覆盖 70 秒重复触发保护
+- 当前 `dev` 可作为后续 fast-forward 到 `dev-editorial` 的项目结构基准；同步前应继续确认生产 runtime 配置不会被覆盖
+
+## Previous Unreleased (2026-04-29)
 
 ### Editorial Pipeline
 
