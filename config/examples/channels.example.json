@@ -1,0 +1,26 @@
+{
+  "channels": {
+    "wecom_main": {
+      "type": "wecom",
+      "name": "企业微信主频道",
+      "cid": "${WECOM_CID}",
+      "secret": "${WECOM_SECRET}",
+      "agent_id": "${WECOM_AGENT_ID}"
+    },
+    "feishu_app_template": {
+      "type": "feishu_app",
+      "name": "飞书应用频道",
+      "app_id": "${FEISHU_APP_ID}",
+      "app_secret": "${FEISHU_APP_SECRET}",
+      "receive_id": "${FEISHU_RECEIVE_ID}",
+      "receive_id_type": "chat_id",
+      "message_template": "interactive"
+    },
+    "feishu_bot_fallback": {
+      "type": "feishu_bot",
+      "name": "飞书机器人兜底",
+      "webhook_url": "${FEISHU_BOT_WEBHOOK_URL}",
+      "mention_all": false
+    }
+  }
+}

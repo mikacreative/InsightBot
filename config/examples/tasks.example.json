@@ -1,0 +1,57 @@
+{
+  "tasks": {
+    "Daily_brief": {
+      "name": "营销日报",
+      "enabled": true,
+      "pipeline": "editorial",
+      "sources": {
+        "rss": [
+          {
+            "id": "marketing_example",
+            "name": "示例营销源",
+            "url": "https://example.com/feed.xml",
+            "enabled": true,
+            "section_hints": ["💡 营销行业"]
+          }
+        ],
+        "search": {
+          "enabled": true,
+          "provider": "baidu",
+          "queries": [
+            {
+              "keywords": "AI 营销",
+              "section_hints": ["🤖 数智前沿"],
+              "max_results": 10
+            }
+          ]
+        }
+      },
+      "sections": {
+        "💡 营销行业": {
+          "prompt": "只保留对中国市场营销、公关传播、品牌建设具有参考价值的案例、行业变化和趋势解读。",
+          "keywords": ["营销", "品牌", "广告", "公关"],
+          "source_hints": ["marketing"]
+        },
+        "🤖 数智前沿": {
+          "prompt": "只保留与营销、公关、内容生产、社交平台机制相关的 AI 和数字化应用。",
+          "keywords": ["AI", "平台", "内容", "工具"],
+          "source_hints": ["digital"]
+        },
+        "📢 政策导向": {
+          "prompt": "只保留对企业经营、广告营销、数据安全、品牌声誉管理有直接影响的中国大陆政策与监管信息。",
+          "keywords": ["政策", "监管", "合规", "数据安全"],
+          "source_hints": ["policy"]
+        }
+      },
+      "pipeline_config": {
+        "max_items_per_section": 5,
+        "allow_empty_sections": true
+      },
+      "channels": ["wecom_main"],
+      "schedule": {
+        "hour": 10,
+        "minute": 0
+      }
+    }
+  }
+}

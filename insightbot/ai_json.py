@@ -31,4 +31,3 @@ def extract_json_object(raw: str) -> dict[str, Any] | None:
         if isinstance(data, dict):
             return data
     return None
-

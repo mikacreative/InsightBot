@@ -108,12 +108,10 @@ class TestTaskShouldRunNow:
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             # First fire — should run
             assert task.should_run_now() is True
-            # Simulate first run by calling run() which sets _last_run_at
-            with patch("insightbot.scheduler.Task.run") as mock_run:
-                mock_run.return_value = {}
-                task.run()
+            # Simulate the scheduler marking this task as already fired.
+            task._last_run_at = datetime(2026, 4, 16, 8, 0)
             # Second check within 70s — should be blocked by idempotency
-            mock_dt.now.return_value = datetime(2026, 4, 16, 8, 1)
+            mock_dt.now.return_value = datetime(2026, 4, 16, 8, 0, 30)
             assert task.should_run_now() is False
 
 

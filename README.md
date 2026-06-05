@@ -65,10 +65,12 @@
 | `feishu_app` | 飞书应用鉴权后通过 OpenAPI 发送，支持 richer message 卡片 | 推荐 |
 | `feishu_bot` | 飞书群机器人 webhook，适合作为轻量 fallback | 可选 |
 
-> 对飞书来说，默认推荐 `feishu_app`。  
+> 对飞书来说，默认推荐 `feishu_app`。
 > 它通过飞书应用鉴权后走官方消息 API，支持 `interactive` 卡片；`feishu_bot` 更适合作为 webhook 兜底通道。
 
 ### 数据模型
+
+运行态配置文件默认放在项目根目录，但这些文件是环境相关的本机状态，不再作为 Git 交付物提交。安全样例统一放在 [`config/examples/`](./config/examples/)。
 
 **`channels.json`**
 
@@ -147,14 +149,19 @@ pip install -e ./insightbot
 2. 准备配置
 
 ```bash
-cp config.secrets.example.json config.secrets.json
+cp config/examples/config.content.example.json config.content.json
+cp config/examples/config.secrets.example.json config.secrets.json
+cp config/examples/channels.example.json channels.json
+cp config/examples/tasks.example.json tasks.json
 ```
 
-然后在控制台 `📡 Channels` 页面创建并填写频道：
+然后在控制台 `📡 Channels` 页面检查并填写频道：
 
 - `wecom`：`cid` / `secret` / `agent_id`
 - `feishu_app`：`app_id` / `app_secret` / `receive_id` / `receive_id_type`
 - `feishu_bot`：`webhook_url`
+
+> 生产环境的 `tasks.json` / `channels.json` / `config.content.json` / `config.secrets.json` 应视为 runtime 配置。部署前先备份生产配置，再更新代码，不要用本地样例覆盖生产文件。
 
 3. 启动
 
@@ -216,6 +223,7 @@ python -m insightbot --webhook
 
 ### 文档
 
+- [Runtime Config Inventory](./docs/runtime_config_inventory.md)
 - [Editorial Pipeline 设计文档](./docs/editorial_pipeline_design.md)
 - [Search 集成设计文档](./docs/search_integration_design.md)
 - [多任务架构说明](./docs/v2.0_architecture.md)

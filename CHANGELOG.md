@@ -1,6 +1,26 @@
 # Changelog
 
-## Unreleased (2026-04-29)
+## Unreleased (2026-06-01)
+
+### Editorial Pipeline AI-First Rewrite
+
+- Stage 3 板块分配改为 AI 优先判断，`source_section_hints` / `source_category_hint` 仅在 AI 输出缺失或无效时作为 fallback
+- Stage 4 改为 AI 终筛并生成最终标题与摘要，代码只负责候选 ID 校验、原始链接映射、字段合法性校验和 Markdown 渲染
+- 移除 Stage 4 的代码硬 gate、代码排序补齐和 `title + 需关注其对...影响` 兜底摘要，避免生产推送出现截断标题混入洞察句的问题
+- Stage 2 保留候选原始标题和摘要，不再提前按展示长度截断；展示长度由 Stage 4 AI 成稿与代码校验共同控制
+- 项目文档同步记录 AI-first 流程作为新的生产契约
+
+### Runtime Config Baseline
+
+- `dev` 已完成 runtime config 结构整理：root-level `tasks.json`、`channels.json`、`config.content.json`、`config.secrets.json` 改为环境相关运行文件，不再作为 Git 交付物提交
+- 安全样例统一迁入 `config/examples/`，并新增 `docs/runtime_config_inventory.md` 记录当前 runtime config 读写路径、生产任务口径和后续清理阶段
+- 新增 `.dockerignore`，避免 Docker build context 带入 `.env.local`、runtime JSON、`data/`、`logs/`、本地虚拟环境和备份目录
+- `.env.example` 与 `.env.local.example` 统一使用实际生效的 `INSIGHTBOT_DRY_RUN`，避免本地测试误以为 dry-run 但仍触发真实 channel send
+- `task_runner` 在 pipeline 失败时不再进入真实发送循环，避免发送空报告或误导性的“无更新”消息
+- 修正 scheduler idempotency 测试，让测试真实覆盖 70 秒重复触发保护
+- 当前 `dev` 可作为后续 fast-forward 到 `dev-editorial` 的项目结构基准；同步前应继续确认生产 runtime 配置不会被覆盖
+
+## Previous Unreleased (2026-04-29)
 
 ### Editorial Pipeline
 

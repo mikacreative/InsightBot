@@ -1,22 +1,23 @@
 # InsightBot Editorial Pipeline Design
 
-> Branch: `dev-editorial`  
-> Status: Implemented in production `main`
+> Branch: `dev` / `main`
+> Status: AI-first production contract
 > Date: 2026-04-08  
-> Updated: 2026-05-29
+> Updated: 2026-06-05
 
 ## 1. Goal
 
-将当前“每个板块各自抓取、各自筛选”的流程，升级为更接近编辑部工作流的双阶段流水线：
+将当前“每个板块各自抓取、各自筛选”的流程，升级为更接近编辑部工作流的 AI-first 流水线：
 
 1. 全局初筛
 2. 板块精选与分配
 
-目标不是立即替换现有稳定链路，而是在保留现有工程化约束能力的基础上，提升：
+目标不是让代码替代编辑判断，而是在保留工程化格式约束的基础上，提升：
 
 - 全局视角下的选题质量
 - 板块之间的去重与优先级一致性
 - “今天到底最值得报什么”的整体判断能力
+- AI 生成内容的完整性与自然度，避免代码 fallback 生成无意义洞察
 
 ## 2. Current Problems
 
@@ -32,10 +33,10 @@
 当前生产流水线：
 
 1. 全量抓取所有订阅源候选
-2. 全局初筛
-3. 板块分配
-4. 板块最终 gate、排序与摘要改写
-5. 代码生成板块 Markdown 并交给发送层推送
+2. AI 全局初筛
+3. AI 板块分配，来源 hint 只作 fallback
+4. AI 板块终筛，并生成最终标题与摘要
+5. 代码校验协议、映射原始链接、生成 Markdown 并交给发送层推送
 
 数据流：
 
@@ -45,7 +46,8 @@ all feeds
 -> global_screened_candidates
 -> category_assignment
 -> category_candidate_map
--> per-category final selection/rewrite
+-> per-category AI final edit
+-> code validation/rendering
 -> final markdown output
 ```
 
@@ -73,7 +75,7 @@ all feeds
 - 基础文本清洗
 - 可选的标题相似度去重
 
-这一层不做板块判断。
+这一层不做板块判断，也不做标题或摘要截断式改写。
 
 ### 4.2 Global Screening
 
@@ -115,27 +117,32 @@ C001 | 0.90 | reason
 C001 | section name | reason
 ```
 
-生产实现会优先使用 `source_section_hints` / `source_category_hint` 做预分配；只有来源 hint 不可靠或无法解析时才调用 AI。最终发布 gate 不使用 AI 的 `assignment_reason` 作为证据。
+生产实现以 AI 判断为主。`source_section_hints` / `source_category_hint` 只在 AI 输出无法解析、遗漏候选或返回无效板块时作为 fallback。
 
 ### 4.4 Category Final Selection
 
-板块层只对已经被分配进来的候选做二次精选与改写。
+板块层只对已经被分配进来的候选做终筛与最终成稿。
 
-这一层不再让 AI 决定最终条数、标题、链接或 Markdown。代码先做最终 gate 和排序，AI 只改写摘要。
+这一层由 AI 决定：
 
-AI 摘要输出契约：
+- 是否保留候选
+- 最终标题
+- 最终摘要
+
+AI 输出契约：
 
 ```text
-C001 | rewritten summary
+C001 | KEEP | final title | final summary | reason
+C002 | DROP | - | - | reason
 ```
 
-板块层只负责：
+代码只负责：
 
-- 该板块候选内部排序
-- 最终发布 gate
-- 摘要改写
-- 板块最终条数裁剪
-- 代码生成 Markdown
+- 校验候选 ID 是否来自输入
+- 校验 `KEEP` / `DROP` 协议
+- 校验标题和摘要不为空、不过长、不含明显截断形态
+- 用原始候选 ID 映射原始链接
+- 生成 Markdown
 
 `max_selected_items` 只是上限。若候选未通过最终 gate，板块可以少于上限甚至为空。
 
@@ -182,18 +189,20 @@ C001 | rewritten summary
 - 保持板块语义稳定
 - 避免“为了填满栏目而把全局边缘内容硬塞进去”
 
-### 5.4 Final Gate Boundaries
+### 5.4 Code Validation Boundaries
 
-当前生产实现中，Stage 4 的最终 gate 只使用稳定事实字段：
+当前生产实现中，Stage 2/3/4 的内容判断由 AI 完成。代码不再使用硬编码板块规则替代编辑判断。
 
-- 标题
-- 原始摘要
-- 来源名
-- 来源 URL
+代码保留这些边界：
 
-不使用 AI 生成的 `assignment_reason` 或 `editorial_note` 作为最终证据。
+- 不接受 AI 发明的新候选 ID
+- 不接受 AI 发明的新板块
+- 不接受 AI 发明或改写链接，最终链接永远来自原始候选
+- 不接受空标题、空摘要、明显截断标题或明显通用 fallback 摘要
+- 不在 AI 失败时用代码生成标题、摘要或洞察
+- 如果 AI 输出无法修复，丢弃该候选或该板块
 
-板块边界：
+AI 判断时仍需遵守板块边界：
 
 - `💡 营销行业`：保留品牌、广告、公关、消费、电商、内容、活动、平台营销案例；排除纯科技展、机器人、硬 AI 基建和泛治理内容，除非有明确营销角度。
 - `🤖 数智前沿`：保留 AI、电商搜索、平台产品/机制变化、内容平台机制和营销可落地 AI 应用；排除泛平台商业模式讨论、芯片、量子、通信试验、算力和基础设施，除非明确落到营销、电商、内容、搜索或平台应用。
@@ -204,13 +213,14 @@ C001 | rewritten summary
 这个方案下，调试入口至少需要两个：
 
 1. 全局初筛调试
-2. 板块分配 / 板块精选调试
+2. 板块分配调试
+3. 板块终筛与最终标题/摘要调试
 
-虽然入口变多，但这是流程拆分后的自然结果。目前没有比“双入口”更清晰的方案。
+虽然入口变多，但这是流程拆分后的自然结果。调试时必须能看到每一层的 AI 原始输出、解析结果和被代码拒绝的原因。
 
 ## 6. Prompt Strategy
 
-仍然坚持“工程规则注入，不靠人工手写 schema”。
+仍然坚持“工程规则注入，不依赖 AI 返回 JSON”。
 
 建议保留可编辑的 prompt 只有两层：
 
@@ -226,9 +236,9 @@ C001 | rewritten summary
 不负责：
 
 - 条数上限
-- JSON schema
 - 最大字数
 - 分片逻辑
+- Markdown 格式
 
 这些规则继续由代码注入。
 

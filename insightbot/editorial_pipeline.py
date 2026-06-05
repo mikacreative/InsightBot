@@ -4,7 +4,7 @@ Editorial Pipeline — 双阶段编辑流水线
 Stage 1: build_global_candidates   — 聚合所有 RSS 候选，形成统一候选池
 Stage 2: screen_global_candidates   — 全局初筛，站在"总编辑"视角做一轮精选
 Stage 3: assign_candidates_to_categories — 单归属板块分配
-Stage 4: select_for_category       — 板块最终排序与摘要改写
+Stage 4: select_for_category       — AI 板块终筛与最终标题/摘要
 """
 
 from datetime import datetime
@@ -45,7 +45,6 @@ DEFAULT_GLOBAL_SELECTION_SETTINGS = {
     "full_context_threshold_chars": 20000,
     "batch_size": 20,
     "min_priority_score": 0.5,
-    "final_min_priority_score": 0.7,
 }
 
 DEFAULT_GLOBAL_SYSTEM_PROMPT = """你是一个资深营销情报官，站在"总编辑"视角对全局候选做初筛。
@@ -134,34 +133,49 @@ def _clean_summary_text(value: str, *, limit: int) -> str:
     return _truncate_text(text, limit=limit).strip("*_` \t")
 
 
-def _summary_looks_like_raw_excerpt(value: str, *, limit: int) -> bool:
-    """Detect source excerpts that should not leak into final publication."""
+def _clean_final_text(value: str) -> str:
+    """Normalize AI final fields without truncating editorial content."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"^[>\-\s]*", "", text).strip()
+    return text.strip("*_` \t")
+
+
+def _looks_truncated(value: str) -> bool:
     text = str(value or "").strip()
-    if len(text) > limit:
-        return True
-    raw_markers = ("中新网", "记者", "编辑：", "作者：", "为什么", "这几年", "今年 ")
-    return any(marker in text for marker in raw_markers)
+    return text.endswith(("...", "…")) or "..." in text
 
 
-def _build_code_summary(candidate: dict, category_name: str, *, limit: int) -> str:
-    """Deterministic fallback when AI summary rewrite is missing or unusable."""
-    title = _clean_output_title(candidate.get("title", ""))
-    normalized_category = _normalize_category_token(category_name)
-    if "政策" in normalized_category:
-        suffix = "需关注其对企业合规与品牌声誉管理的影响"
-    elif "数智" in normalized_category:
-        suffix = "需关注其对AI营销与平台运营的影响"
-    else:
-        suffix = "需关注其对品牌传播与消费沟通的影响"
-    return _truncate_text(f"{title}，{suffix}。", limit=limit)
+def _looks_like_code_fallback_summary(summary: str) -> bool:
+    text = str(summary or "")
+    fallback_markers = (
+        "需关注其对品牌传播与消费沟通的影响",
+        "需关注其对AI营销与平台运营的影响",
+        "需关注其对企业合规与品牌声誉管理的影响",
+        "需关注其对",
+    )
+    return any(marker in text for marker in fallback_markers)
 
 
-def _fallback_summary(candidate: dict, category_name: str, *, limit: int) -> str:
-    """Prefer clean source summaries, otherwise use code-owned fallback copy."""
-    summary = _clean_summary_text(candidate.get("summary", ""), limit=limit)
-    if summary and not _summary_looks_like_raw_excerpt(candidate.get("summary", ""), limit=limit):
-        return summary
-    return _build_code_summary(candidate, category_name, limit=limit)
+def _validate_final_title(value: str, *, title_max_len: int) -> str:
+    title = _clean_final_text(value)
+    title = _clean_output_title(title)
+    if _is_explicit_empty_ai_response(title):
+        return ""
+    if not title or len(title) > title_max_len or _looks_truncated(title):
+        return ""
+    return title
+
+
+def _validate_final_summary(value: str, *, summary_max_len: int) -> str:
+    summary = _clean_final_text(value)
+    summary = re.sub(r"^💡\s*", "", summary).strip("*_` \t")
+    if _is_explicit_empty_ai_response(summary):
+        return ""
+    if not summary or len(summary) > summary_max_len:
+        return ""
+    if _looks_truncated(summary) or _looks_like_code_fallback_summary(summary):
+        return ""
+    return summary
 
 
 def _title_similarity_key(value: str) -> set[str]:
@@ -267,6 +281,49 @@ def _parse_summary_lines(raw: str, valid_refs: set[str], *, summary_max_len: int
     return summaries
 
 
+def _parse_final_edit_lines(
+    raw: str,
+    valid_refs: set[str],
+    *,
+    title_max_len: int,
+    summary_max_len: int,
+) -> dict[str, dict]:
+    """Parse Stage 4 output: C001 | KEEP/DROP | final title | final summary | reason."""
+    parsed: dict[str, dict] = {}
+    for line in str(raw or "").splitlines():
+        parts = [part.strip() for part in re.split(r"\s*[|]\s*", line.strip(), maxsplit=4)]
+        if len(parts) < 2:
+            continue
+        ref = parts[0].lstrip("-* ").strip()
+        if ref not in valid_refs or ref in parsed:
+            continue
+        status = parts[1].upper()
+        if status not in {"KEEP", "DROP"}:
+            continue
+        reason = parts[4] if len(parts) > 4 else ""
+        if status == "DROP":
+            parsed[ref] = {
+                "status": "DROP",
+                "title": "",
+                "summary": "",
+                "reason": reason,
+            }
+            continue
+        if len(parts) < 4:
+            continue
+        title = _validate_final_title(parts[2], title_max_len=title_max_len)
+        summary = _validate_final_summary(parts[3], summary_max_len=summary_max_len)
+        if not title or not summary:
+            continue
+        parsed[ref] = {
+            "status": "KEEP",
+            "title": title,
+            "summary": summary,
+            "reason": reason,
+        }
+    return parsed
+
+
 def _is_explicit_empty_ai_response(raw: str) -> bool:
     text = str(raw or "").strip().lower()
     return text in {"none", "no", "empty", "无", "无合格内容", "没有符合内容"}
@@ -299,7 +356,7 @@ def _parse_global_screen_response(
 
 
 def _resolve_source_hint_category(candidate: dict, category_list: list[str]) -> str:
-    """Resolve a category using source_section_hints before asking AI."""
+    """Resolve a fallback category using source_section_hints/source_category_hint."""
     raw_hints: list[str] = []
     if candidate.get("source_category_hint"):
         raw_hints.append(str(candidate.get("source_category_hint", "")))
@@ -346,91 +403,11 @@ def _candidate_search_text(candidate: dict) -> str:
     ).lower()
 
 
-def _contains_any_marker(text: str, markers: tuple[str, ...]) -> bool:
-    return any(marker.lower() in text for marker in markers)
-
-
-def _category_final_gate_allowed(candidate: dict, category_name: str) -> bool:
-    """Apply hard category gates before final publication."""
-    normalized_category = _normalize_category_token(category_name)
-    text = _candidate_search_text(candidate)
-    if "政策" in normalized_category:
-        policy_action_markers = (
-            "国务院", "发改委", "工信部", "市场监管", "网信", "生态环境部",
-            "央行", "证监会", "商务部", "教育部", "两部门", "官方",
-            "印发", "通报", "通知", "意见", "办法", "条例", "法规", "监管",
-            "合规", "标准", "规划", "政策", "限制", "涉考", "高考", "限时上锁",
-            "消费者权益", "个人信息", "数据安全", "计量",
-        )
-        policy_relevance_markers = (
-            "企业", "品牌", "营销", "广告", "公关", "消费", "消费者", "服务体验",
-            "消费者权益", "个人信息", "数据安全", "平台", "ai", "人工智能",
-            "涉考", "高考", "城市更新", "商业", "市场监管", "网信", "计量",
-            "算力", "基础设施", "合规", "声誉",
-        )
-        return (
-            _contains_any_marker(text, policy_action_markers)
-            and _contains_any_marker(text, policy_relevance_markers)
-        )
-    if "数智" in normalized_category:
-        generic_platform_markers = (
-            "没有付费", "用户成为产品", "免费服务", "注意力", "商业化利用",
-            "商业模式", "用户价值交换",
-        )
-        product_change_markers = (
-            "功能", "机制", "算法", "搜索", "版权", "产品更新", "产品功能", "工具", "开放",
-            "上线", "更新", "接入", "模型", "流量分发", "推荐", "电商",
-            "供应链", "视频生成",
-        )
-        hard_tech_markers = ("芯片", "量子", "通信试验", "可信通信", "算力", "基础设施")
-        marketing_application_markers = (
-            "营销", "广告", "电商", "内容", "搜索", "社交媒体", "平台", "用户",
-            "购物", "视频", "客服", "投放", "创意",
-        )
-        digital_strong_markers = (
-            "ai", "人工智能", "大模型", "算法", "搜索", "电商", "亚马逊",
-            "openai", "claude", "agent", "生成", "智能", "数字化",
-            "社交媒体", "内容平台", "rufu", "rufus",
-        )
-        platform_product_markers = ("小红书", "抖音", "微信", "微博", "快手", "b站")
-        if _contains_any_marker(text, hard_tech_markers):
-            return _contains_any_marker(text, marketing_application_markers)
-        if _contains_any_marker(text, generic_platform_markers):
-            return _contains_any_marker(text, product_change_markers)
-        if _contains_any_marker(text, digital_strong_markers):
-            return True
-        return (
-            _contains_any_marker(text, platform_product_markers)
-            and _contains_any_marker(text, product_change_markers)
-        )
-    if "营销" in normalized_category:
-        non_marketing_markers = (
-            "具身智能", "机器人", "人工智能计量", "智博会", "产业博览会",
-            "全球治理", "两部门", "监管", "法规", "政策",
-        )
-        marketing_markers = (
-            "营销", "品牌", "广告", "传播", "公关", "消费者", "消费", "用户",
-            "小红书", "抖音", "淘宝", "电商", "包装", "发布会", "联名", "内容",
-            "创意", "campaign", "世界杯", "平台",
-        )
-        if _contains_any_marker(text, non_marketing_markers):
-            return _contains_any_marker(text, marketing_markers)
-    return True
-
-
 def _get_final_selection_settings(config: dict) -> dict[str, int]:
     """Use existing final-selection settings; fall back to editorial settings if needed."""
     settings = get_selection_settings(config)
-    settings.setdefault(
-        "final_min_priority_score",
-        DEFAULT_GLOBAL_SELECTION_SETTINGS["final_min_priority_score"],
-    )
     ai_config = config.get("ai", {}) or {}
     if ai_config.get("selection"):
-        raw_selection = ai_config.get("selection") or {}
-        value = raw_selection.get("final_min_priority_score")
-        if isinstance(value, (int, float)) and value > 0:
-            settings["final_min_priority_score"] = float(value)
         return settings
     editorial_settings = (
         (ai_config.get("editorial_pipeline", {}) or {}).get("selection", {})
@@ -440,9 +417,6 @@ def _get_final_selection_settings(config: dict) -> dict[str, int]:
             value = editorial_settings.get(key)
             if isinstance(value, int) and value > 0:
                 settings[key] = value
-        value = editorial_settings.get("final_min_priority_score")
-        if isinstance(value, (int, float)) and value > 0:
-            settings["final_min_priority_score"] = float(value)
     return settings
 
 
@@ -1024,8 +998,7 @@ def _normalize_global_items(items: list[dict], *, selection_settings: dict[str, 
     """对全局初筛结果去重 + 字段补全。"""
     normalized = []
     seen_urls = set()
-    title_max_len = selection_settings["title_max_len"]
-    summary_max_len = selection_settings["summary_max_len"]
+    _ = selection_settings
 
     for item in items:
         if not isinstance(item, dict):
@@ -1033,8 +1006,8 @@ def _normalize_global_items(items: list[dict], *, selection_settings: dict[str, 
         url = _normalize_result_url(item.get("link", ""))
         if not url or url in seen_urls:
             continue
-        title = _truncate_text(item.get("title", ""), limit=title_max_len)
-        summary = _truncate_text(item.get("summary", ""), limit=summary_max_len)
+        title = _clean_output_title(item.get("title", ""))
+        summary = str(item.get("summary", "")).strip()
         if not title:
             continue
         normalized_item = dict(item)
@@ -1090,24 +1063,14 @@ def assign_candidates_to_categories(
             "error": None,
         }
 
-    # 按 batch_size 分批分配
+    # 按 batch_size 分批分配。AI 先判断，source hint 只作 fallback。
     batch_size = editorial_config.get("assignment_batch_size", 20)
     category_map: dict[str, list[dict]] = {cat: [] for cat in feeds}
     unassigned: list[dict] = []
-    unresolved_candidates: list[dict] = []
     category_list = list(feeds.keys())
 
-    for candidate in screened_candidates:
-        resolved_category = _resolve_source_hint_category(candidate, category_list)
-        if resolved_category:
-            assigned_candidate = dict(candidate)
-            assigned_candidate.setdefault("assignment_reason", "source_section_hints")
-            category_map[resolved_category].append(assigned_candidate)
-        else:
-            unresolved_candidates.append(candidate)
-
-    for start in range(0, len(unresolved_candidates), batch_size):
-        batch = unresolved_candidates[start:start + batch_size]
+    for start in range(0, len(screened_candidates), batch_size):
+        batch = screened_candidates[start:start + batch_size]
         batch_no = start // batch_size + 1
         logger.info(f"🔀 板块分配批次 {batch_no}（{len(batch)} 条）")
 
@@ -1122,7 +1085,14 @@ def assign_candidates_to_categories(
         for cat, assigned in result["assignments"].items():
             category_map[cat].extend(assigned)
 
-        unassigned.extend(result["unassigned"])
+        for candidate in result["unassigned"]:
+            fallback_category = _resolve_source_hint_category(candidate, category_list)
+            if fallback_category:
+                assigned_candidate = dict(candidate)
+                assigned_candidate["assignment_reason"] = "source_hint_fallback"
+                category_map[fallback_category].append(assigned_candidate)
+            else:
+                unassigned.append(candidate)
         time.sleep(2)
 
     # 统计日志
@@ -1269,12 +1239,11 @@ def select_for_category(
     candidates: list[dict],
     logger,
 ):
-    """板块最终输出：代码排序、代码生成 Markdown，AI 只改写摘要。"""
+    """板块最终输出：AI 终筛并生成标题/摘要，代码只校验和渲染。"""
     settings = _get_final_selection_settings(config)
     max_items = settings["max_selected_items"]
     title_max_len = settings["title_max_len"]
     summary_max_len = settings["summary_max_len"]
-    final_min_score = float(settings.get("final_min_priority_score", 0.7))
 
     if not candidates:
         return {
@@ -1283,80 +1252,157 @@ def select_for_category(
             "preview_markdown": "",
             "candidate_count": 0,
             "batches": [],
-            "selection_mode": "code_rank",
+            "selection_mode": "ai_final_edit",
         }
 
-    ranked_candidates = sorted(
+    ordered_candidates = sorted(
         candidates,
         key=lambda c: float(c.get("priority_score", 0.5) or 0.5),
         reverse=True,
     )
 
-    selected_candidates: list[dict] = []
-    for candidate in ranked_candidates:
-        if not _category_final_gate_allowed(candidate, category_name):
-            continue
-        priority_score = float(candidate.get("priority_score", 0.5) or 0.5)
-        if priority_score < final_min_score:
-            continue
-        normalized_url = _normalize_result_url(candidate.get("link", ""))
-        title = _truncate_text(_clean_output_title(candidate.get("title", "")), limit=title_max_len)
-        if not normalized_url or not title:
-            continue
-        if any(_is_similar_title(title, existing.get("title", "")) for existing in selected_candidates):
-            continue
-        item = dict(candidate)
-        item["title"] = title
-        item["link"] = normalized_url
-        selected_candidates.append(item)
-        if len(selected_candidates) >= max_items:
-            break
+    final_items, final_record = _final_edit_category_items(
+        config=config,
+        category_name=category_name,
+        candidates=ordered_candidates,
+        max_items=max_items,
+        title_max_len=title_max_len,
+        summary_max_len=summary_max_len,
+    )
 
-    if not selected_candidates:
+    if not final_items:
         return {
             "status": "empty",
             "selected_items": [],
             "preview_markdown": "",
             "candidate_count": len(candidates),
-            "batches": [],
-            "selection_mode": "code_rank",
+            "batches": [final_record],
+            "system_prompt": final_record.get("system_prompt", ""),
+            "selection_mode": "ai_final_edit",
         }
 
-    summaries, summary_record = _rewrite_category_summaries(
-        config=config,
-        category_name=category_name,
-        candidates=selected_candidates,
-        summary_max_len=summary_max_len,
-    )
-
-    selected_items = []
-    for i, candidate in enumerate(selected_candidates):
-        ref = _candidate_ref(i)
-        summary = summaries.get(ref) or _fallback_summary(
-            candidate,
-            category_name,
-            limit=summary_max_len,
-        )
-        if not summary:
-            continue
-        selected_items.append({
-            "title": candidate["title"],
-            "url": candidate["link"],
-            "summary": summary,
-        })
-
-    preview_markdown = _render_markdown(category_name, selected_items)
-    logger.info(f"  🧩 【{category_name}】代码生成输出 {len(selected_items)} 条")
+    preview_markdown = _render_markdown(category_name, final_items)
+    logger.info(f"  🧩 【{category_name}】AI 最终成稿 {len(final_items)} 条")
 
     return {
-        "status": "success" if selected_items else "empty",
-        "selected_items": selected_items,
+        "status": "success",
+        "selected_items": final_items,
         "preview_markdown": preview_markdown,
         "candidate_count": len(candidates),
-        "batches": [summary_record],
-        "system_prompt": summary_record.get("system_prompt", ""),
-        "selection_mode": "code_rank",
+        "batches": [final_record],
+        "system_prompt": final_record.get("system_prompt", ""),
+        "selection_mode": "ai_final_edit",
     }
+
+
+def _final_edit_category_items(
+    *,
+    config: dict,
+    category_name: str,
+    candidates: list[dict],
+    max_items: int,
+    title_max_len: int,
+    summary_max_len: int,
+) -> tuple[list[dict], dict]:
+    """Ask AI to make the final keep/drop decision and final copy."""
+    input_text = _make_candidate_ref_input(candidates)
+    sections = _get_sections_config(config)
+    category_prompt = sections.get(category_name, {}).get("prompt", "")
+    system_prompt = f"""你是资深营销情报编辑。请对当前板块候选做最终终筛，并生成最终标题和摘要。
+
+【当前板块】
+{category_name}
+
+【板块口径】
+{category_prompt}
+
+【任务】
+- 从候选中保留最多 {max_items} 条。
+- 可以少于 {max_items} 条，也可以全部 DROP。
+- 对 KEEP 项生成最终标题和最终摘要。
+- 标题必须是完整标题，{title_max_len} 字以内，禁止用省略号结尾。
+- 摘要必须是简体中文，{summary_max_len} 字以内，写清“发生了什么 + 对营销人的具体启示/影响”。
+- 摘要不要机械重复标题，禁止使用“需关注其对...影响”这类通用句式。
+
+【输出格式】
+每行固定为：
+C001 | KEEP | final title | final summary | reason
+C002 | DROP | - | - | reason
+
+【关键限制】
+- 只能使用输入候选 ID。
+- 不要输出链接、Markdown、JSON、编号列表或解释。
+- 不能发明事实；链接和 Markdown 将由代码生成。
+- 没有可保留内容时只输出 NONE。"""
+
+    record = {
+        "stage": "final_edit",
+        "batch_no": 1,
+        "candidate_count": len(candidates),
+        "input_chars": len(input_text),
+        "raw_response": "",
+        "parsed_items": {},
+        "status": "pending",
+        "system_prompt": system_prompt,
+    }
+
+    valid_refs = set(_candidate_ref_map(candidates))
+    ref_map = _candidate_ref_map(candidates)
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            raw = chat_completion(
+                api_url=config["ai"]["api_url"],
+                api_key=config["ai"]["api_key"],
+                model=config["ai"]["model"],
+                system_prompt=system_prompt,
+                user_text=input_text,
+                temperature=0.2,
+                timeout_s=120,
+                json_mode=False,
+            )
+            parsed = _parse_final_edit_lines(
+                raw,
+                valid_refs,
+                title_max_len=title_max_len,
+                summary_max_len=summary_max_len,
+            )
+            record["raw_response"] = raw
+            record["parsed_items"] = parsed
+            if parsed or _is_explicit_empty_ai_response(raw):
+                record["status"] = "success" if parsed else "empty"
+                break
+            record["status"] = "invalid_text"
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY_S)
+        except Exception as e:
+            record["status"] = "error"
+            record["error"] = str(e)
+            parsed = {}
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_DELAY_S)
+    else:
+        parsed = {}
+
+    selected_items: list[dict] = []
+    for ref in ref_map:
+        item = parsed.get(ref)
+        if not item or item.get("status") != "KEEP":
+            continue
+        candidate = ref_map[ref]
+        url = _normalize_result_url(candidate.get("link", ""))
+        if not url:
+            continue
+        selected_items.append({
+            "title": item["title"],
+            "url": url,
+            "summary": item["summary"],
+        })
+        if len(selected_items) >= max_items:
+            break
+
+    record["selected_count"] = len(selected_items)
+    return selected_items, record
 
 
 def _rewrite_category_summaries(
@@ -1503,7 +1549,6 @@ def run_editorial_pipeline(*, config: dict, logger) -> dict:
     logger.info("✂️  Stage 4: 板块最终精选")
     category_results = {}
     final_blocks = []
-    seen_final_titles: list[str] = []
 
     for category in _get_sections_config(config).keys():
         cat_candidates = assignment_result["category_candidate_map"].get(category, [])
@@ -1518,7 +1563,6 @@ def run_editorial_pipeline(*, config: dict, logger) -> dict:
             candidates=cat_candidates,
             logger=logger,
         )
-        result = _remove_cross_category_duplicates(result, seen_final_titles, category)
         category_results[category] = result
 
         if result.get("status") == "success" and result.get("preview_markdown"):

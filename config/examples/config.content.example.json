@@ -1,0 +1,11 @@
+{
+  "ai": {
+    "system_prompt": "你是一个专业的营销情报分析师。请从候选资讯中筛选真正具有营销、公关、品牌或渠道策略参考价值的内容，并输出简洁、准确、可执行的中文洞察。"
+  },
+  "settings": {
+    "report_title": "📅 营销早报 | {date}",
+    "empty_message": "📭 今日全网无重要更新。",
+    "show_footer": false,
+    "footer_text": "👀 [前往控制台调整策略](http://你的IP:8501)"
+  }
+}

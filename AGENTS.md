@@ -8,7 +8,7 @@ This project is Mika's marketing intelligence bot. Default communication with th
 - Production host: `ubuntu@111.229.166.6`
 - Production path: `/root/marketing_bot`
 - Production branch: `main`
-- Latest verified production commit: `e1d4037`
+- Verify the latest production commit live before and after each deployment; do not rely on a stale recorded hash.
 - Production services:
   - `insightbot-web.service` runs Streamlit on port `8501`
   - `insightbot-scheduler.service` runs the scheduler
@@ -93,7 +93,8 @@ assert len(message.content.encode("utf-8")) <= WECOM_SOFT_LIMIT_BYTES
 
 ## Editorial AI Output Contract
 
-- Do not let AI own final Markdown, source links, source names, section headings, or candidate titles in `insightbot/editorial_pipeline.py`.
+- Do not let AI own final Markdown, source links, source names, or section headings in `insightbot/editorial_pipeline.py`.
+- Do let AI own Stage 2/3/4 editorial judgment: global shortlist, section assignment, final keep/drop, final title, and final summary.
 - Stage 2 global screening should ask AI only for minimal score lines:
 
 ```text
@@ -101,24 +102,30 @@ C001 | 0.90 | reason
 ```
 
 - Treat low-score lines as rejected. The production path should ignore Stage 2 items below the configured minimum score, default `0.50`.
-- Stage 3 section assignment should first use `source_section_hints` / `source_category_hint`; call AI only for candidates without a reliable source hint. AI assignment output should stay minimal:
+- Stage 3 section assignment should call AI first. Use `source_section_hints` / `source_category_hint` only as fallback when AI output is missing, unparsable, or names an invalid section. AI assignment output should stay minimal:
 
 ```text
 C001 | section name | reason
 ```
 
-- Stage 4 should rank candidates in code and generate Markdown via `_render_markdown()`. AI may only rewrite summaries:
+- Stage 4 should let AI decide final keep/drop and generate final title + final summary. Code should not rank, hard-gate, truncate, or backfill editorial content after AI has made the final decision:
 
 ```text
-C001 | rewritten summary
+C001 | KEEP | final title | final summary | reason
+C002 | DROP | - | - | reason
 ```
 
+- Code must map final links from original candidate IDs, never from AI text.
+- Code must render Markdown via `_render_markdown()`.
+- Code must reject invalid final protocol, empty fields, overlong fields, clearly truncated titles, and generic code-fallback-like summaries. If AI repair fails, drop the item or section rather than generating fallback copy.
 - Keep JSON parsers only for compatibility tests or old utilities. New production editorial pipeline paths should not depend on AI returning valid JSON.
 
-## Editorial Final Gate Rules
+## Editorial Validation Rules
 
-- Treat `max_selected_items` as an upper bound only. Do not backfill a section to 5 items if the candidates do not pass the final quality gate.
-- Stage 4 final gates should use stable factual fields only: title, original summary, source name, and source URL. Do not use AI-provided `assignment_reason` or `editorial_note` as final evidence.
+- Treat `max_selected_items` as an upper bound only. Do not backfill a section to 5 items if AI does not keep enough candidates.
+- Stage 4 code validation is a protocol and safety gate, not an editorial gate. It should not use hard-coded topic rules to override AI's final content selection.
+- Do not generate fallback insights such as `title + 需关注其对...影响`. That pattern caused production summaries to repeat clipped titles and produce meaningless analysis.
+- Do not truncate titles before Stage 4 final AI editing. If the final title is too long or visibly clipped, ask AI to repair; if repair fails, drop it.
 - `🤖 数智前沿` should keep AI, ecommerce search, platform product changes, content platform mechanisms, and practical marketing-facing AI use cases.
 - `🤖 数智前沿` should reject generic platform/business-model essays such as "users are the product" unless they include a concrete product, algorithm, search, ecommerce, or platform mechanism change.
 - `🤖 数智前沿` should reject hard-tech or infrastructure-only items such as chips, quantum, trusted communication, compute, and foundational security unless they clearly land in marketing, ecommerce, content, search, or platform usage.
@@ -158,7 +165,7 @@ PYTHONPATH=. streamlit run scripts/app.py --server.headless true --server.port 8
 Local dry run:
 
 ```bash
-python -m insightbot.cli --task daily_brief --dry-run
+python -m insightbot.cli --task Daily_brief --dry-run
 ```
 
 Production dry run currently uses the production task id:
@@ -168,7 +175,7 @@ cd /root/marketing_bot
 ./.venv/bin/python -m insightbot.cli --task Daily_brief --dry-run
 ```
 
-The local task id is usually `daily_brief`; production still has `Daily_brief`. This naming drift is not currently fatal, but it is a cleanup candidate.
+Both local and production currently use task id `Daily_brief`. If a task id changes, verify it from `tasks.json` before running CLI commands.
 
 ## Git Hygiene
 

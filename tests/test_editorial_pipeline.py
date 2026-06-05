@@ -5,7 +5,7 @@ test_editorial_pipeline.py — insightbot.editorial_pipeline 核心逻辑测试
   - Stage 1: build_global_candidates — 全量源汇总、链接去重
   - Stage 2: screen_global_candidates — 3x倍率、全量 vs 分片模式
   - Stage 3: assign_candidates_to_categories — 单归属、空板块允许
-  - Stage 4: select_for_category — 代码生成 Markdown，AI 只改写摘要
+  - Stage 4: select_for_category — AI 终筛并生成最终标题/摘要
   - run_editorial_pipeline — 完整流水线编排、灰度开关
 """
 import json
@@ -30,6 +30,7 @@ from insightbot.editorial_pipeline import (
     _normalize_global_items,
     _parse_assignment_lines,
     _parse_assignment_response,
+    _parse_final_edit_lines,
     _parse_global_screen_response,
     _parse_summary_lines,
     _remove_cross_category_duplicates,
@@ -533,7 +534,7 @@ class TestAssignCandidatesToCategories:
         assert result["category_candidate_map"]["💡 营销行业"][0]["assignment_reason"] == "匹配营销案例"
         assert result["unassigned"] == []
 
-    def test_assignment_prefers_source_section_hints(self, silent_logger):
+    def test_assignment_uses_ai_before_source_section_hints(self, silent_logger):
         candidates = [
             {
                 "title": "AI营销文章",
@@ -544,14 +545,33 @@ class TestAssignCandidatesToCategories:
         ]
         config = _editorial_config()
 
-        with patch("insightbot.editorial_pipeline.chat_completion") as mock_ai:
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 营销行业 | AI判断为营销案例") as mock_ai:
             result = assign_candidates_to_categories(
                 config=config, screened_candidates=candidates, logger=silent_logger
             )
 
-        mock_ai.assert_not_called()
+        mock_ai.assert_called_once()
+        assert len(result["category_candidate_map"]["💡 营销行业"]) == 1
+        assert result["category_candidate_map"]["💡 营销行业"][0]["assignment_reason"] == "AI判断为营销案例"
+
+    def test_assignment_falls_back_to_source_section_hints_when_ai_empty(self, silent_logger):
+        candidates = [
+            {
+                "title": "AI营销文章",
+                "link": "https://example.com/ai",
+                "summary": "摘要",
+                "source_section_hints": ["🤖 数智前沿"],
+            },
+        ]
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value="NONE"):
+            result = assign_candidates_to_categories(
+                config=config, screened_candidates=candidates, logger=silent_logger
+            )
+
         assert len(result["category_candidate_map"]["🤖 数智前沿"]) == 1
-        assert result["category_candidate_map"]["🤖 数智前沿"][0]["assignment_reason"] == "source_section_hints"
+        assert result["category_candidate_map"]["🤖 数智前沿"][0]["assignment_reason"] == "source_hint_fallback"
 
     def test_policy_hint_requires_policy_evidence(self, silent_logger):
         candidates = [
@@ -614,13 +634,12 @@ class TestBuildPublicationScopeSummary:
 
 
 class TestSelectForCategory:
-    """测试板块最终输出：代码拥有标题、链接和 Markdown，AI 只改写摘要"""
+    """测试板块最终输出：AI 终筛并生成最终标题/摘要，代码只校验与渲染"""
 
-    def test_uses_code_owned_title_url_and_ai_summary(self, silent_logger):
-        """标题、链接和 Markdown 应该由代码生成，AI 只提供摘要。"""
+    def test_uses_ai_final_title_summary_and_code_owned_url(self, silent_logger):
         candidates = [
             {
-                "title": "[RSS] 文章频道 - 测试标题",
+                "title": "[RSS] 文章频道 - 原始长标题",
                 "link": "https://example.com/1",
                 "summary": "测试摘要",
                 "priority_score": 0.8,
@@ -628,8 +647,9 @@ class TestSelectForCategory:
             }
         ]
         config = _editorial_config()
+        raw = "C001 | KEEP | AI改写标题 | AI改写摘要，说明营销启示 | 适合发布"
 
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 改写后的摘要") as mock_ai:
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw) as mock_ai:
             result = select_for_category(
                 config=config,
                 category_name="💡 营销行业",
@@ -639,34 +659,28 @@ class TestSelectForCategory:
 
         mock_ai.assert_called_once()
         assert mock_ai.call_args[1]["json_mode"] is False
+        assert result["selection_mode"] == "ai_final_edit"
         assert result["status"] == "success"
         assert result["selected_items"] == [
-            {"title": "测试标题", "url": "https://example.com/1", "summary": "改写后的摘要"}
+            {"title": "AI改写标题", "url": "https://example.com/1", "summary": "AI改写摘要，说明营销启示"}
         ]
-        assert "### [测试标题](https://example.com/1)" in result["preview_markdown"]
+        assert "### [AI改写标题](https://example.com/1)" in result["preview_markdown"]
 
-    def test_does_not_fill_to_five_below_final_quality_threshold(self, silent_logger):
+    def test_does_not_backfill_when_ai_keeps_fewer_than_max(self, silent_logger):
         candidates = [
-            {
-                "title": title,
-                "link": f"https://example.com/{i}",
-                "summary": "摘要",
-                "priority_score": score,
-            }
-            for i, (title, score) in enumerate(
-                [
-                    ("苹果推出新广告", 0.91),
-                    ("耐克发布跑步社群计划", 0.82),
-                    ("普通行业消息", 0.69),
-                    ("低价值消息", 0.6),
-                    ("边缘消息", 0.55),
-                ],
-                start=1,
-            )
+            {"title": f"候选{i}", "link": f"https://example.com/{i}", "summary": "摘要", "priority_score": 0.9 - i * 0.01}
+            for i in range(1, 6)
         ]
         config = _editorial_config()
+        raw = (
+            "C001 | KEEP | 保留一 | 摘要一说明营销启示 | 合格\n"
+            "C002 | KEEP | 保留二 | 摘要二说明营销启示 | 合格\n"
+            "C003 | DROP | - | - | 边缘\n"
+            "C004 | DROP | - | - | 边缘\n"
+            "C005 | DROP | - | - | 边缘"
+        )
 
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 摘要一\nC002 | 摘要二"):
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw):
             result = select_for_category(
                 config=config,
                 category_name="💡 营销行业",
@@ -675,219 +689,44 @@ class TestSelectForCategory:
             )
 
         assert result["status"] == "success"
-        assert len(result["selected_items"]) == 2
-        assert [item["title"] for item in result["selected_items"]] == ["苹果推出新广告", "耐克发布跑步社群计划"]
+        assert [item["title"] for item in result["selected_items"]] == ["保留一", "保留二"]
 
-    def test_policy_final_gate_drops_non_policy_items(self, silent_logger):
+    def test_invalid_ai_final_copy_is_dropped_without_code_fallback(self, silent_logger):
         candidates = [
             {
-                "title": "智博会观察：具身智能独立成馆",
-                "link": "https://example.com/embodied-ai",
-                "summary": "具身智能产业地位提升。",
+                "title": "Nike Reveals a World Cup Universe",
+                "link": "https://example.com/nike",
+                "summary": "Nike launches World Cup creative platform.",
                 "priority_score": 0.9,
             },
-            {
-                "title": "中国两部门系统布局人工智能计量能力建设",
-                "link": "https://example.com/ai-measurement",
-                "summary": "两部门联合印发人工智能计量体系文件。",
-                "priority_score": 0.86,
-            },
         ]
         config = _editorial_config()
+        raw = "C001 | KEEP | Nike Reveals a World Cup Unive... | Nike Reveals a World Cup Unive...，需关注其对品牌传播与消费沟通的影响 | 合格"
 
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | AI计量摘要"):
-            result = select_for_category(
-                config=config,
-                category_name="📢 政策导向",
-                candidates=candidates,
-                logger=silent_logger,
-            )
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw):
+            with patch("insightbot.editorial_pipeline.time.sleep"):
+                result = select_for_category(
+                    config=config,
+                    category_name="💡 营销行业",
+                    candidates=candidates,
+                    logger=silent_logger,
+                )
 
-        assert len(result["selected_items"]) == 1
-        assert result["selected_items"][0]["title"] == "中国两部门系统布局人工智能计量能力建设"
+        assert result["status"] == "empty"
+        assert result["selected_items"] == []
 
-    def test_policy_final_gate_ignores_broad_governance_terms(self, silent_logger):
-        candidates = [
-            {
-                "title": "王毅出席全球治理之友小组会议",
-                "link": "https://example.com/global-governance",
-                "summary": "国际会议讨论全球治理合作。",
-                "priority_score": 0.92,
-            },
-            {
-                "title": "上海市网信办通报13品牌违规收集个人信息",
-                "link": "https://example.com/privacy",
-                "summary": "消费品牌需关注个人信息合规。",
-                "priority_score": 0.88,
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 数据合规摘要"):
-            result = select_for_category(
-                config=config,
-                category_name="📢 政策导向",
-                candidates=candidates,
-                logger=silent_logger,
-            )
-
-        assert len(result["selected_items"]) == 1
-        assert result["selected_items"][0]["title"] == "上海市网信办通报13品牌违规收集个人信息"
-
-    def test_policy_final_gate_requires_business_relevance(self, silent_logger):
-        candidates = [
-            {
-                "title": "生态环境部印发海湾清洁指数评价技术方法",
-                "link": "https://example.com/bay-cleanliness",
-                "summary": "生态环境部印发海湾清洁指数评价技术方法试行文件。",
-                "priority_score": 0.9,
-            },
-            {
-                "title": "高考临近多家AI平台涉考功能限时上锁",
-                "link": "https://example.com/ai-exam",
-                "summary": "高考期间多家AI平台限制涉考功能。",
-                "priority_score": 0.88,
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | AI合规摘要"):
-            result = select_for_category(
-                config=config,
-                category_name="📢 政策导向",
-                candidates=candidates,
-                logger=silent_logger,
-            )
-
-        assert len(result["selected_items"]) == 1
-        assert result["selected_items"][0]["title"] == "高考临近多家AI平台涉考功能限时上锁"
-
-    def test_digital_final_gate_requires_product_or_ai_signal(self, silent_logger):
-        candidates = [
-            {
-                "title": "当你没有付费，你可能就是产品本身",
-                "link": "https://example.com/free-product",
-                "summary": "互联网平台免费服务背后用户成为产品，AI时代数据与注意力被商业化利用。",
-                "assignment_reason": "平台数据议题",
-                "priority_score": 0.91,
-            },
-            {
-                "title": "亚马逊搜索全面 AI 化",
-                "link": "https://example.com/amazon-ai-search",
-                "summary": "电商搜索被AI重构。",
-                "priority_score": 0.86,
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | AI搜索摘要"):
-            result = select_for_category(
-                config=config,
-                category_name="🤖 数智前沿",
-                candidates=candidates,
-                logger=silent_logger,
-            )
-
-        assert len(result["selected_items"]) == 1
-        assert result["selected_items"][0]["title"] == "亚马逊搜索全面 AI 化"
-
-    def test_digital_final_gate_allows_platform_product_changes(self, silent_logger):
-        candidates = [
-            {
-                "title": "小红书买下世界杯版权",
-                "link": "https://example.com/rednote-worldcup",
-                "summary": "小红书通过版权内容拓展平台内容供给。",
-                "priority_score": 0.88,
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 平台内容摘要"):
-            result = select_for_category(
-                config=config,
-                category_name="🤖 数智前沿",
-                candidates=candidates,
-                logger=silent_logger,
-            )
-
-        assert len(result["selected_items"]) == 1
-
-    def test_digital_final_gate_drops_hard_tech_without_marketing_application(self, silent_logger):
-        candidates = [
-            {
-                "title": "中国首创基于国产抗量子芯片的AI多智能体可信通信试验",
-                "link": "https://example.com/quantum-chip",
-                "summary": "国产抗量子芯片完成AI多智能体可信通信试验。",
-                "priority_score": 0.91,
-            },
-            {
-                "title": "AI做电商视频的8个稳定出片问题",
-                "link": "https://example.com/ai-video",
-                "summary": "AI电商视频面临商品一致性与生成稳定性挑战。",
-                "priority_score": 0.86,
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | AI视频摘要"):
-            result = select_for_category(
-                config=config,
-                category_name="🤖 数智前沿",
-                candidates=candidates,
-                logger=silent_logger,
-            )
-
-        assert len(result["selected_items"]) == 1
-        assert result["selected_items"][0]["title"] == "AI做电商视频的8个稳定出片问题"
-
-    def test_marketing_final_gate_drops_pure_tech_expo(self, silent_logger):
-        candidates = [
-            {
-                "title": "智博会观察：具身智能独立成馆",
-                "link": "https://example.com/embodied-ai",
-                "summary": "人工智能产业博览会展示具身智能技术进展。",
-                "priority_score": 0.91,
-            },
-            {
-                "title": "六神把发布会开成蚊学院",
-                "link": "https://example.com/sixgod",
-                "summary": "品牌通过场景化发布会强化新品传播。",
-                "priority_score": 0.86,
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 发布会摘要"):
-            result = select_for_category(
-                config=config,
-                category_name="💡 营销行业",
-                candidates=candidates,
-                logger=silent_logger,
-            )
-
-        assert len(result["selected_items"]) == 1
-        assert result["selected_items"][0]["title"] == "六神把发布会开成蚊学院"
-
-    def test_raw_excerpt_fallback_uses_code_owned_summary(self, silent_logger):
-        candidates = [
-            {
-                "title": "淘小宝勇闯异世界",
-                "link": "https://example.com/pet",
-                "summary": "这几年被大量铲屎官们加倍宠爱的，非异宠们莫属了！今年5月7日-10日，在上海国家会展中心举办活动。",
-                "priority_score": 0.88,
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="NONE"):
-            result = select_for_category(
-                config=config,
-                category_name="💡 营销行业",
-                candidates=candidates,
-                logger=silent_logger,
-            )
-
-        assert result["selected_items"][0]["summary"] == "淘小宝勇闯异世界，需关注其对品牌传播与消费沟通的影响。"
+    def test_final_edit_parser_rejects_truncated_and_generic_fallback_copy(self):
+        parsed = _parse_final_edit_lines(
+            "C001 | KEEP | 标题... | 标题...，需关注其对品牌传播与消费沟通的影响 | bad\n"
+            "C002 | KEEP | 完整标题 | 事件说明清楚，并给出具体营销启示 | ok\n"
+            "C003 | DROP | - | - | low",
+            {"C001", "C002", "C003"},
+            title_max_len=30,
+            summary_max_len=60,
+        )
+        assert "C001" not in parsed
+        assert parsed["C002"]["status"] == "KEEP"
+        assert parsed["C003"]["status"] == "DROP"
 
     def test_summary_parser_rejects_none_and_strips_markdown(self):
         parsed = _parse_summary_lines(
@@ -897,7 +736,7 @@ class TestSelectForCategory:
         )
         assert parsed == {"C002": "有效摘要内容"}
 
-    def test_cross_category_dedupe_drops_repeated_topics(self):
+    def test_cross_category_dedupe_helper_still_drops_repeated_topics(self):
         result = {
             "status": "success",
             "selected_items": [
@@ -915,7 +754,6 @@ class TestSelectForCategory:
         assert [item["title"] for item in filtered["selected_items"]] == ["完全不同标题"]
 
     def test_returns_empty_when_no_candidates(self, silent_logger):
-        """空候选时返回空结果，不崩溃"""
         config = _editorial_config()
         result = select_for_category(
             config=config,
@@ -925,7 +763,7 @@ class TestSelectForCategory:
         )
         assert result["status"] == "empty_candidates"
 
-    def test_falls_back_to_original_summary_when_ai_rewrite_fails(self, silent_logger):
+    def test_returns_empty_when_ai_final_edit_fails(self, silent_logger):
         candidates = [
             {
                 "title": "测试标题",
@@ -937,15 +775,16 @@ class TestSelectForCategory:
         config = _editorial_config()
 
         with patch("insightbot.editorial_pipeline.chat_completion", side_effect=TimeoutError("timeout")):
-            result = select_for_category(
-                config=config,
-                category_name="💡 营销行业",
-                candidates=candidates,
-                logger=silent_logger,
-            )
+            with patch("insightbot.editorial_pipeline.time.sleep"):
+                result = select_for_category(
+                    config=config,
+                    category_name="💡 营销行业",
+                    candidates=candidates,
+                    logger=silent_logger,
+                )
 
-        assert result["status"] == "success"
-        assert result["selected_items"][0]["summary"] == "原始摘要内容"
+        assert result["status"] == "empty"
+        assert result["selected_items"] == []
         assert result["batches"][0]["status"] == "error"
 
 
