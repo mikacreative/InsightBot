@@ -2,6 +2,14 @@
 
 ## Unreleased (2026-06-01)
 
+### Editorial Pipeline AI-First Rewrite
+
+- Stage 3 板块分配改为 AI 优先判断，`source_section_hints` / `source_category_hint` 仅在 AI 输出缺失或无效时作为 fallback
+- Stage 4 改为 AI 终筛并生成最终标题与摘要，代码只负责候选 ID 校验、原始链接映射、字段合法性校验和 Markdown 渲染
+- 移除 Stage 4 的代码硬 gate、代码排序补齐和 `title + 需关注其对...影响` 兜底摘要，避免生产推送出现截断标题混入洞察句的问题
+- Stage 2 保留候选原始标题和摘要，不再提前按展示长度截断；展示长度由 Stage 4 AI 成稿与代码校验共同控制
+- 项目文档同步记录 AI-first 流程作为新的生产契约
+
 ### Runtime Config Baseline
 
 - `dev` 已完成 runtime config 结构整理：root-level `tasks.json`、`channels.json`、`config.content.json`、`config.secrets.json` 改为环境相关运行文件，不再作为 Git 交付物提交
