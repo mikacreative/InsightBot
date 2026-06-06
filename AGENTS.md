@@ -6,7 +6,7 @@ This project is Mika's marketing intelligence bot. Default communication with th
 
 - Local repo: `/Users/mikawang/Documents/GitHub/InsightBot`
 - Production host: `ubuntu@111.229.166.6`
-- Production path: `/root/marketing_bot`
+- Production path: `/home/ubuntu/marketing_bot`
 - Production branch: `main`
 - Verify the latest production commit live before and after each deployment; do not rely on a stale recorded hash.
 - Production services:
@@ -16,11 +16,18 @@ This project is Mika's marketing intelligence bot. Default communication with th
 
 ## Safe Deployment Pattern
 
+Production can be deployed automatically through GitHub Actions:
+
+- Workflow: `.github/workflows/deploy-production.yml`
+- Docs: `docs/github_actions_production_deploy.md`
+- The workflow must preserve runtime config files exactly like the manual deployment pattern below.
+- If GitHub Environment `production` has no required reviewers, every push to `main` deploys automatically after tests pass.
+
 Before updating Tencent Cloud production, always inspect the remote working tree:
 
 ```bash
 ssh -i /Users/mikawang/.ssh/mika.pem ubuntu@111.229.166.6 \
-  'sudo bash -lc "cd /root/marketing_bot && git branch --show-current && git rev-parse HEAD && git status --short"'
+  'sudo bash -lc "cd /home/ubuntu/marketing_bot && git branch --show-current && git rev-parse HEAD && git status --short"'
 ```
 
 If production has runtime config changes, back up and restore those files around the Git update:
@@ -28,13 +35,13 @@ If production has runtime config changes, back up and restore those files around
 ```bash
 stamp=$(date +%Y%m%d-%H%M%S)
 mkdir -p /root/back-up/main-hotfix-$stamp
-cd /root/marketing_bot
+cd /home/ubuntu/marketing_bot
 cp config.content.json /root/back-up/main-hotfix-$stamp/config.content.json
 cp -f tasks.json /root/back-up/main-hotfix-$stamp/tasks.json 2>/dev/null || true
 cp -f channels.json /root/back-up/main-hotfix-$stamp/channels.json 2>/dev/null || true
 git fetch origin
 git reset --hard origin/main
-cp /root/back-up/main-hotfix-$stamp/config.content.json /root/marketing_bot/config.content.json
+cp /root/back-up/main-hotfix-$stamp/config.content.json /home/ubuntu/marketing_bot/config.content.json
 systemctl restart insightbot-web.service
 systemctl restart insightbot-scheduler.service
 ```
@@ -171,7 +178,7 @@ python -m insightbot.cli --task Daily_brief --dry-run
 Production dry run currently uses the production task id:
 
 ```bash
-cd /root/marketing_bot
+cd /home/ubuntu/marketing_bot
 ./.venv/bin/python -m insightbot.cli --task Daily_brief --dry-run
 ```
 

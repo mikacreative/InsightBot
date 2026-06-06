@@ -5,6 +5,8 @@ def default_bot_dir() -> str:
     env_dir = os.getenv("MARKETING_BOT_DIR")
     if env_dir:
         return env_dir
+    if os.path.isdir("/home/ubuntu/marketing_bot"):
+        return "/home/ubuntu/marketing_bot"
     if os.path.isdir("/root/marketing_bot"):
         return "/root/marketing_bot"
     return os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
