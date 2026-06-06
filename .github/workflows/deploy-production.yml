@@ -140,7 +140,18 @@ jobs:
             exit 1
           fi
 
-          curl -I -s http://127.0.0.1:8501 | head -n 5
+          for attempt in $(seq 1 12); do
+            if curl -I -s http://127.0.0.1:8501 | head -n 5; then
+              http_ready=1
+              break
+            fi
+            http_ready=0
+            sleep 5
+          done
+          if [ "$http_ready" != "1" ]; then
+            echo "Streamlit HTTP health check failed after retries" >&2
+            exit 1
+          fi
 
           if [ "${RUN_DRY_RUN:-false}" = "true" ]; then
             ./.venv/bin/python -m insightbot.cli --task Daily_brief --dry-run
