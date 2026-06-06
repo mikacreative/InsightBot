@@ -1,0 +1,163 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_dry_run:
+        description: "Run production Daily_brief dry-run after deploy"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          PYTHONPATH: .:editorial-intelligence
+        run: python -m pytest -q
+
+      - name: Compile check
+        run: python -m compileall insightbot scripts
+
+  deploy:
+    name: Deploy to Tencent Cloud
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    env:
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      TENCENT_HOST: ${{ secrets.TENCENT_HOST }}
+      TENCENT_USER: ${{ secrets.TENCENT_USER }}
+      TENCENT_SSH_KEY: ${{ secrets.TENCENT_SSH_KEY }}
+      TENCENT_SSH_PORT: ${{ secrets.TENCENT_SSH_PORT }}
+      RUN_DRY_RUN: ${{ github.event.inputs.run_dry_run || 'false' }}
+    steps:
+      - name: Validate required secrets
+        run: |
+          test -n "$TENCENT_HOST"
+          test -n "$TENCENT_USER"
+          test -n "$TENCENT_SSH_KEY"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$TENCENT_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          port="${TENCENT_SSH_PORT:-22}"
+          ssh-keyscan -p "$port" -H "$TENCENT_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: |
+          port="${TENCENT_SSH_PORT:-22}"
+          remote="${TENCENT_USER}@${TENCENT_HOST}"
+          ssh -i ~/.ssh/deploy_key -p "$port" "$remote" \
+            "sudo DEPLOY_PATH='${DEPLOY_PATH:-/home/ubuntu/marketing_bot}' RUN_DRY_RUN='$RUN_DRY_RUN' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          deploy_path="${DEPLOY_PATH:-/home/ubuntu/marketing_bot}"
+          cd "$deploy_path"
+
+          current_branch="$(git branch --show-current)"
+          if [ "$current_branch" != "main" ]; then
+            echo "Refusing deploy: production branch is $current_branch, expected main" >&2
+            exit 1
+          fi
+
+          before_commit="$(git rev-parse --short HEAD)"
+          stamp="github-actions-$(date +%Y%m%d-%H%M%S)"
+          snap="/root/back-up/marketing_bot-deploy-snapshots/$stamp"
+          mkdir -p "$snap"
+
+          for f in tasks.json channels.json config.content.json config.secrets.json .env .env.local; do
+            if [ -f "$f" ]; then
+              cp -a "$f" "$snap/$f"
+            fi
+          done
+
+          git fetch origin main
+
+          services_stopped=0
+          restart_on_error() {
+            if [ "$services_stopped" = "1" ]; then
+              systemctl restart insightbot-web.service insightbot-scheduler.service || true
+            fi
+          }
+          trap restart_on_error ERR
+
+          systemctl stop insightbot-scheduler.service insightbot-web.service
+          services_stopped=1
+
+          git checkout main
+          git reset --hard origin/main
+
+          for f in tasks.json channels.json config.content.json config.secrets.json .env .env.local; do
+            if [ -f "$snap/$f" ]; then
+              cp -a "$snap/$f" "$deploy_path/$f"
+            fi
+          done
+
+          chown ubuntu:ubuntu "$deploy_path"/tasks.json "$deploy_path"/channels.json "$deploy_path"/config.content.json "$deploy_path"/config.secrets.json 2>/dev/null || true
+
+          ./.venv/bin/python -m compileall insightbot scripts
+
+          systemctl restart insightbot-web.service insightbot-scheduler.service
+          services_stopped=0
+
+          web_status="$(systemctl is-active insightbot-web.service)"
+          scheduler_status="$(systemctl is-active insightbot-scheduler.service)"
+          if [ "$web_status" != "active" ] || [ "$scheduler_status" != "active" ]; then
+            echo "Service check failed: web=$web_status scheduler=$scheduler_status" >&2
+            exit 1
+          fi
+
+          for attempt in $(seq 1 12); do
+            if curl -I -s http://127.0.0.1:8501 | head -n 5; then
+              http_ready=1
+              break
+            fi
+            http_ready=0
+            sleep 5
+          done
+          if [ "$http_ready" != "1" ]; then
+            echo "Streamlit HTTP health check failed after retries" >&2
+            exit 1
+          fi
+
+          if [ "${RUN_DRY_RUN:-false}" = "true" ]; then
+            ./.venv/bin/python -m insightbot.cli --task Daily_brief --dry-run
+          fi
+
+          after_commit="$(git rev-parse --short HEAD)"
+          echo "Deployed $before_commit -> $after_commit"
+          echo "Runtime config snapshot: $snap"
+          REMOTE

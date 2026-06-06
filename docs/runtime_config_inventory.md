@@ -52,7 +52,7 @@ Current entrypoints:
 
 - `insightbot/paths.py` defines default paths for `config.content.json`, `config.secrets.json`, `tasks.json`, and `channels.json`.
 - `MARKETING_BOT_DIR` can override the runtime directory.
-- If `MARKETING_BOT_DIR` is unset, `default_bot_dir()` prefers `/root/marketing_bot` when it exists; otherwise it uses the repo root.
+- If `MARKETING_BOT_DIR` is unset, `default_bot_dir()` prefers the deployed production directory when configured; otherwise it falls back to the repo root.
 - `insightbot/config.py::load_runtime_config()` loads runtime config in this order: `CONFIG_FILE`, split content/secrets files, legacy `config.json`, then environment overrides.
 - `insightbot/config.py::load_tasks()` reads `tasks.json`.
 - `insightbot/config.py::load_channels()` reads `channels.json`.
@@ -128,7 +128,7 @@ Responsibilities:
 4. Normalize task id policy: decide whether production remains `Daily_brief` or migrates to `daily_brief`, then document or implement aliases.
 5. Retire legacy wording: migrate UI/debug/docs from `feeds` terminology to `sources` / `sections`.
 6. Reduce compatibility paths only after production and local dev both run cleanly on canonical config.
-7. Consider cloud path migration from `/root/marketing_bot` to `/home/ubuntu/...` as a separate deployment hygiene task.
+7. Cloud production was migrated to `/home/ubuntu/marketing_bot`; keep `/root/marketing_bot` only as a temporary cold backup if present.
 
 ## Guardrails
 

@@ -199,7 +199,7 @@ python -m insightbot --webhook
 
 | 变量 | 说明 |
 |------|------|
-| `MARKETING_BOT_DIR` | 工作目录，默认 `/root/marketing_bot` 或当前目录 |
+| `MARKETING_BOT_DIR` | 工作目录，生产默认 `/home/ubuntu/marketing_bot`，兼容 `/root/marketing_bot`，本地默认当前 repo |
 | `CONFIG_CONTENT_FILE` | 覆盖 `config.content.json` 路径 |
 | `CONFIG_SECRETS_FILE` | 覆盖 `config.secrets.json` 路径 |
 | `CHANNELS_FILE` | 覆盖 `channels.json` 路径 |
