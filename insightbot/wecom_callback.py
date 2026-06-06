@@ -83,7 +83,17 @@ def _reply_text(to_user: str, from_user: str, content: str) -> str:
 </xml>"""
 
 
-def _handle_command(cmd: str, scheduler: Scheduler, channel_id: str | None) -> str:
+def _allowed_users() -> set[str]:
+    raw = os.getenv("WECOM_ALLOWED_USERS", "")
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def _can_run_command(from_user: str) -> bool:
+    allowed = _allowed_users()
+    return bool(from_user and from_user in allowed)
+
+
+def _handle_command(cmd: str, scheduler: Scheduler, channel_id: str | None, from_user: str = "") -> str:
     """Parse command and return reply text."""
     cmd = cmd.strip().lower()
     parts = cmd.split()
@@ -114,6 +124,8 @@ def _handle_command(cmd: str, scheduler: Scheduler, channel_id: str | None) -> s
         return "任务列表:\n" + "\n".join(lines) if lines else "暂无任务。"
 
     if action in ("run", "执行"):
+        if not _can_run_command(from_user):
+            return "当前用户未授权执行真实推送。请使用 dry <task_id> 试运行，或联系管理员加入 WECOM_ALLOWED_USERS。"
         if len(parts) < 2:
             return "用法: run <task_id>"
         task_id = parts[1]
@@ -243,7 +255,7 @@ def make_request_handler(
 
             if msg_type_text == "text" and content:
                 logger.info(f"Received command from {from_user}: {content}")
-                reply = _handle_command(content, scheduler, channel_id)
+                reply = _handle_command(content, scheduler, channel_id, from_user=from_user)
 
                 # Reply via channel if configured, otherwise return empty success
                 if channel_id:

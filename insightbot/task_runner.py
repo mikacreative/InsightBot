@@ -179,7 +179,7 @@ def _run_editorial_intelligence_pipeline(*, config: dict, logger) -> dict:
                 provider_id="brave",
                 name="Brave Search",
                 api_key=brave_key,
-                base_url="https://api.search.brave.com/res/v1/web/search",
+                base_url="https://api.search.brave.com/res/v1/web",
                 weight=0.4,
                 enabled=True,
             )
@@ -404,15 +404,20 @@ def run_task(
             logger.error(f"TaskRunner: failed to send to '{channel_id}': {e}")
             channel_results.append({"channel_id": channel_id, "ok": False, "error": str(e)})
 
+    delivery_ok = any(item.get("ok") for item in channel_results) if task_channels else True
+    overall_ok = pipeline_ok and delivery_ok
+    delivery_error = None if delivery_ok else "All configured channels failed to send."
     payload = {
-        "ok": pipeline_ok,
+        "ok": overall_ok,
+        "pipeline_ok": pipeline_ok,
+        "delivery_ok": delivery_ok,
         "task_id": task_id,
         "pipeline": task_pipeline,
         "dry_run": False,
         "final_markdown": final_markdown,
         "channel_results": channel_results,
         "stage_results": stage_results,
-        "error": pipeline_error,
+        "error": pipeline_error or delivery_error,
     }
     try:
         append_run_record(
@@ -424,10 +429,10 @@ def run_task(
                 started_at=started_at,
                 ended_at=datetime.now(),
                 dry_run=False,
-                ok=pipeline_ok,
+                ok=overall_ok,
                 stage_results=stage_results,
                 channel_results=channel_results,
-                error=pipeline_error,
+                error=pipeline_error or delivery_error,
             ),
         )
     except Exception as exc:

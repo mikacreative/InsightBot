@@ -9,6 +9,7 @@ import feedparser
 import requests
 
 from .paths import feed_health_cache_file_path
+from .safe_http import UnsafeURL, safe_get
 
 CACHE_TTL_SECONDS = 300
 FEED_FETCH_TIMEOUT_S = 15
@@ -23,14 +24,21 @@ def _normalize_feed_url(raw_url: str) -> str:
 
 
 def _classify_exception(exc: Exception) -> tuple[str, str]:
-    if isinstance(exc, (TimeoutError, requests.exceptions.Timeout)):
+    timeout_exc = getattr(requests.exceptions, "Timeout", None)
+    connection_exc = getattr(requests.exceptions, "ConnectionError", None)
+    http_exc = getattr(requests.exceptions, "HTTPError", None)
+
+    timeout_types = tuple(t for t in (TimeoutError, timeout_exc) if isinstance(t, type))
+    if timeout_types and isinstance(exc, timeout_types):
         return "timeout", str(exc) or "请求超时"
-    if isinstance(exc, requests.exceptions.ConnectionError):
+    if isinstance(connection_exc, type) and isinstance(exc, connection_exc):
         return "unreachable", str(exc)
-    if isinstance(exc, requests.exceptions.HTTPError):
+    if isinstance(http_exc, type) and isinstance(exc, http_exc):
         response = getattr(exc, "response", None)
         status_code = response.status_code if response is not None else "unknown"
         return "invalid_feed", f"HTTP {status_code}"
+    if isinstance(exc, UnsafeURL):
+        return "blocked_url", str(exc)
 
     text = str(exc).lower()
     if "timeout" in text or "timed out" in text:
@@ -73,7 +81,7 @@ def inspect_feed(url: str) -> dict[str, Any]:
 
     try:
         start = time.time()
-        response = requests.get(
+        response = safe_get(
             normalized_url,
             timeout=FEED_FETCH_TIMEOUT_S,
             headers={"User-Agent": "InsightBot/0.3.0 (+https://github.com/mikacreative/InsightBot)"},

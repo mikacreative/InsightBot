@@ -226,7 +226,11 @@ class TestRunTaskReal:
                 mock_channel.return_value.delivery_profile = {"preferred_format": "markdown", "channel_type": "wecom"}
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
-        assert result["channel_results"][0]["ok"] is False
+                assert result["channel_results"][0]["ok"] is False
+                assert result["pipeline_ok"] is True
+                assert result["delivery_ok"] is False
+                assert result["ok"] is False
+                assert result["error"] == "All configured channels failed to send."
 
     def test_real_run_does_not_send_when_pipeline_fails(self):
         from insightbot.task_runner import run_task

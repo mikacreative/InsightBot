@@ -12,9 +12,10 @@ import time
 from datetime import datetime
 from typing import Callable
 
-from .config import load_tasks, load_tasks_config, normalize_task_definition
+from .channels import init_channels
+from .config import load_channels, load_tasks, load_tasks_config, normalize_task_definition
 from .logging_setup import build_logger
-from .paths import bot_log_file_path, default_bot_dir, tasks_file_path
+from .paths import bot_log_file_path, channels_file_path, default_bot_dir, tasks_file_path
 
 logger = logging.getLogger("Scheduler")
 
@@ -99,7 +100,9 @@ class Scheduler:
         self.bot_dir = bot_dir or default_bot_dir()
         self.tasks: dict[str, Task] = {}
         self._log = logging.getLogger("Scheduler")
+        self._runtime_mtimes: dict[str, float | None] = {}
         self._load_tasks()
+        self._refresh_runtime_mtimes()
 
     def _make_task_config_loader(self, task_id: str) -> Callable[[], dict]:
         """Build a per-task config loader so CLI/systemd runs use the full task config."""
@@ -117,13 +120,45 @@ class Scheduler:
             )
         self._log.info(f"Loaded {len(self.tasks)} tasks from tasks.json")
 
+    def _watched_runtime_files(self) -> dict[str, str]:
+        bot_dir = getattr(self, "bot_dir", None) or default_bot_dir()
+        return {
+            "tasks": tasks_file_path(bot_dir),
+            "channels": channels_file_path(bot_dir),
+        }
+
+    def _get_runtime_mtimes(self) -> dict[str, float | None]:
+        mtimes: dict[str, float | None] = {}
+        for key, path in self._watched_runtime_files().items():
+            try:
+                mtimes[key] = os.path.getmtime(path)
+            except OSError:
+                mtimes[key] = None
+        return mtimes
+
+    def _refresh_runtime_mtimes(self) -> None:
+        self._runtime_mtimes = self._get_runtime_mtimes()
+
+    def reload_if_config_changed(self) -> bool:
+        """Reload tasks and channels if runtime config files changed on disk."""
+        current = self._get_runtime_mtimes()
+        if current == getattr(self, "_runtime_mtimes", current):
+            return False
+        self._log.info("Runtime config changed on disk; reloading scheduler state.")
+        self._load_tasks()
+        init_channels(load_channels(self.bot_dir))
+        self._runtime_mtimes = current
+        return True
+
     def reload(self) -> None:
         """Reload tasks.json from disk."""
         self._load_tasks()
+        self._refresh_runtime_mtimes()
         self._log.info("Scheduler tasks reloaded.")
 
     def run_task_by_id(self, task_id: str, dry_run: bool = False) -> dict:
         """Run a specific task by ID immediately (bypasses schedule)."""
+        self.reload_if_config_changed()
         task = self.tasks.get(task_id)
         if task is None:
             raise KeyError(f"Task '{task_id}' not found.")
@@ -133,6 +168,7 @@ class Scheduler:
     def run_all_enabled(self, dry_run: bool = False) -> list[dict]:
         """Run all enabled tasks immediately."""
         results = []
+        self.reload_if_config_changed()
         for task in self.tasks.values():
             if task.enabled:
                 try:
@@ -153,6 +189,7 @@ class Scheduler:
             f"checking every {check_interval_seconds}s."
         )
         while True:
+            self.reload_if_config_changed()
             for task in self.tasks.values():
                 if task.enabled and task.should_run_now():
                     try:

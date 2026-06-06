@@ -16,6 +16,7 @@ from insightbot.config import (
     save_tasks,
 )
 from insightbot.feed_health import CACHE_TTL_SECONDS, get_feed_health_snapshot, load_health_cache
+from insightbot.ids import is_safe_id
 from insightbot.paths import (
     bot_log_file_path,
     config_content_file_path,
@@ -838,7 +839,9 @@ def main() -> None:
         if st.button("创建任务", key="quick_create_task_btn", use_container_width=True):
             tasks_data = get_tasks_data()
             tasks = tasks_data.get("tasks", {})
-            if quick_new_task_id and quick_new_task_id not in tasks:
+            if quick_new_task_id and not is_safe_id(quick_new_task_id):
+                st.error("任务 ID 只能使用英文字母、数字、下划线和连字符，长度 1-64。")
+            elif quick_new_task_id and quick_new_task_id not in tasks:
                 tasks[quick_new_task_id] = {
                     "name": quick_new_task_name or quick_new_task_id,
                     "enabled": False,
@@ -1601,7 +1604,9 @@ def main() -> None:
             new_ch_type_input = st.selectbox("类型", options=["wecom", "feishu_app", "feishu_bot"], index=0)
 
         if st.button("添加频道", key="add_channel_btn"):
-            if new_ch_id and new_ch_id not in channels_data["channels"]:
+            if new_ch_id and not is_safe_id(new_ch_id):
+                st.error("频道 ID 只能使用英文字母、数字、下划线和连字符，长度 1-64。")
+            elif new_ch_id and new_ch_id not in channels_data["channels"]:
                 channels_data["channels"][new_ch_id] = {
                     "type": new_ch_type_input,
                     "name": new_ch_name_input or new_ch_id,

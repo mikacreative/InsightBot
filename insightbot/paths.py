@@ -1,4 +1,7 @@
 import os
+from pathlib import Path
+
+from .ids import require_safe_id
 
 
 def default_bot_dir() -> str:
@@ -72,9 +75,25 @@ def task_runs_file_path(bot_dir: str | None = None) -> str:
 
 def task_health_cache_file_path(task_id: str, bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
-    return os.getenv("TASK_HEALTH_CACHE_FILE", os.path.join(data_dir(bot_dir), "task_health", f"{task_id}.json"))
+    override = os.getenv("TASK_HEALTH_CACHE_FILE")
+    if override:
+        return override
+    safe_task_id = require_safe_id(task_id, label="task_id")
+    base_dir = Path(data_dir(bot_dir)).resolve() / "task_health"
+    target = (base_dir / f"{safe_task_id}.json").resolve()
+    if base_dir.resolve() not in target.parents:
+        raise ValueError("Task health path escaped task_health directory.")
+    return str(target)
 
 
 def task_state_file_path(task_id: str, bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
-    return os.getenv("TASK_STATE_FILE", os.path.join(data_dir(bot_dir), "task_state", f"{task_id}.json"))
+    override = os.getenv("TASK_STATE_FILE")
+    if override:
+        return override
+    safe_task_id = require_safe_id(task_id, label="task_id")
+    base_dir = Path(data_dir(bot_dir)).resolve() / "task_state"
+    target = (base_dir / f"{safe_task_id}.json").resolve()
+    if base_dir.resolve() not in target.parents:
+        raise ValueError("Task state path escaped task_state directory.")
+    return str(target)

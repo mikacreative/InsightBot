@@ -42,7 +42,7 @@ class TestInspectFeed:
     def test_recent_feed_is_ok(self):
         feed = _make_feed([_make_entry("近期文章", "https://example.com/recent", hours_ago=2)])
 
-        with patch("insightbot.feed_health.requests.get", return_value=_make_http_response()):
+        with patch("insightbot.feed_health.safe_get", return_value=_make_http_response()):
             with patch("insightbot.feed_health.feedparser.parse", return_value=feed):
                 result = inspect_feed("https://example.com/feed.xml")
 
@@ -53,7 +53,7 @@ class TestInspectFeed:
     def test_stale_feed_is_marked_stale(self):
         feed = _make_feed([_make_entry("过期文章", "https://example.com/stale", hours_ago=48)])
 
-        with patch("insightbot.feed_health.requests.get", return_value=_make_http_response()):
+        with patch("insightbot.feed_health.safe_get", return_value=_make_http_response()):
             with patch("insightbot.feed_health.feedparser.parse", return_value=feed):
                 result = inspect_feed("https://example.com/feed.xml")
 
@@ -64,7 +64,7 @@ class TestInspectFeed:
     def test_bozo_without_entries_is_parse_error(self):
         feed = _make_feed([], bozo=True, bozo_exception=ValueError("bad xml"))
 
-        with patch("insightbot.feed_health.requests.get", return_value=_make_http_response()):
+        with patch("insightbot.feed_health.safe_get", return_value=_make_http_response()):
             with patch("insightbot.feed_health.feedparser.parse", return_value=feed):
                 result = inspect_feed("https://example.com/feed.xml")
 
@@ -72,7 +72,7 @@ class TestInspectFeed:
         assert result["error_type"] == "parse_error"
 
     def test_network_timeout_is_classified(self):
-        with patch("insightbot.feed_health.requests.get", side_effect=TimeoutError("timed out")):
+        with patch("insightbot.feed_health.safe_get", side_effect=TimeoutError("timed out")):
             result = inspect_feed("https://example.com/feed.xml")
 
         assert result["status"] == "error"
@@ -85,7 +85,7 @@ class TestInspectFeeds:
         first_feed = _make_feed([_make_entry("近期文章", "https://example.com/recent", hours_ago=1)])
         second_feed = _make_feed([_make_entry("过期文章", "https://example.com/stale", hours_ago=36)])
 
-        with patch("insightbot.feed_health.requests.get", side_effect=[_make_http_response(), _make_http_response()]):
+        with patch("insightbot.feed_health.safe_get", side_effect=[_make_http_response(), _make_http_response()]):
             with patch("insightbot.feed_health.feedparser.parse", side_effect=[first_feed, second_feed]):
                 snapshot = inspect_feeds(
                     {

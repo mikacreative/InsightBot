@@ -10,6 +10,7 @@ import requests
 
 from .ai_json import extract_json_object
 from .ai import chat_completion
+from .safe_http import safe_get
 
 # ---------- constants ----------
 MAX_RETRIES = 3
@@ -147,7 +148,7 @@ def _build_system_prompt(
 
 
 def _parse_feed_url(url: str):
-    response = requests.get(
+    response = safe_get(
         url,
         timeout=FEED_FETCH_TIMEOUT_S,
         headers={"User-Agent": "InsightBot/0.3.0 (+https://github.com/mikacreative/InsightBot)"},

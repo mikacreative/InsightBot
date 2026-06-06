@@ -232,7 +232,7 @@ class SearchAdapter:
 
         try:
             resp = httpx.get(
-                f"{provider.base_url}/search",
+                f"{(provider.base_url or 'https://api.search.brave.com/res/v1/web').rstrip('/')}/search",
                 headers=headers,
                 params=params,
                 timeout=provider.timeout_s,

@@ -171,6 +171,27 @@ class TestSchedulerReload:
             assert "task_y" in sched.tasks
             assert "task_x" not in sched.tasks
 
+    def test_reload_if_config_changed_refreshes_tasks_and_channels(self):
+        from insightbot.scheduler import Scheduler
+
+        sched = Scheduler.__new__(Scheduler)
+        sched.bot_dir = "/tmp"
+        sched.tasks = {}
+        sched._log = MagicMock()
+        sched._runtime_mtimes = {"tasks": 1.0, "channels": 1.0}
+
+        with patch.object(Scheduler, "_get_runtime_mtimes", return_value={"tasks": 2.0, "channels": 1.0}), \
+             patch.object(Scheduler, "_load_tasks") as mock_load_tasks, \
+             patch("insightbot.scheduler.load_channels", return_value={"channels": {}}) as mock_load_channels, \
+             patch("insightbot.scheduler.init_channels") as mock_init_channels:
+            changed = sched.reload_if_config_changed()
+
+        assert changed is True
+        mock_load_tasks.assert_called_once()
+        mock_load_channels.assert_called_once_with("/tmp")
+        mock_init_channels.assert_called_once_with({"channels": {}})
+        assert sched._runtime_mtimes == {"tasks": 2.0, "channels": 1.0}
+
 
 class TestSchedulerTaskConfigLoading:
     def test_loads_full_task_config_per_task(self):

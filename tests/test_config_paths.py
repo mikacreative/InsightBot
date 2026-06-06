@@ -134,6 +134,24 @@ class TestSplitConfigPaths:
             result = task_state_file_path("daily_brief", str(tmp_path))
         assert result == str(tmp_path / "data" / "task_state" / "daily_brief.json")
 
+    def test_task_state_path_rejects_path_traversal_task_id(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("TASK_STATE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            with pytest.raises(ValueError):
+                task_state_file_path("../../channels", str(tmp_path))
+
+    def test_task_health_path_rejects_path_traversal_task_id(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("TASK_HEALTH_CACHE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            with pytest.raises(ValueError):
+                task_health_cache_file_path("../bad", str(tmp_path))
+
 
 # ── bot_log_file_path 测试 ────────────────────────────────────────────────────
 class TestBotLogFilePath:
