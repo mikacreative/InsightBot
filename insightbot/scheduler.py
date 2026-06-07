@@ -235,12 +235,21 @@ class Scheduler:
         """
         from .domain import ChangeSet
         from .domain.commands import get_task_spec, get_task_version
+        from .ids import require_safe_id
 
         args = arguments or {}
         tools = {tool["name"]: tool for tool in self.tool_manifest().get("tools", [])}
         tool = tools.get(tool_name)
         if tool is None:
             return {"ok": False, "tool": tool_name, "error": f"Unknown tool: {tool_name}"}
+        validation_errors = self._validate_tool_arguments(tool.get("input_schema", {}), args)
+        if validation_errors:
+            return {
+                "ok": False,
+                "tool": tool_name,
+                "error": "invalid_arguments",
+                "details": validation_errors,
+            }
         if tool.get("requires_approval") and not approved:
             return {
                 "ok": False,
@@ -269,26 +278,28 @@ class Scheduler:
                     },
                 }
             if tool_name == "get_task_spec":
+                task_id = require_safe_id(args.get("task_id"), label="task_id")
                 return {
                     "ok": True,
                     "tool": tool_name,
-                    "output": get_task_spec(tasks_payload, str(args.get("task_id") or "")).to_dict(),
+                    "output": get_task_spec(tasks_payload, task_id).to_dict(),
                 }
             if tool_name == "get_task_version":
+                task_id = require_safe_id(args.get("task_id"), label="task_id")
                 return {
                     "ok": True,
                     "tool": tool_name,
-                    "output": get_task_version(tasks_payload, str(args.get("task_id") or "")).to_dict(),
+                    "output": get_task_version(tasks_payload, task_id).to_dict(),
                 }
             if tool_name == "validate_task":
-                return {"ok": True, "tool": tool_name, "output": self.validate_task_command(str(args.get("task_id") or ""))}
+                return {"ok": True, "tool": tool_name, "output": self.validate_task_command(require_safe_id(args.get("task_id"), label="task_id"))}
             if tool_name == "dry_run_task":
-                return {"ok": True, "tool": tool_name, "output": self.dry_run_task_command(str(args.get("task_id") or "")).to_dict()}
+                return {"ok": True, "tool": tool_name, "output": self.dry_run_task_command(require_safe_id(args.get("task_id"), label="task_id")).to_dict()}
             if tool_name == "run_task":
-                return {"ok": True, "tool": tool_name, "output": self.run_task_command(str(args.get("task_id") or "")).to_dict()}
+                return {"ok": True, "tool": tool_name, "output": self.run_task_command(require_safe_id(args.get("task_id"), label="task_id")).to_dict()}
             if tool_name == "propose_task_changeset":
                 changeset = self.propose_task_changeset_command(
-                    str(args.get("task_id") or ""),
+                    require_safe_id(args.get("task_id"), label="task_id"),
                     args.get("target_task_definition") or {},
                     intent=str(args.get("intent") or ""),
                     rationale=str(args.get("rationale") or ""),
@@ -300,7 +311,7 @@ class Scheduler:
                 return {"ok": True, "tool": tool_name, "output": self.apply_changeset_command(changeset)}
             if tool_name == "create_task":
                 result = self.create_task_command(
-                    str(args.get("task_id") or ""),
+                    require_safe_id(args.get("task_id"), label="task_id"),
                     args.get("task_definition") or {},
                     intent=str(args.get("intent") or ""),
                     rationale=str(args.get("rationale") or ""),
@@ -308,14 +319,51 @@ class Scheduler:
                 return {"ok": result.ok, "tool": tool_name, "output": result.to_dict(), "error": result.error}
             if tool_name == "delete_task":
                 result = self.delete_task_command(
-                    str(args.get("task_id") or ""),
+                    require_safe_id(args.get("task_id"), label="task_id"),
                     intent=str(args.get("intent") or ""),
                     rationale=str(args.get("rationale") or ""),
                 )
                 return {"ok": result.ok, "tool": tool_name, "output": result.to_dict(), "error": result.error}
             return {"ok": False, "tool": tool_name, "error": f"Tool is declared but not implemented: {tool_name}"}
+        except ValueError as exc:
+            return {"ok": False, "tool": tool_name, "error": "invalid_arguments", "details": [str(exc)]}
         except Exception as exc:
             return {"ok": False, "tool": tool_name, "error": str(exc)}
+
+    @staticmethod
+    def _validate_tool_arguments(schema: dict, arguments: dict) -> list[str]:
+        """Small JSON-schema subset validator for Domain Kernel tool inputs."""
+        errors: list[str] = []
+        if schema.get("type") == "object" and not isinstance(arguments, dict):
+            return ["arguments must be an object"]
+        required = schema.get("required", []) or []
+        for field in required:
+            if field not in arguments:
+                errors.append(f"missing required field: {field}")
+        properties = schema.get("properties", {}) or {}
+        if schema.get("additionalProperties") is False:
+            for field in arguments:
+                if field not in properties:
+                    errors.append(f"unexpected field: {field}")
+        for field, value in arguments.items():
+            field_schema = properties.get(field)
+            if not isinstance(field_schema, dict):
+                continue
+            expected_type = field_schema.get("type")
+            if expected_type == "string":
+                if not isinstance(value, str):
+                    errors.append(f"{field} must be a string")
+                elif field_schema.get("minLength") and len(value) < int(field_schema["minLength"]):
+                    errors.append(f"{field} must not be empty")
+            elif expected_type == "object" and not isinstance(value, dict):
+                errors.append(f"{field} must be an object")
+            elif expected_type == "array" and not isinstance(value, list):
+                errors.append(f"{field} must be an array")
+            elif expected_type == "boolean" and not isinstance(value, bool):
+                errors.append(f"{field} must be a boolean")
+            elif expected_type == "number" and not isinstance(value, (int, float)):
+                errors.append(f"{field} must be a number")
+        return errors
 
     def create_task_command(
         self,

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from insightbot.config import normalize_task_definition
+from insightbot.ids import require_safe_id
 
 from .models import ChangeSet, DiagnosisReport, RunTrace, TaskSpec, TaskVersion
 
@@ -70,6 +71,7 @@ def _task_definitions(tasks_payload: dict[str, Any]) -> dict[str, dict]:
 
 
 def get_task_definition(tasks_payload: dict[str, Any], task_id: str) -> dict:
+    task_id = require_safe_id(task_id, label="task_id")
     tasks = _task_definitions(tasks_payload)
     if task_id not in tasks:
         raise DomainCommandError(f"Unknown task_id: {task_id}")
@@ -88,21 +90,64 @@ def _make_changeset_id(task_id: str, operations: list[dict[str, Any]], target_ve
     return f"chg_{digest}"
 
 
+_SENSITIVE_PATH_PARTS = ("api_key", "secret", "token", "webhook", "password")
+_REDACTED = "<redacted>"
+
+
+def _escape_pointer_part(value: Any) -> str:
+    return str(value).replace("~", "~0").replace("/", "~1")
+
+
+def _unescape_pointer_part(value: str) -> str:
+    return value.replace("~1", "/").replace("~0", "~")
+
+
+def _path_parts(path: str) -> list[str]:
+    return [_unescape_pointer_part(part) for part in path.strip("/").split("/") if part]
+
+
+def _is_sensitive_path(path: str) -> bool:
+    lowered = path.lower()
+    return any(part in lowered for part in _SENSITIVE_PATH_PARTS)
+
+
+def _operation(
+    *,
+    op: str,
+    path: str,
+    before: Any,
+    after: Any,
+) -> dict[str, Any]:
+    sensitive = _is_sensitive_path(path)
+    payload = {
+        "op": op,
+        "path": path,
+        "before": _REDACTED if sensitive and before is not None else deepcopy(before),
+        "after": _REDACTED if sensitive and after is not None else deepcopy(after),
+    }
+    if sensitive:
+        payload["sensitive"] = True
+        payload["_before_value"] = deepcopy(before)
+        payload["_after_value"] = deepcopy(after)
+    return payload
+
+
 def _diff_dict(before: Any, after: Any, path: str = "") -> list[dict[str, Any]]:
     if isinstance(before, dict) and isinstance(after, dict):
         operations: list[dict[str, Any]] = []
         keys = sorted(set(before.keys()) | set(after.keys()))
         for key in keys:
-            child_path = f"{path}/{key}" if path else f"/{key}"
+            escaped_key = _escape_pointer_part(key)
+            child_path = f"{path}/{escaped_key}" if path else f"/{escaped_key}"
             if key not in before:
-                operations.append({"op": "add", "path": child_path, "before": None, "after": deepcopy(after[key])})
+                operations.append(_operation(op="add", path=child_path, before=None, after=after[key]))
             elif key not in after:
-                operations.append({"op": "remove", "path": child_path, "before": deepcopy(before[key]), "after": None})
+                operations.append(_operation(op="remove", path=child_path, before=before[key], after=None))
             else:
                 operations.extend(_diff_dict(before[key], after[key], child_path))
         return operations
     if before != after:
-        return [{"op": "replace", "path": path or "/", "before": deepcopy(before), "after": deepcopy(after)}]
+        return [_operation(op="replace", path=path or "/", before=before, after=after)]
     return []
 
 
@@ -132,7 +177,7 @@ def _force_changeset_risk(changeset: ChangeSet, risk_level: str) -> ChangeSet:
 
 
 def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
-    parts = [part for part in path.strip("/").split("/") if part]
+    parts = _path_parts(path)
     if not parts:
         raise DomainCommandError("Cannot replace root task definition via changeset operation.")
     current: Any = root
@@ -146,7 +191,7 @@ def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
 
 
 def _remove_path(root: dict[str, Any], path: str) -> None:
-    parts = [part for part in path.strip("/").split("/") if part]
+    parts = _path_parts(path)
     if not parts:
         raise DomainCommandError("Cannot remove root task definition via changeset operation.")
     current: Any = root
@@ -158,7 +203,52 @@ def _remove_path(root: dict[str, Any], path: str) -> None:
         current.pop(parts[-1], None)
 
 
+def _get_path(root: dict[str, Any], path: str) -> Any:
+    parts = _path_parts(path)
+    current: Any = root
+    for part in parts:
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return deepcopy(current)
+
+
+def _operation_before_value(operation: dict[str, Any]) -> Any:
+    if operation.get("sensitive"):
+        return operation.get("_before_value", operation.get("before"))
+    return operation.get("before")
+
+
+def _operation_after_value(operation: dict[str, Any]) -> Any:
+    if operation.get("sensitive"):
+        if "_after_value" not in operation and operation.get("after") == _REDACTED:
+            raise DomainCommandError("Cannot apply redacted sensitive changeset without private after value.")
+        return operation.get("_after_value", operation.get("after"))
+    return operation.get("after")
+
+
+def _assert_changeset_can_apply(task_definition: dict[str, Any], changeset: ChangeSet) -> None:
+    if changeset.base_version_id:
+        current_spec = TaskSpec.from_task_definition(changeset.task_id, task_definition)
+        current_version = TaskVersion.from_spec(current_spec)
+        if current_version.version_id != changeset.base_version_id:
+            raise DomainCommandError(
+                f"ChangeSet base version conflict: expected {changeset.base_version_id}, "
+                f"got {current_version.version_id}."
+            )
+    for operation in changeset.operations:
+        op = operation.get("op")
+        if op not in {"add", "replace", "remove"}:
+            raise DomainCommandError(f"Unsupported changeset operation: {op}")
+        path = str(operation.get("path", ""))
+        current_value = _get_path(task_definition, path)
+        expected_before = _operation_before_value(operation)
+        if current_value != expected_before:
+            raise DomainCommandError(f"ChangeSet before value mismatch at {path}.")
+
+
 def get_task_spec(tasks_payload: dict[str, Any], task_id: str) -> TaskSpec:
+    task_id = require_safe_id(task_id, label="task_id")
     return TaskSpec.from_task_definition(task_id, get_task_definition(tasks_payload, task_id))
 
 
@@ -263,6 +353,7 @@ def propose_task_changeset(
     intent: str,
     rationale: str = "",
 ) -> ChangeSet:
+    task_id = require_safe_id(task_id, label="task_id")
     current_definition = normalize_task_definition(get_task_definition(tasks_payload, task_id))
     target_definition = normalize_task_definition(target_task_definition)
     current_spec = TaskSpec.from_task_definition(task_id, current_definition)
@@ -283,19 +374,22 @@ def propose_task_changeset(
 
 
 def apply_changeset(tasks_payload: dict[str, Any], changeset: ChangeSet) -> dict[str, Any]:
+    changeset = changeset if isinstance(changeset, ChangeSet) else ChangeSet.from_dict(changeset)
+    task_id = require_safe_id(changeset.task_id, label="task_id")
     updated_payload = deepcopy(tasks_payload)
     updated_payload.setdefault("tasks", {})
-    task_definition = normalize_task_definition(get_task_definition(updated_payload, changeset.task_id))
+    task_definition = normalize_task_definition(get_task_definition(updated_payload, task_id))
+    _assert_changeset_can_apply(task_definition, changeset)
     for operation in changeset.operations:
         op = operation.get("op")
         path = str(operation.get("path", ""))
         if op in {"add", "replace"}:
-            _set_path(task_definition, path, operation.get("after"))
+            _set_path(task_definition, path, _operation_after_value(operation))
         elif op == "remove":
             _remove_path(task_definition, path)
         else:
             raise DomainCommandError(f"Unsupported changeset operation: {op}")
-    updated_payload["tasks"][changeset.task_id] = normalize_task_definition(task_definition)
+    updated_payload["tasks"][task_id] = normalize_task_definition(task_definition)
     return updated_payload
 
 
@@ -307,7 +401,9 @@ def create_task(
     intent: str,
     rationale: str = "",
 ) -> TaskMutationResult:
+    task_id = str(task_id or "")
     try:
+        task_id = require_safe_id(task_id, label="task_id")
         if task_id in _task_definitions(tasks_payload):
             raise DomainCommandError(f"Task already exists: {task_id}")
         normalized_task = normalize_task_definition(task_definition)
@@ -344,7 +440,9 @@ def delete_task(
     intent: str,
     rationale: str = "",
 ) -> TaskMutationResult:
+    task_id = str(task_id or "")
     try:
+        task_id = require_safe_id(task_id, label="task_id")
         current_definition = get_task_definition(tasks_payload, task_id)
         current_spec = get_task_spec(tasks_payload, task_id)
         base_version = TaskVersion.from_spec(current_spec)

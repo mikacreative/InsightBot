@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -252,6 +253,7 @@ class RunTrace:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     final_markdown: str = ""
+    result_fingerprint: str | None = None
 
     @classmethod
     def from_task_result(
@@ -263,6 +265,7 @@ class RunTrace:
         run_id: str | None = None,
     ) -> "RunTrace":
         stage_results = result.get("stage_results", {}) or {}
+        pipeline = str(result.get("pipeline") or "")
         global_candidates = stage_results.get("global_candidates", [])
         screened_items = (stage_results.get("screened_result", {}) or {}).get("screened", [])
         assignment = stage_results.get("assignment_result", {}) or {}
@@ -279,6 +282,14 @@ class RunTrace:
             global_candidates = []
         if not isinstance(screened_items, list):
             screened_items = []
+        if not global_candidates and isinstance(result.get("candidate_count"), int):
+            global_candidates = [{} for _ in range(max(0, int(result.get("candidate_count", 0))))]
+        if not screened_items and isinstance(result.get("shortlist_size"), int):
+            screened_items = [{} for _ in range(max(0, int(result.get("shortlist_size", 0))))]
+        if not selected_count and isinstance(result.get("selected_count"), int):
+            selected_count = max(0, int(result.get("selected_count", 0)))
+        if not selected_count and screened_items and pipeline in {"editorial-intelligence", "classic"}:
+            selected_count = len(screened_items)
 
         stages = [
             RunStage(stage="fetch", output_count=len(global_candidates)),
@@ -304,17 +315,19 @@ class RunTrace:
             ),
         ]
         errors = [str(result["error"])] if result.get("error") else []
+        result_fingerprint = hashlib.sha1(_json_dumps(result).encode("utf-8")).hexdigest()[:16]
         return cls(
-            run_id=run_id or f"run_{hashlib.sha1(_json_dumps(result).encode('utf-8')).hexdigest()[:12]}",
+            run_id=run_id or f"run_{uuid.uuid4().hex[:16]}",
             task_id=str(result.get("task_id") or result.get("_selected_task_id") or ""),
             task_version_id=task_version_id,
             trigger_type=trigger_type,
             ok=bool(result.get("ok", False)),
-            pipeline=str(result.get("pipeline") or ""),
+            pipeline=pipeline,
             stages=stages,
             channel_results=list(result.get("channel_results", []) or []),
             errors=errors,
             final_markdown=str(result.get("final_markdown", "") or ""),
+            result_fingerprint=result_fingerprint,
         )
 
     def stage(self, name: str) -> RunStage:
@@ -336,6 +349,7 @@ class RunTrace:
             "errors": self.errors,
             "warnings": self.warnings,
             "final_markdown": self.final_markdown,
+            "result_fingerprint": self.result_fingerprint,
         }
 
 
@@ -538,11 +552,20 @@ class ChangeSet:
         )
 
     def to_dict(self) -> dict:
+        operations: list[dict[str, Any]] = []
+        for operation in self.operations:
+            operations.append(
+                {
+                    key: value
+                    for key, value in operation.items()
+                    if not str(key).startswith("_")
+                }
+            )
         return {
             "changeset_id": self.changeset_id,
             "task_id": self.task_id,
             "intent": self.intent,
-            "operations": self.operations,
+            "operations": operations,
             "risk_level": self.risk_level,
             "rationale": self.rationale,
             "base_version_id": self.base_version_id,

@@ -295,6 +295,75 @@ def test_changeset_proposal_and_apply_are_structured_and_non_mutating():
     assert tasks["tasks"]["Daily_brief"]["channels"] == ["wecom_main"]
 
 
+def test_changeset_apply_rejects_stale_base_version_and_before_conflicts():
+    from insightbot.domain.commands import DomainCommandError, apply_changeset, propose_task_changeset
+
+    tasks = {"tasks": {"Daily_brief": _sample_task()}}
+    target_task = _sample_task()
+    target_task["name"] = "营销日报新版"
+    changeset = propose_task_changeset(
+        tasks,
+        "Daily_brief",
+        target_task,
+        intent="Rename task",
+    )
+
+    stale_tasks = {"tasks": {"Daily_brief": _sample_task()}}
+    stale_tasks["tasks"]["Daily_brief"]["channels"] = ["wecom_backup"]
+
+    try:
+        apply_changeset(stale_tasks, changeset)
+        assert False, "Expected stale changeset to be rejected."
+    except DomainCommandError as exc:
+        assert "base version" in str(exc)
+
+    conflict_changeset = propose_task_changeset(
+        tasks,
+        "Daily_brief",
+        target_task,
+        intent="Rename task",
+    )
+    first_operation = dict(conflict_changeset.operations[0])
+    first_operation["before"] = "__wrong_before__"
+    conflict_changeset = conflict_changeset.__class__(
+        **{**conflict_changeset.to_dict(), "operations": [first_operation, *conflict_changeset.operations[1:]]}
+    )
+
+    try:
+        apply_changeset(tasks, conflict_changeset)
+        assert False, "Expected before mismatch to be rejected."
+    except DomainCommandError as exc:
+        assert "before value mismatch" in str(exc)
+
+
+def test_changeset_redacts_sensitive_values_and_preserves_slash_in_paths():
+    from insightbot.domain.commands import apply_changeset, propose_task_changeset
+
+    tasks = {"tasks": {"Daily_brief": _sample_task()}}
+    tasks["tasks"]["Daily_brief"]["sections"]["AI/Tech"] = {"prompt": "Old", "keywords": [], "source_hints": []}
+    tasks["tasks"]["Daily_brief"]["sources"]["search"]["api_key"] = "old-secret"
+    target_task = _sample_task()
+    target_task["sections"]["AI/Tech"] = {"prompt": "New", "keywords": [], "source_hints": []}
+    target_task["sources"]["search"]["api_key"] = "new-secret"
+
+    changeset = propose_task_changeset(
+        tasks,
+        "Daily_brief",
+        target_task,
+        intent="Update slash section and search credential",
+    )
+
+    sensitive_ops = [op for op in changeset.operations if op.get("sensitive")]
+    assert sensitive_ops
+    assert sensitive_ops[0]["before"] == "<redacted>"
+    assert sensitive_ops[0]["after"] == "<redacted>"
+    assert any("/AI~1Tech/" in op["path"] for op in changeset.operations)
+
+    updated = apply_changeset(tasks, changeset)
+    assert updated["tasks"]["Daily_brief"]["sections"]["AI/Tech"]["prompt"] == "New"
+    assert updated["tasks"]["Daily_brief"]["sources"]["search"]["api_key"] == "new-secret"
+
+
 def test_create_and_delete_task_commands_are_structured_and_non_mutating():
     from insightbot.domain.commands import create_task, delete_task, get_task_spec
 
@@ -333,6 +402,22 @@ def test_create_and_delete_task_commands_are_structured_and_non_mutating():
     assert "Weekly_brief" in create_result.updated_tasks["tasks"]
 
 
+def test_domain_commands_reject_unsafe_task_ids():
+    from insightbot.domain.commands import DomainCommandError, create_task, get_task_spec
+
+    tasks = {"tasks": {"Daily_brief": _sample_task()}}
+
+    try:
+        get_task_spec(tasks, "../bad")
+        assert False, "Expected unsafe task_id to be rejected."
+    except (DomainCommandError, ValueError) as exc:
+        assert "task_id" in str(exc)
+
+    result = create_task(tasks, "../bad", _sample_task(), intent="Create unsafe task")
+    assert result.ok is False
+    assert "task_id" in result.error
+
+
 def test_domain_tool_manifest_describes_agent_safe_command_boundary():
     from insightbot.domain import get_tool_manifest
 
@@ -361,3 +446,30 @@ def test_domain_tool_manifest_describes_agent_safe_command_boundary():
         assert tool["input_schema"]["type"] == "object"
         assert tool["output_schema"]["type"] == "object"
         assert isinstance(tool["description"], str) and tool["description"]
+
+
+def test_run_trace_handles_editorial_intelligence_shape_and_unique_run_ids():
+    from insightbot.domain import DiagnosisReport, RunTrace
+
+    result = {
+        "ok": True,
+        "dry_run": True,
+        "pipeline": "editorial-intelligence",
+        "task_id": "Daily_brief",
+        "candidate_count": 12,
+        "shortlist_size": 5,
+        "final_markdown": "### A\n> summary",
+        "channel_results": [],
+        "diagnostics": [{"stage": "source", "message": "ok"}],
+        "stage_results": {},
+    }
+
+    trace_a = RunTrace.from_task_result(result, task_version_id="taskv_123", trigger_type="dry_run")
+    trace_b = RunTrace.from_task_result(result, task_version_id="taskv_123", trigger_type="dry_run")
+    diagnosis = DiagnosisReport.from_run_trace(trace_a)
+
+    assert trace_a.run_id != trace_b.run_id
+    assert trace_a.result_fingerprint == trace_b.result_fingerprint
+    assert trace_a.stage("fetch").output_count == 12
+    assert trace_a.stage("screen").output_count == 5
+    assert diagnosis.severity == "ok"

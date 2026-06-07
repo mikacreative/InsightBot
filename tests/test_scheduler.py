@@ -369,12 +369,21 @@ class TestSchedulerDomainCommands:
              patch("insightbot.scheduler.load_channels", return_value={"channels": {"wecom_main": {}}}):
             list_result = sched.execute_tool_call("list_tasks", {})
             spec_result = sched.execute_tool_call("get_task_spec", {"task_id": "daily"})
+            missing_args = sched.execute_tool_call("get_task_spec", {})
+            extra_args = sched.execute_tool_call("get_task_spec", {"task_id": "daily", "extra": True})
+            unsafe_id = sched.execute_tool_call("get_task_spec", {"task_id": "../bad"})
             blocked_run = sched.execute_tool_call("run_task", {"task_id": "daily"})
 
         assert list_result["ok"] is True
         assert list_result["output"]["task_ids"] == ["daily"]
         assert spec_result["ok"] is True
         assert spec_result["output"]["task_id"] == "daily"
+        assert missing_args["ok"] is False
+        assert missing_args["error"] == "invalid_arguments"
+        assert extra_args["ok"] is False
+        assert extra_args["error"] == "invalid_arguments"
+        assert unsafe_id["ok"] is False
+        assert "task_id" in unsafe_id["details"][0]
         assert blocked_run["ok"] is False
         assert blocked_run["error"] == "Tool requires approval."
 

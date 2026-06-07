@@ -157,7 +157,25 @@ It provides the first Tool API adapter:
 - `list_tasks`, `get_task_spec`, `get_task_version`, `validate_task`, and `dry_run_task` can run without approval.
 - `run_task`, `apply_changeset`, `create_task`, and `delete_task` require `approved=True`.
 - All routes reuse the same Scheduler and Domain Command methods that the UI uses.
+- Tool arguments are validated against the manifest schema subset before execution.
+- All task id entrypoints use the same safe id rule: `[A-Za-z0-9_-]{1,64}`.
 - This is not a public network API or MCP server yet. A future MCP adapter should wrap this method rather than reimplement command routing.
+
+## Safety Rules
+
+ChangeSet application must be conflict-safe:
+
+- Recompute the current task version and reject stale `base_version_id`.
+- Verify every operation's `before` value before applying it.
+- Use JSON Pointer escaping for path parts so section names such as `AI/Tech` survive propose/apply.
+- Redact sensitive operation values in public output for paths containing `api_key`, `secret`, `token`, `webhook`, or `password`.
+- Do not apply a redacted sensitive operation from a serialized external payload unless the private value is still available in the in-memory ChangeSet.
+
+RunTrace identity must represent an execution, not just a result:
+
+- `run_id` is unique per trace.
+- `result_fingerprint` stores the deterministic content fingerprint.
+- `editorial-intelligence` and classic result shapes should map count-style evidence into fetch/screen/generate stages rather than producing false empty-candidate diagnoses.
 
 Future commands:
 
@@ -177,6 +195,7 @@ Future commands:
 9. Expose a machine-readable Tool Manifest for current commands.
 10. Persist `RunTrace` and `DiagnosisReport` into the existing run history records.
 11. Add an internal executable Tool API boundary that routes through Domain Commands.
+12. Add Tool API schema validation, safe task id enforcement, ChangeSet conflict checks, sensitive value redaction, and pipeline-aware RunTrace extraction.
 
 ## Acceptance Criteria
 
