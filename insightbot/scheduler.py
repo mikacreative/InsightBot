@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Callable
 
 from .channels import init_channels
-from .config import load_channels, load_tasks, load_tasks_config, normalize_task_definition
+from .config import load_channels, load_tasks, load_tasks_config, normalize_task_definition, save_tasks
 from .logging_setup import build_logger
 from .paths import bot_log_file_path, channels_file_path, default_bot_dir, tasks_file_path
 
@@ -79,14 +79,21 @@ class Task:
 
         return True
 
-    def run(self, dry_run: bool = False) -> dict:
+    def run(self, dry_run: bool = False, trigger_type: str | None = None) -> dict:
         """Run this task via task_runner."""
         from .task_runner import run_task
 
         self._last_run_at = datetime.now()
+
+        def load_config() -> dict:
+            config = self._config_loader()
+            if trigger_type:
+                config["_task_trigger_type"] = trigger_type
+            return config
+
         return run_task(
             self.task_id,
-            self._config_loader,
+            load_config,
             dry_run=dry_run,
         )
 
@@ -106,7 +113,23 @@ class Scheduler:
 
     def _make_task_config_loader(self, task_id: str) -> Callable[[], dict]:
         """Build a per-task config loader so CLI/systemd runs use the full task config."""
-        return lambda: load_tasks_config(task_id, self.bot_dir)
+        def load_config() -> dict:
+            config = load_tasks_config(task_id, self.bot_dir)
+            try:
+                from .domain import TaskVersion
+                from .domain.commands import get_task_spec
+
+                spec = get_task_spec(load_tasks(self.bot_dir), task_id)
+                config["_task_version_id"] = TaskVersion.from_spec(spec).version_id
+            except Exception as exc:
+                getattr(self, "_log", logger).warning(
+                    "Failed to attach TaskVersion for task '%s': %s",
+                    task_id,
+                    exc,
+                )
+            return config
+
+        return load_config
 
     def _load_tasks(self) -> None:
         """Load tasks from tasks.json."""
@@ -163,7 +186,250 @@ class Scheduler:
         if task is None:
             raise KeyError(f"Task '{task_id}' not found.")
         self._log.info(f"Running task '{task_id}' (dry_run={dry_run})")
-        return task.run(dry_run=dry_run)
+        return task.run(dry_run=dry_run, trigger_type="dry_run" if dry_run else "manual")
+
+    def validate_task_command(self, task_id: str) -> dict:
+        """Validate a task through the Domain Kernel and return UI-compatible output."""
+        from .domain import TaskVersion
+        from .domain.commands import validate_task
+        from .domain.compat import validation_result_from_domain
+
+        tasks_payload = load_tasks(self.bot_dir)
+        channels_payload = load_channels(self.bot_dir)
+        spec, report = validate_task(
+            tasks_payload,
+            task_id,
+            channels_payload=channels_payload,
+        )
+        result = validation_result_from_domain(spec, report)
+        version = TaskVersion.from_spec(spec)
+        result["summary"]["task_version_id"] = version.version_id
+        result["task_version"] = version.to_dict()
+        return result
+
+    def get_tool_manifest_command(self) -> dict:
+        """Expose the Domain Kernel tool manifest with current runtime task IDs."""
+        from .domain import get_tool_manifest
+
+        tasks_payload = load_tasks(self.bot_dir)
+        manifest = get_tool_manifest()
+        manifest["runtime"] = {
+            "bot_dir": self.bot_dir,
+            "task_ids": sorted(tasks_payload.get("tasks", {}).keys()),
+        }
+        return manifest
+
+    def tool_manifest(self) -> dict:
+        """Return the static Domain Kernel tool manifest."""
+        from .domain import get_tool_manifest
+
+        return get_tool_manifest()
+
+    def execute_tool_call(self, tool_name: str, arguments: dict | None = None, *, approved: bool = False) -> dict:
+        """
+        Execute a Domain Kernel tool call through the same command boundary used by the UI.
+
+        This is an internal Tool API adapter, not a network server. External MCP
+        or Agent adapters should call this method instead of editing runtime
+        config files or invoking Streamlit code.
+        """
+        from .domain import ChangeSet
+        from .domain.commands import get_task_spec, get_task_version
+
+        args = arguments or {}
+        tools = {tool["name"]: tool for tool in self.tool_manifest().get("tools", [])}
+        tool = tools.get(tool_name)
+        if tool is None:
+            return {"ok": False, "tool": tool_name, "error": f"Unknown tool: {tool_name}"}
+        if tool.get("requires_approval") and not approved:
+            return {
+                "ok": False,
+                "tool": tool_name,
+                "requires_approval": True,
+                "error": "Tool requires approval.",
+            }
+
+        try:
+            tasks_payload = load_tasks(self.bot_dir)
+            if tool_name == "list_tasks":
+                tasks = tasks_payload.get("tasks", {}) or {}
+                return {
+                    "ok": True,
+                    "tool": tool_name,
+                    "output": {
+                        "task_ids": sorted(tasks.keys()),
+                        "tasks": [
+                            {
+                                "task_id": task_id,
+                                "name": (task_def or {}).get("name", task_id) if isinstance(task_def, dict) else task_id,
+                                "enabled": bool((task_def or {}).get("enabled", False)) if isinstance(task_def, dict) else False,
+                            }
+                            for task_id, task_def in sorted(tasks.items())
+                        ],
+                    },
+                }
+            if tool_name == "get_task_spec":
+                return {
+                    "ok": True,
+                    "tool": tool_name,
+                    "output": get_task_spec(tasks_payload, str(args.get("task_id") or "")).to_dict(),
+                }
+            if tool_name == "get_task_version":
+                return {
+                    "ok": True,
+                    "tool": tool_name,
+                    "output": get_task_version(tasks_payload, str(args.get("task_id") or "")).to_dict(),
+                }
+            if tool_name == "validate_task":
+                return {"ok": True, "tool": tool_name, "output": self.validate_task_command(str(args.get("task_id") or ""))}
+            if tool_name == "dry_run_task":
+                return {"ok": True, "tool": tool_name, "output": self.dry_run_task_command(str(args.get("task_id") or "")).to_dict()}
+            if tool_name == "run_task":
+                return {"ok": True, "tool": tool_name, "output": self.run_task_command(str(args.get("task_id") or "")).to_dict()}
+            if tool_name == "propose_task_changeset":
+                changeset = self.propose_task_changeset_command(
+                    str(args.get("task_id") or ""),
+                    args.get("target_task_definition") or {},
+                    intent=str(args.get("intent") or ""),
+                    rationale=str(args.get("rationale") or ""),
+                )
+                return {"ok": True, "tool": tool_name, "output": changeset.to_dict()}
+            if tool_name == "apply_changeset":
+                changeset_payload = args.get("changeset") or {}
+                changeset = changeset_payload if isinstance(changeset_payload, ChangeSet) else ChangeSet.from_dict(changeset_payload)
+                return {"ok": True, "tool": tool_name, "output": self.apply_changeset_command(changeset)}
+            if tool_name == "create_task":
+                result = self.create_task_command(
+                    str(args.get("task_id") or ""),
+                    args.get("task_definition") or {},
+                    intent=str(args.get("intent") or ""),
+                    rationale=str(args.get("rationale") or ""),
+                )
+                return {"ok": result.ok, "tool": tool_name, "output": result.to_dict(), "error": result.error}
+            if tool_name == "delete_task":
+                result = self.delete_task_command(
+                    str(args.get("task_id") or ""),
+                    intent=str(args.get("intent") or ""),
+                    rationale=str(args.get("rationale") or ""),
+                )
+                return {"ok": result.ok, "tool": tool_name, "output": result.to_dict(), "error": result.error}
+            return {"ok": False, "tool": tool_name, "error": f"Tool is declared but not implemented: {tool_name}"}
+        except Exception as exc:
+            return {"ok": False, "tool": tool_name, "error": str(exc)}
+
+    def create_task_command(
+        self,
+        task_id: str,
+        task_definition: dict,
+        *,
+        intent: str,
+        rationale: str = "",
+    ):
+        """Create a task through the Domain Kernel mutation command."""
+        from .domain.commands import create_task
+
+        tasks_payload = load_tasks(self.bot_dir)
+        result = create_task(
+            tasks_payload,
+            task_id,
+            task_definition,
+            intent=intent,
+            rationale=rationale,
+        )
+        if result.ok and result.updated_tasks is not None:
+            save_tasks(result.updated_tasks, self.bot_dir)
+            self.reload()
+        return result
+
+    def delete_task_command(
+        self,
+        task_id: str,
+        *,
+        intent: str,
+        rationale: str = "",
+    ):
+        """Delete a task through the Domain Kernel mutation command."""
+        from .domain.commands import delete_task
+
+        tasks_payload = load_tasks(self.bot_dir)
+        result = delete_task(
+            tasks_payload,
+            task_id,
+            intent=intent,
+            rationale=rationale,
+        )
+        if result.ok and result.updated_tasks is not None:
+            save_tasks(result.updated_tasks, self.bot_dir)
+            self.reload()
+        return result
+
+    def dry_run_task_command(self, task_id: str):
+        """
+        Run a task through the Domain Kernel command boundary.
+
+        This keeps the existing scheduler/runner behavior intact while attaching
+        TaskSpec, TaskVersion, RunTrace, and DiagnosisReport metadata for UI and
+        future Agent tool consumers.
+        """
+        from .domain.commands import dry_run_task
+
+        tasks_payload = load_tasks(self.bot_dir)
+        return dry_run_task(
+            tasks_payload,
+            task_id,
+            run_task_fn=lambda selected_task_id, dry_run=True: self.run_task_by_id(
+                selected_task_id,
+                dry_run=dry_run,
+            ),
+        )
+
+    def run_task_command(self, task_id: str):
+        """
+        Run and send a task through the Domain Kernel command boundary.
+
+        This is the manual execution equivalent of dry_run_task_command().
+        """
+        from .domain.commands import run_task
+
+        tasks_payload = load_tasks(self.bot_dir)
+        return run_task(
+            tasks_payload,
+            task_id,
+            run_task_fn=lambda selected_task_id, dry_run=False: self.run_task_by_id(
+                selected_task_id,
+                dry_run=dry_run,
+            ),
+        )
+
+    def propose_task_changeset_command(
+        self,
+        task_id: str,
+        target_task_definition: dict,
+        *,
+        intent: str,
+        rationale: str = "",
+    ):
+        """Create a ChangeSet for a task config update without mutating storage."""
+        from .domain.commands import propose_task_changeset
+
+        tasks_payload = load_tasks(self.bot_dir)
+        return propose_task_changeset(
+            tasks_payload,
+            task_id,
+            target_task_definition,
+            intent=intent,
+            rationale=rationale,
+        )
+
+    def apply_changeset_command(self, changeset):
+        """Apply a Domain ChangeSet to tasks.json, then reload scheduler state."""
+        from .domain.commands import apply_changeset
+
+        tasks_payload = load_tasks(self.bot_dir)
+        updated_payload = apply_changeset(tasks_payload, changeset)
+        save_tasks(updated_payload, self.bot_dir)
+        self.reload()
+        return updated_payload
 
     def run_all_enabled(self, dry_run: bool = False) -> list[dict]:
         """Run all enabled tasks immediately."""
@@ -172,7 +438,7 @@ class Scheduler:
         for task in self.tasks.values():
             if task.enabled:
                 try:
-                    result = task.run(dry_run=dry_run)
+                    result = task.run(dry_run=dry_run, trigger_type="dry_run" if dry_run else "scheduled")
                     results.append({"task_id": task.task_id, "ok": result.get("ok", False)})
                 except Exception as e:
                     self._log.error(f"Task '{task.task_id}' failed: {e}")

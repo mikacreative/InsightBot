@@ -30,7 +30,6 @@ from insightbot.paths import (
 from insightbot.prompt_debug_history import (
     append_prompt_debug_history,
     load_prompt_debug_history,
-    make_compare_record,
     make_draft_run_record,
 )
 from insightbot.run_history import get_latest_run, get_latest_successful_send
@@ -54,11 +53,11 @@ from insightbot.editorial_pipeline import (
     run_editorial_pipeline,
 )
 try:
-    from scripts.ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
+    from scripts.ui.dry_run import _command_result_to_ui_result, render_inline_dry_run_panel, render_task_run_result
     from scripts.ui.overview import render_task_overview
     from scripts.ui.task_config import render_task_empty_state_wizard
 except ModuleNotFoundError:
-    from ui.dry_run import render_dry_run_tab, render_inline_dry_run_panel
+    from ui.dry_run import _command_result_to_ui_result, render_inline_dry_run_panel, render_task_run_result
     from ui.overview import render_task_overview
     from ui.task_config import render_task_empty_state_wizard
 
@@ -484,10 +483,13 @@ def main() -> None:
         summary = validation_result.get("summary", {})
         section_count = summary.get("section_count", summary.get("category_count", 0))
         rss_source_count = summary.get("rss_source_count", summary.get("feed_count", 0))
+        task_version_id = summary.get("task_version_id") or (validation_result.get("task_version") or {}).get("version_id")
         st.caption(
             f"板块 {section_count} 个 | RSS {rss_source_count} 个 | "
             f"频道 {summary.get('channel_count', 0)} 个 | 调度 {'已配置' if summary.get('has_schedule') else '未配置'}"
         )
+        if task_version_id:
+            st.caption(f"Domain Kernel: `{task_version_id}` | Diagnosis: `{summary.get('domain_diagnosis_id', 'n/a')}`")
         if task_state and task_state.get("needs_revalidation"):
             st.warning("当前任务最近配置已变更，建议重新 Dry Run 并刷新健康度。")
         issues = validation_result.get("issues", [])
@@ -500,6 +502,13 @@ def main() -> None:
                     st.error(line)
                 else:
                     st.warning(line)
+        if validation_result.get("domain_diagnosis"):
+            with st.expander("开发者详情：Domain Diagnosis", expanded=False):
+                st.json(validation_result["domain_diagnosis"], expanded=False)
+        changeset = st.session_state.get(f"last_changeset::{validation_result.get('task_id')}")
+        if changeset:
+            with st.expander("最近一次配置 ChangeSet", expanded=False):
+                st.json(changeset, expanded=False)
         st.markdown("</div>", unsafe_allow_html=True)
 
     def render_verification_summary(
@@ -677,9 +686,30 @@ def main() -> None:
     def save_task_definition(task_id: str, task_def: dict) -> None:
         tasks_data = get_tasks_data()
         tasks_data.setdefault("tasks", {})
-        tasks_data["tasks"][task_id] = normalize_task_definition(task_def)
-        save_tasks(tasks_data, bot_dir)
-        scheduler.reload()
+        normalized_task = normalize_task_definition(task_def)
+        if hasattr(scheduler, "propose_task_changeset_command") and hasattr(scheduler, "apply_changeset_command"):
+            try:
+                changeset = scheduler.propose_task_changeset_command(
+                    task_id,
+                    normalized_task,
+                    intent="Update task definition from Streamlit UI",
+                    rationale="User saved task configuration in the control panel.",
+                )
+                tasks_data = scheduler.apply_changeset_command(changeset)
+                st.session_state[f"last_changeset::{task_id}"] = changeset.to_dict()
+            except Exception as exc:
+                logging.getLogger("InsightBot").warning(
+                    "Domain ChangeSet save failed for task '%s'; falling back to direct save: %s",
+                    task_id,
+                    exc,
+                )
+                tasks_data["tasks"][task_id] = normalized_task
+                save_tasks(tasks_data, bot_dir)
+                scheduler.reload()
+        else:
+            tasks_data["tasks"][task_id] = normalized_task
+            save_tasks(tasks_data, bot_dir)
+            scheduler.reload()
         mark_task_changed(task_id)
 
     def build_task_runtime_config(task_id: str | None) -> dict:
@@ -719,10 +749,7 @@ def main() -> None:
                 }
             )
             task_sources["rss"] = rss_sources
-            tasks_data["tasks"][task_id] = task_def
-            save_tasks(tasks_data, bot_dir)
-            scheduler.reload()
-            mark_task_changed(task_id)
+            save_task_definition(task_id, task_def)
             return True
         except Exception as e:
             st.error(f"淇濆瓨澶辫触: {e}")
@@ -744,6 +771,21 @@ def main() -> None:
     init_channels(channels_data)
     scheduler = create_scheduler(bot_dir)
     tasks_data = get_tasks_data()
+
+    def build_task_validation(task_id: str | None, task_def: dict | None) -> dict:
+        if not task_id or not task_def:
+            return {"status": "not_ready", "is_runnable": False, "issues": [], "summary": {}}
+        if hasattr(scheduler, "validate_task_command"):
+            try:
+                return scheduler.validate_task_command(task_id)
+            except Exception as exc:
+                logging.getLogger("InsightBot").warning(
+                    "Domain validation failed for task '%s'; falling back to legacy validation: %s",
+                    task_id,
+                    exc,
+                )
+        return validate_task_definition(task_id, task_def, load_channels(bot_dir))
+
     selected_task_id, selected_task = get_selected_task(tasks_data)
     selected_task_runtime_config = build_task_runtime_config(selected_task_id)
     selected_task_feeds = deepcopy(selected_task_runtime_config.get("feeds", {})) if selected_task else {}
@@ -761,11 +803,7 @@ def main() -> None:
             )
     else:
         current_revision = ""
-    selected_task_validation = (
-        validate_task_definition(selected_task_id, selected_task, channels_data)
-        if selected_task_id and selected_task
-        else {"status": "not_ready", "is_runnable": False, "issues": [], "summary": {}}
-    )
+    selected_task_validation = build_task_validation(selected_task_id, selected_task)
 
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
     render_prompt_debug_styles()
@@ -803,7 +841,7 @@ def main() -> None:
                     bot_dir=bot_dir,
                     last_validated_revision=selected_task_state.get("last_validated_revision"),
                 )
-            selected_task_validation = validate_task_definition(selected_task_id, selected_task, channels_data)
+            selected_task_validation = build_task_validation(selected_task_id, selected_task)
             st.caption(
                 f"Pipeline: `{selected_task.get('pipeline', 'editorial')}` | "
                 f"Channels: {len(selected_task.get('channels', []))} | "
@@ -842,7 +880,7 @@ def main() -> None:
             if quick_new_task_id and not is_safe_id(quick_new_task_id):
                 st.error("任务 ID 只能使用英文字母、数字、下划线和连字符，长度 1-64。")
             elif quick_new_task_id and quick_new_task_id not in tasks:
-                tasks[quick_new_task_id] = {
+                new_task_def = {
                     "name": quick_new_task_name or quick_new_task_id,
                     "enabled": False,
                     "pipeline": quick_new_task_pipeline,
@@ -852,8 +890,22 @@ def main() -> None:
                     "channels": deepcopy((selected_task or {}).get("channels", [])),
                     "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
                 }
-                save_tasks(tasks_data, bot_dir)
-                scheduler.reload()
+                if hasattr(scheduler, "create_task_command"):
+                    result = scheduler.create_task_command(
+                        quick_new_task_id,
+                        new_task_def,
+                        intent="Create task from Streamlit quick action",
+                        rationale="User created a task in the sidebar quick action.",
+                    )
+                    if not result.ok:
+                        st.error(result.error or "创建任务失败")
+                        st.stop()
+                    else:
+                        st.session_state[f"last_changeset::{quick_new_task_id}"] = result.changeset.to_dict() if result.changeset else None
+                else:
+                    tasks[quick_new_task_id] = new_task_def
+                    save_tasks(tasks_data, bot_dir)
+                    scheduler.reload()
                 mark_task_changed(quick_new_task_id)
                 st.session_state["selected_task_id"] = quick_new_task_id
                 st.success(f"任务「{quick_new_task_id}」已创建。")
@@ -864,13 +916,25 @@ def main() -> None:
         if st.button("▶️ 立即手动运行", type="primary", use_container_width=True, disabled=not bool(selected_task_id)):
             with st.spinner("AI 正在全网检索并撰写简报..."):
                 try:
-                    result = scheduler.run_task_by_id(selected_task_id, dry_run=False)
+                    if hasattr(scheduler, "run_task_command"):
+                        result = _command_result_to_ui_result(scheduler.run_task_command(selected_task_id))
+                    else:
+                        result = scheduler.run_task_by_id(selected_task_id, dry_run=False)
                     if result.get("ok"):
                         st.success("运行完成，已按任务频道配置发送。")
                     else:
                         st.error(f"运行失败：{result.get('error') or '未知错误'}")
                     with st.expander("查看本次运行结果", expanded=not bool(result.get("ok"))):
-                        st.json(result)
+                        render_task_run_result(
+                            {
+                                **result,
+                                "_selected_task_id": selected_task_id,
+                                "_selected_task_name": selected_task.get("name", selected_task_id),
+                            },
+                            summarize_task_debug_result=summarize_task_debug_result,
+                            expanded=not bool(result.get("ok")),
+                            title_prefix="手动",
+                        )
                 except Exception as exc:
                     st.error(f"运行失败：{exc}")
 
@@ -916,10 +980,10 @@ def main() -> None:
         selected_task_state,
     )
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🏠 概览", "📋 任务管理", "📡 Channels",
-        "🧪 验证与调试", "📝 运行日志",
-        "⚙️ 推送版式定制", "🔬 任务调试",
+        "✅ 验证与运行", "📝 运行日志",
+        "⚙️ 推送版式定制",
     ])
 
     with tab0:
@@ -1438,19 +1502,26 @@ def main() -> None:
 
                     mark_task_changed(selected_task_id)
                     selected_task_state = load_task_state(selected_task_id, bot_dir)
-                    selected_task_validation = validate_task_definition(
-                        selected_task_id,
-                        task_def,
-                        load_channels(bot_dir),
-                    )
+                    selected_task_validation = build_task_validation(selected_task_id, task_def)
                     st.success(f"任务「{task_def['name']}」已保存。")
             with save_col2:
                 if st.button("🗑️ 删除当前任务", key=f"del_task_{selected_task_id}", use_container_width=True):
                     tasks_data = get_tasks_data()
-                    tasks_data.get("tasks", {}).pop(selected_task_id, None)
-                    save_tasks(tasks_data, bot_dir)
-                    scheduler.reload()
+                    if hasattr(scheduler, "delete_task_command"):
+                        result = scheduler.delete_task_command(
+                            selected_task_id,
+                            intent="Delete task from Streamlit UI",
+                            rationale="User deleted the current task in the control panel.",
+                        )
+                        if not result.ok:
+                            st.error(result.error or "删除任务失败")
+                            st.stop()
+                    else:
+                        tasks_data.get("tasks", {}).pop(selected_task_id, None)
+                        save_tasks(tasks_data, bot_dir)
+                        scheduler.reload()
                     st.session_state.pop(f"task_search_queries::{selected_task_id}", None)
+                    tasks_data = get_tasks_data()
                     next_task_id = next(iter(tasks_data.get("tasks", {})), None)
                     st.session_state["selected_task_id"] = next_task_id
                     st.success("任务已删除。")
@@ -1639,8 +1710,8 @@ def main() -> None:
                 st.error("频道 ID 已存在。")
 
     with tab3:
-        st.subheader("验证与调试")
-        st.caption("把最近运行、成功发送、健康检查、板块调试、No Push Diagnosis 和相关日志放在一页里，减少来回切页排查。")
+        st.subheader("验证与运行")
+        st.caption("先跑 Dry Run 看完整链路，再按问题提示修信源、板块或频道。高级 Prompt 调试默认折叠。")
 
         health_snapshot = load_task_health(selected_task_id, bot_dir) if selected_task_id else None
         run_summary = parse_recent_run_summary(bot_log_path)
@@ -1714,192 +1785,146 @@ def main() -> None:
                 st.info("这个板块最近还没有调试记录，可以先抓候选再试跑。")
             st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
-        st.markdown('<div class="ib-section-title">板块调试</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="ib-section-copy">这里承接原来的 Prompt Debug 能力：抓候选、试跑草稿 Prompt、对比当前与草稿，并在确认后写回任务配置。</div>',
-            unsafe_allow_html=True,
-        )
-        if not selected_task_categories:
-            st.info("当前任务还没有板块，先去“任务管理”添加板块和 RSS 源。")
-        else:
-            debug_task_scope = selected_task_id or "default"
-            stored_debug_category = st.session_state.get(f"prompt_debug_category::{debug_task_scope}")
-            debug_category = focused_category or stored_debug_category or selected_task_categories[0]
-            if debug_category not in selected_task_categories:
-                debug_category = selected_task_categories[0]
-            set_prompt_debug_category(selected_task_id, debug_category)
-
-            debug_category = st.selectbox(
-                "调试板块",
-                options=selected_task_categories,
-                index=selected_task_categories.index(debug_category),
-                key=f"inline_prompt_debug_category::{debug_task_scope}",
-            )
-            set_prompt_debug_category(selected_task_id, debug_category)
-
-            saved_prompt = selected_task_feeds.get(debug_category, {}).get("prompt", "")
-            draft_key = f"draft_prompt::{debug_task_scope}::{debug_category}"
-            if draft_key not in st.session_state:
-                st.session_state[draft_key] = saved_prompt
-            draft_prompt = st.text_area(
-                "草稿 Prompt",
-                value=st.session_state[draft_key],
-                height=180,
-                key=draft_key,
-            ).strip()
-
-            debug_selection = get_selection_settings(selected_task_runtime_config)
+        with st.expander("高级 Prompt 调试（可选）", expanded=False):
             st.caption(
-                f"当前筛选规则：最多保留 {debug_selection['max_selected_items']} 条 | 标题 {debug_selection['title_max_len']} 字 | "
-                f"摘要 {debug_selection['summary_max_len']} 字 | 分批大小 {debug_selection['batch_size']}"
+                "这里只测试单个板块 prompt，不代表完整推送结果。日常判断请优先看上方 Dry Run 的四阶段结果。"
             )
-
-            debug_meta = st.session_state.get("prompt_debug_meta", {})
-            candidate_list = st.session_state.get("prompt_debug_candidates", [])
-            candidate_matches = (
-                debug_meta.get("task_id") == selected_task_id
-                and debug_meta.get("category") == debug_category
-            )
-            debug_candidates = candidate_list if candidate_matches else []
-            using_fallback_candidates = bool(debug_meta.get("using_fallback")) if candidate_matches else False
-            prompt_changed = draft_prompt != saved_prompt
-
-            debug_action1, debug_action2, debug_action3, debug_action4 = st.columns(4)
-            with debug_action1:
-                if st.button("📥 抓候选", key=f"inline_fetch_candidates::{debug_category}", use_container_width=True):
-                    candidate_count, using_fallback = seed_prompt_debug_candidates(selected_task_id, debug_category)
-                    status_text = "内置样例" if using_fallback else "真实 RSS"
-                    st.success(f"已为 [{debug_category}] 准备 {candidate_count} 条候选（{status_text}）。")
-                    st.rerun()
-            with debug_action2:
-                if st.button("🧪 试跑草稿", key=f"inline_draft_run::{debug_category}", use_container_width=True):
-                    if not debug_candidates:
-                        st.warning("请先抓取候选，再试跑草稿 Prompt。")
-                    else:
-                        ui_logger = build_ui_logger()
-                        result = run_prompt_debug(
-                            config=selected_task_runtime_config,
-                            category_name=debug_category,
-                            news_list=debug_candidates,
-                            category_prompt=draft_prompt,
-                            logger=ui_logger,
-                        )
-                        st.session_state["prompt_debug_result"] = {
-                            "category": debug_category,
-                            "result": result,
-                        }
-                        st.session_state.pop("prompt_debug_compare", None)
-                        append_prompt_debug_history(
-                            bot_dir,
-                            make_draft_run_record(
-                                task_id=selected_task_id,
-                                task_name=selected_task.get("name", selected_task_id) if selected_task else selected_task_id,
-                                category=debug_category,
-                                candidate_count=len(debug_candidates),
-                                result=result,
-                                using_fallback_candidates=using_fallback_candidates,
-                                draft_prompt=draft_prompt,
-                            ),
-                        )
-                        st.success("草稿 Prompt 试跑完成。")
-                        st.rerun()
-            with debug_action3:
-                if st.button("🆚 当前 vs 草稿", key=f"inline_compare_run::{debug_category}", use_container_width=True):
-                    if not debug_candidates:
-                        st.warning("请先抓取候选，再比较当前与草稿 Prompt。")
-                    else:
-                        ui_logger = build_ui_logger()
-                        saved_result = run_prompt_debug(
-                            config=selected_task_runtime_config,
-                            category_name=debug_category,
-                            news_list=debug_candidates,
-                            category_prompt=saved_prompt,
-                            logger=ui_logger,
-                        )
-                        draft_result = run_prompt_debug(
-                            config=selected_task_runtime_config,
-                            category_name=debug_category,
-                            news_list=debug_candidates,
-                            category_prompt=draft_prompt,
-                            logger=ui_logger,
-                        )
-                        st.session_state["prompt_debug_compare"] = {
-                            "category": debug_category,
-                            "saved_result": saved_result,
-                            "draft_result": draft_result,
-                        }
-                        st.session_state.pop("prompt_debug_result", None)
-                        append_prompt_debug_history(
-                            bot_dir,
-                            make_compare_record(
-                                task_id=selected_task_id,
-                                task_name=selected_task.get("name", selected_task_id) if selected_task else selected_task_id,
-                                category=debug_category,
-                                candidate_count=len(debug_candidates),
-                                saved_result=saved_result,
-                                draft_result=draft_result,
-                                using_fallback_candidates=using_fallback_candidates,
-                                draft_prompt=draft_prompt,
-                            ),
-                        )
-                        st.success("当前 Prompt 与草稿 Prompt 对比完成。")
-                        st.rerun()
-            with debug_action4:
-                if st.button("💾 写回草稿到任务", key=f"inline_writeback::{debug_category}", use_container_width=True):
-                    tasks_data = get_tasks_data()
-                    task_def = normalize_task_definition(deepcopy(tasks_data.get("tasks", {}).get(selected_task_id, {})))
-                    task_def.setdefault("sections", {}).setdefault(debug_category, {}).update(
-                        {**task_def.get("sections", {}).get(debug_category, {}), "prompt": draft_prompt}
-                    )
-                    save_task_definition(selected_task_id, task_def)
-                    st.success(f"已把 [{debug_category}] 的草稿 Prompt 写回任务配置。")
-                    st.rerun()
-
-            if debug_candidates:
-                render_kpi_strip(
-                    candidate_count=len(debug_candidates),
-                    selected_count=len((st.session_state.get("prompt_debug_result", {}).get("result") or {}).get("selected_items", []))
-                    if st.session_state.get("prompt_debug_result", {}).get("category") == debug_category
-                    else len((st.session_state.get("prompt_debug_compare", {}).get("draft_result") or {}).get("selected_items", []))
-                    if st.session_state.get("prompt_debug_compare", {}).get("category") == debug_category
-                    else 0,
-                    using_fallback=using_fallback_candidates,
-                    prompt_changed=prompt_changed,
+            if not selected_task_categories:
+                st.info("当前任务还没有板块，先去“任务管理”添加板块和 RSS 源。")
+            else:
+                st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+                st.markdown('<div class="ib-section-title">单板块 Prompt 调试</div>', unsafe_allow_html=True)
+                st.markdown(
+                    '<div class="ib-section-copy">用于局部验证某个板块的 prompt。它不会经过完整的全局初筛和板块分配链路。</div>',
+                    unsafe_allow_html=True,
                 )
-                with st.expander(f"候选池预览（{len(debug_candidates)} 条）", expanded=False):
-                    for idx, item in enumerate(debug_candidates[:20], start=1):
-                        st.markdown(f"**{idx}. [{item.get('title', '')}]({item.get('link', '')})**")
-                        st.caption(item.get("summary", "") or "无摘要")
-                    if len(debug_candidates) > 20:
-                        st.caption(f"其余 {len(debug_candidates) - 20} 条已省略。")
-            else:
-                st.info("当前还没有候选内容。先抓取一批候选，再试跑草稿或做对比。")
+                debug_task_scope = selected_task_id or "default"
+                stored_debug_category = st.session_state.get(f"prompt_debug_category::{debug_task_scope}")
+                debug_category = focused_category or stored_debug_category or selected_task_categories[0]
+                if debug_category not in selected_task_categories:
+                    debug_category = selected_task_categories[0]
+                set_prompt_debug_category(selected_task_id, debug_category)
 
-            single_result = st.session_state.get("prompt_debug_result", {})
-            if single_result.get("category") == debug_category and single_result.get("result"):
-                render_result_panel(title="草稿试跑结果", result=single_result["result"])
+                debug_category = st.selectbox(
+                    "调试板块",
+                    options=selected_task_categories,
+                    index=selected_task_categories.index(debug_category),
+                    key=f"inline_prompt_debug_category::{debug_task_scope}",
+                )
+                set_prompt_debug_category(selected_task_id, debug_category)
 
-            compare_result = st.session_state.get("prompt_debug_compare", {})
-            if compare_result.get("category") == debug_category:
-                compare_col1, compare_col2 = st.columns(2)
-                with compare_col1:
-                    render_result_panel(title="当前 Prompt", result=compare_result.get("saved_result", {}))
-                with compare_col2:
-                    render_result_panel(title="草稿 Prompt", result=compare_result.get("draft_result", {}))
+                saved_prompt = selected_task_feeds.get(debug_category, {}).get("prompt", "")
+                draft_key = f"draft_prompt::{debug_task_scope}::{debug_category}"
+                if draft_key not in st.session_state:
+                    st.session_state[draft_key] = saved_prompt
+                draft_prompt = st.text_area(
+                    "草稿 Prompt",
+                    height=180,
+                    key=draft_key,
+                ).strip()
 
-            inline_history = filter_prompt_history_for_category(task_prompt_history, debug_category)
-            if inline_history:
-                st.markdown("**最近调试记录**")
-                for item in inline_history[:5]:
-                    mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
-                    st.markdown(
-                        f"- {item.get('created_at', '')} | {mode_label} | 候选 {item.get('candidate_count', 0)} 条 | "
-                        f"{render_history_status('草稿', item.get('draft_status'), item.get('draft_selected_count'))}"
+                debug_selection = get_selection_settings(selected_task_runtime_config)
+                st.caption(
+                    f"当前筛选规则：最多保留 {debug_selection['max_selected_items']} 条 | 标题 {debug_selection['title_max_len']} 字 | "
+                    f"摘要 {debug_selection['summary_max_len']} 字 | 分批大小 {debug_selection['batch_size']}"
+                )
+
+                debug_meta = st.session_state.get("prompt_debug_meta", {})
+                candidate_list = st.session_state.get("prompt_debug_candidates", [])
+                candidate_matches = (
+                    debug_meta.get("task_id") == selected_task_id
+                    and debug_meta.get("category") == debug_category
+                )
+                debug_candidates = candidate_list if candidate_matches else []
+                using_fallback_candidates = bool(debug_meta.get("using_fallback")) if candidate_matches else False
+                prompt_changed = draft_prompt != saved_prompt
+
+                debug_action1, debug_action2, debug_action3 = st.columns(3)
+                with debug_action1:
+                    if st.button("📥 抓候选", key=f"inline_fetch_candidates::{debug_category}", use_container_width=True):
+                        candidate_count, using_fallback = seed_prompt_debug_candidates(selected_task_id, debug_category)
+                        status_text = "内置样例" if using_fallback else "真实 RSS"
+                        st.success(f"已为 [{debug_category}] 准备 {candidate_count} 条候选（{status_text}）。")
+                        st.rerun()
+                with debug_action2:
+                    if st.button("🧪 试跑草稿", key=f"inline_draft_run::{debug_category}", use_container_width=True):
+                        if not debug_candidates:
+                            st.warning("请先抓取候选，再试跑草稿 Prompt。")
+                        else:
+                            ui_logger = build_ui_logger()
+                            result = run_prompt_debug(
+                                config=selected_task_runtime_config,
+                                category_name=debug_category,
+                                news_list=debug_candidates,
+                                category_prompt=draft_prompt,
+                                logger=ui_logger,
+                            )
+                            st.session_state["prompt_debug_result"] = {
+                                "category": debug_category,
+                                "result": result,
+                            }
+                            st.session_state.pop("prompt_debug_compare", None)
+                            append_prompt_debug_history(
+                                bot_dir,
+                                make_draft_run_record(
+                                    task_id=selected_task_id,
+                                    task_name=selected_task.get("name", selected_task_id) if selected_task else selected_task_id,
+                                    category=debug_category,
+                                    candidate_count=len(debug_candidates),
+                                    result=result,
+                                    using_fallback_candidates=using_fallback_candidates,
+                                    draft_prompt=draft_prompt,
+                                ),
+                            )
+                            st.success("草稿 Prompt 试跑完成。")
+                            st.rerun()
+                with debug_action3:
+                    if st.button("💾 写回草稿", key=f"inline_writeback::{debug_category}", use_container_width=True):
+                        tasks_data = get_tasks_data()
+                        task_def = normalize_task_definition(deepcopy(tasks_data.get("tasks", {}).get(selected_task_id, {})))
+                        task_def.setdefault("sections", {}).setdefault(debug_category, {}).update(
+                            {**task_def.get("sections", {}).get(debug_category, {}), "prompt": draft_prompt}
+                        )
+                        save_task_definition(selected_task_id, task_def)
+                        st.success(f"已把 [{debug_category}] 的草稿 Prompt 写回任务配置。")
+                        st.rerun()
+
+                if debug_candidates:
+                    single_result = st.session_state.get("prompt_debug_result", {})
+                    selected_count = 0
+                    if single_result.get("category") == debug_category:
+                        selected_count = len((single_result.get("result") or {}).get("selected_items", []))
+                    render_kpi_strip(
+                        candidate_count=len(debug_candidates),
+                        selected_count=selected_count,
+                        using_fallback=using_fallback_candidates,
+                        prompt_changed=prompt_changed,
                     )
-            else:
-                st.caption("当前板块还没有调试历史。")
-        st.markdown("</div>", unsafe_allow_html=True)
+                    with st.expander(f"候选池预览（{len(debug_candidates)} 条）", expanded=False):
+                        for idx, item in enumerate(debug_candidates[:20], start=1):
+                            st.markdown(f"**{idx}. [{item.get('title', '')}]({item.get('link', '')})**")
+                            st.caption(item.get("summary", "") or "无摘要")
+                        if len(debug_candidates) > 20:
+                            st.caption(f"其余 {len(debug_candidates) - 20} 条已省略。")
+                else:
+                    st.info("当前还没有候选内容。先抓取一批候选，再试跑草稿。")
+
+                single_result = st.session_state.get("prompt_debug_result", {})
+                if single_result.get("category") == debug_category and single_result.get("result"):
+                    render_result_panel(title="草稿试跑结果", result=single_result["result"])
+
+                inline_history = filter_prompt_history_for_category(task_prompt_history, debug_category)
+                if inline_history:
+                    st.markdown("**最近调试记录**")
+                    for item in inline_history[:5]:
+                        mode_label = "草稿试跑" if item.get("mode") == "draft_run" else "当前 vs 草稿"
+                        st.markdown(
+                            f"- {item.get('created_at', '')} | {mode_label} | 候选 {item.get('candidate_count', 0)} 条 | "
+                            f"{render_history_status('草稿', item.get('draft_status'), item.get('draft_selected_count'))}"
+                        )
+                else:
+                    st.caption("当前板块还没有调试历史。")
+                st.markdown("</div>", unsafe_allow_html=True)
 
         header_col1, header_col2, header_col3 = st.columns([1.3, 1.0, 1.2])
         with header_col1:
@@ -2131,15 +2156,6 @@ def main() -> None:
             save_config(config)
             mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
             st.toast("设置已生效！")
-
-    with tab6:
-        render_dry_run_tab(
-            tasks=load_tasks(bot_dir).get("tasks", {}),
-            selected_task_id=selected_task_id,
-            scheduler=scheduler,
-            summarize_task_debug_result=summarize_task_debug_result,
-        )
-
 
 if __name__ == "__main__":
     main()
