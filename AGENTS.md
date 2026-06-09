@@ -14,6 +14,21 @@ This project is Mika's marketing intelligence bot. Default communication with th
   - `insightbot-scheduler.service` runs the scheduler
 - Production runtime files such as `tasks.json`, `channels.json`, `config.content.json`, `config.secrets.json`, and `data/` may differ from local Git state. Do not overwrite them blindly.
 
+## Tencent Cloud Gateway Readiness
+
+InsightBot is moving toward the shared Tencent Cloud product gateway model. Current direct access to Streamlit on `8501` is a production reality, not the target product-readiness standard.
+
+Before calling any future web deployment complete, verify these gateway-readiness rules:
+
+- Public access should go through the shared gateway on `80/443`, not direct public app ports.
+- The app must support a public path prefix such as `/insightbot/`; root `/` is reserved for the shared app index unless the gateway project changes that policy.
+- Frontend/backend services should bind to `127.0.0.1` in production.
+- Browser traffic must not default to `http(s)://<host>:8501` or any other internal app port.
+- Health/config/debug endpoints should be reachable through the gateway path when exposed.
+- Streamlit-specific routing, static assets, redirects, downloads, WebSocket behavior, and refresh under `/insightbot/` must be checked before gateway cutover.
+
+Gateway readiness is not required for local UI iteration on `8502`, but it is required before treating the workbench as a polished product surface on Tencent Cloud.
+
 ## Safe Deployment Pattern
 
 Production can be deployed automatically through GitHub Actions:

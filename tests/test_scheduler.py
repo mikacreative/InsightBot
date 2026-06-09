@@ -387,6 +387,134 @@ class TestSchedulerDomainCommands:
         assert blocked_run["ok"] is False
         assert blocked_run["error"] == "Tool requires approval."
 
+    def test_execute_tool_call_returns_product_read_models(self):
+        from insightbot.scheduler import Scheduler
+
+        sched = Scheduler.__new__(Scheduler)
+        sched.bot_dir = "/tmp/insightbot"
+        sched.tasks = {}
+        sched._log = MagicMock()
+        tasks_payload = {
+            "tasks": {
+                "daily": {
+                    "name": "Daily",
+                    "enabled": True,
+                    "pipeline": "editorial",
+                    "sections": {"Marketing": {"prompt": "Keep marketing news."}},
+                    "sources": {
+                        "rss": [
+                            {
+                                "id": "src",
+                                "url": "https://example.com/feed.xml",
+                                "enabled": True,
+                                "api_key": "should-not-leak",
+                            }
+                        ]
+                    },
+                    "channels": ["wecom_main"],
+                    "schedule": {"hour": 8, "minute": 0},
+                }
+            }
+        }
+        latest_run = {
+            "run_id": "run_1",
+            "task_id": "daily",
+            "ok": True,
+            "dry_run": True,
+            "final_markdown": "### A\n> summary",
+            "channel_results": [],
+            "run_trace": {
+                "stages": [
+                    {"stage": "fetch", "input_count": 0, "output_count": 3, "warnings": [], "errors": []}
+                ]
+            },
+            "diagnosis": {"severity": "ok", "findings": []},
+        }
+        health = {
+            "counts": {"total": 2, "ok": 1, "stale": 0, "error": 1},
+            "categories": [
+                {
+                    "category": "Marketing",
+                    "feeds": [
+                        {
+                            "name": "Example Feed",
+                            "url": "https://example.com/feed.xml",
+                            "status": "error",
+                            "error_type": "timeout",
+                            "error_message": "timed out",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        with patch("insightbot.scheduler.load_tasks", return_value=tasks_payload), \
+             patch("insightbot.scheduler.load_channels", return_value={"channels": {"wecom_main": {}}}), \
+             patch("insightbot.run_history.get_latest_run", return_value=latest_run), \
+             patch("insightbot.run_history.get_latest_successful_send", return_value=None), \
+             patch("insightbot.task_health_store.load_task_health", return_value=health):
+            cards = sched.execute_tool_call("list_task_cards", {})
+            workspace = sched.execute_tool_call("get_workspace_state", {"selected_task_id": "daily"})
+            status = sched.execute_tool_call("get_task_status", {"task_id": "daily"})
+            evidence = sched.execute_tool_call("get_latest_run_evidence", {"task_id": "daily"})
+            source_health = sched.execute_tool_call("get_source_health_summary", {"task_id": "daily"})
+            bad_args = sched.execute_tool_call("get_task_status", {"task_id": "daily", "raw_config": True})
+            bad_workspace_args = sched.execute_tool_call("get_workspace_state", {"selected_task_id": "../bad"})
+
+        assert cards["ok"] is True
+        assert cards["output"]["task_cards"][0]["task_id"] == "daily"
+        assert workspace["ok"] is True
+        assert workspace["output"]["selected_task_id"] == "daily"
+        assert workspace["output"]["selected_task_card"]["task_id"] == "daily"
+        assert status["output"]["status"] == "Ready"
+        assert evidence["output"]["stage_counts"]["fetch"]["output"] == 3
+        assert source_health["output"]["error_count"] == 1
+        assert "should-not-leak" not in str(cards)
+        assert "should-not-leak" not in str(status)
+        assert bad_args["ok"] is False
+        assert bad_args["error"] == "invalid_arguments"
+        assert bad_workspace_args["ok"] is False
+
+    def test_product_read_models_degrade_when_one_task_validation_fails(self):
+        from insightbot.scheduler import Scheduler
+
+        sched = Scheduler.__new__(Scheduler)
+        sched.bot_dir = "/tmp/insightbot"
+        sched.tasks = {}
+        sched._log = MagicMock()
+        tasks_payload = {
+            "tasks": {
+                "daily": {
+                    "name": "Daily",
+                    "enabled": True,
+                    "pipeline": "editorial",
+                    "sections": {"Marketing": {"prompt": "Keep marketing news."}},
+                    "sources": {"rss": [{"id": "src", "url": "https://example.com/feed.xml", "enabled": True}]},
+                    "channels": ["wecom_main"],
+                    "schedule": {"hour": 8, "minute": 0},
+                },
+                "broken": ["not", "a", "task"],
+            }
+        }
+
+        def validate_side_effect(task_id: str):
+            if task_id == "broken":
+                raise ValueError("bad task")
+            return {"is_runnable": True, "issues": [], "summary": {"task_version_id": "taskv_daily"}}
+
+        with patch("insightbot.scheduler.load_tasks", return_value=tasks_payload), \
+             patch("insightbot.run_history.get_latest_run", return_value=None), \
+             patch("insightbot.run_history.get_latest_successful_send", return_value=None), \
+             patch("insightbot.task_health_store.load_task_health", return_value=None), \
+             patch.object(Scheduler, "validate_task_command", side_effect=validate_side_effect):
+            result = sched.execute_tool_call("list_task_cards", {})
+
+        assert result["ok"] is True
+        by_id = {card["task_id"]: card for card in result["output"]["task_cards"]}
+        assert by_id["daily"]["status"] == "Ready"
+        assert by_id["broken"]["status"] == "Needs Review"
+        assert by_id["broken"]["risk_summary"]["error_count"] == 1
+
     def test_execute_tool_call_can_apply_changeset_when_approved(self):
         from insightbot.scheduler import Scheduler
 
@@ -427,6 +555,57 @@ class TestSchedulerDomainCommands:
              patch.object(Scheduler, "reload") as mock_reload:
             blocked_apply = sched.execute_tool_call("apply_changeset", {"changeset": changeset})
             apply_result = sched.execute_tool_call("apply_changeset", {"changeset": changeset}, approved=True)
+
+        assert blocked_apply["ok"] is False
+        assert apply_result["ok"] is True
+        assert apply_result["output"]["tasks"]["daily"]["name"] == "Daily Updated"
+        mock_save.assert_called_once()
+        mock_reload.assert_called_once()
+
+    def test_execute_tool_call_supports_product_changeset_aliases(self):
+        from insightbot.scheduler import Scheduler
+
+        sched = Scheduler.__new__(Scheduler)
+        sched.bot_dir = "/tmp/insightbot"
+        sched.tasks = {}
+        sched._log = MagicMock()
+        tasks_payload = {
+            "tasks": {
+                "daily": {
+                    "name": "Daily",
+                    "enabled": True,
+                    "pipeline": "editorial",
+                    "sections": {"Marketing": {"prompt": "Keep marketing news."}},
+                    "sources": {"rss": [{"id": "src", "url": "https://example.com/feed.xml", "enabled": True}]},
+                    "channels": ["wecom_main"],
+                    "schedule": {"hour": 8, "minute": 0},
+                }
+            }
+        }
+        target_task = {**tasks_payload["tasks"]["daily"], "name": "Daily Updated"}
+
+        with patch("insightbot.scheduler.load_tasks", return_value=tasks_payload):
+            proposal = sched.execute_tool_call(
+                "propose_task_update",
+                {
+                    "task_id": "daily",
+                    "target_task_definition": target_task,
+                    "intent": "Rename task",
+                },
+            )
+
+        assert proposal["ok"] is True
+        changeset = proposal["output"]
+
+        with patch("insightbot.scheduler.load_tasks", return_value=tasks_payload), \
+             patch("insightbot.scheduler.save_tasks") as mock_save, \
+             patch.object(Scheduler, "reload") as mock_reload:
+            blocked_apply = sched.execute_tool_call("approve_and_apply_changeset", {"changeset": changeset})
+            apply_result = sched.execute_tool_call(
+                "approve_and_apply_changeset",
+                {"changeset": changeset},
+                approved=True,
+            )
 
         assert blocked_apply["ok"] is False
         assert apply_result["ok"] is True
