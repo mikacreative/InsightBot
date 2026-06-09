@@ -219,6 +219,40 @@ class Scheduler:
         }
         return manifest
 
+    def build_workspace_state_command(self, selected_task_id: str | None = None) -> dict:
+        """Build the shared product workbench state for UI and internal tools."""
+        from .product import build_workspace_state
+        from .run_history import get_latest_run, get_latest_successful_send
+        from .task_health_store import load_task_health
+
+        tasks_payload = load_tasks(self.bot_dir)
+        tasks = tasks_payload.get("tasks", {}) or {}
+        histories: dict[str, dict] = {}
+        health: dict[str, dict | None] = {}
+        for task_id in sorted(tasks.keys()):
+            # Validate through the same command boundary used by UI actions, but
+            # keep the workbench readable when one task is malformed.
+            try:
+                validation = self.validate_task_command(task_id)
+            except Exception as exc:
+                validation = {
+                    "is_runnable": False,
+                    "issues": [
+                        {
+                            "severity": "error",
+                            "message": f"任务配置无法验证：{exc}",
+                        }
+                    ],
+                    "summary": {},
+                }
+            histories[task_id] = {
+                "validation": validation,
+                "latest_run": get_latest_run(task_id, self.bot_dir),
+                "latest_success": get_latest_successful_send(task_id, self.bot_dir),
+            }
+            health[task_id] = load_task_health(task_id, self.bot_dir)
+        return build_workspace_state(tasks, selected_task_id, histories, health)
+
     def tool_manifest(self) -> dict:
         """Return the static Domain Kernel tool manifest."""
         from .domain import get_tool_manifest
@@ -236,6 +270,9 @@ class Scheduler:
         from .domain import ChangeSet
         from .domain.commands import get_task_spec, get_task_version
         from .ids import require_safe_id
+        from .product import build_run_evidence, build_source_health_summary
+        from .run_history import get_latest_run
+        from .task_health_store import load_task_health
 
         args = arguments or {}
         tools = {tool["name"]: tool for tool in self.tool_manifest().get("tools", [])}
@@ -277,6 +314,13 @@ class Scheduler:
                         ],
                     },
                 }
+            if tool_name == "list_task_cards":
+                cards = self.build_workspace_state_command().get("task_cards", [])
+                return {"ok": True, "tool": tool_name, "output": {"task_cards": cards}}
+            if tool_name == "get_workspace_state":
+                selected_task_arg = args.get("selected_task_id")
+                selected_task_id = require_safe_id(selected_task_arg, label="selected_task_id") if selected_task_arg else None
+                return {"ok": True, "tool": tool_name, "output": self.build_workspace_state_command(selected_task_id)}
             if tool_name == "get_task_spec":
                 task_id = require_safe_id(args.get("task_id"), label="task_id")
                 return {
@@ -291,13 +335,38 @@ class Scheduler:
                     "tool": tool_name,
                     "output": get_task_version(tasks_payload, task_id).to_dict(),
                 }
+            if tool_name == "get_task_status":
+                task_id = require_safe_id(args.get("task_id"), label="task_id")
+                get_task_spec(tasks_payload, task_id)
+                state = self.build_workspace_state_command(task_id)
+                return {
+                    "ok": True,
+                    "tool": tool_name,
+                    "output": state.get("selected_task_card"),
+                }
+            if tool_name == "get_latest_run_evidence":
+                task_id = require_safe_id(args.get("task_id"), label="task_id")
+                get_task_spec(tasks_payload, task_id)
+                return {
+                    "ok": True,
+                    "tool": tool_name,
+                    "output": build_run_evidence(get_latest_run(task_id, self.bot_dir)),
+                }
+            if tool_name == "get_source_health_summary":
+                task_id = require_safe_id(args.get("task_id"), label="task_id")
+                get_task_spec(tasks_payload, task_id)
+                return {
+                    "ok": True,
+                    "tool": tool_name,
+                    "output": build_source_health_summary(load_task_health(task_id, self.bot_dir)),
+                }
             if tool_name == "validate_task":
                 return {"ok": True, "tool": tool_name, "output": self.validate_task_command(require_safe_id(args.get("task_id"), label="task_id"))}
             if tool_name == "dry_run_task":
                 return {"ok": True, "tool": tool_name, "output": self.dry_run_task_command(require_safe_id(args.get("task_id"), label="task_id")).to_dict()}
             if tool_name == "run_task":
                 return {"ok": True, "tool": tool_name, "output": self.run_task_command(require_safe_id(args.get("task_id"), label="task_id")).to_dict()}
-            if tool_name == "propose_task_changeset":
+            if tool_name in {"propose_task_changeset", "propose_task_update"}:
                 changeset = self.propose_task_changeset_command(
                     require_safe_id(args.get("task_id"), label="task_id"),
                     args.get("target_task_definition") or {},
@@ -305,7 +374,7 @@ class Scheduler:
                     rationale=str(args.get("rationale") or ""),
                 )
                 return {"ok": True, "tool": tool_name, "output": changeset.to_dict()}
-            if tool_name == "apply_changeset":
+            if tool_name in {"apply_changeset", "approve_and_apply_changeset"}:
                 changeset_payload = args.get("changeset") or {}
                 changeset = changeset_payload if isinstance(changeset_payload, ChangeSet) else ChangeSet.from_dict(changeset_payload)
                 return {"ok": True, "tool": tool_name, "output": self.apply_changeset_command(changeset)}
