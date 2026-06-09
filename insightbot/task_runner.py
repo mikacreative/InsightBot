@@ -110,9 +110,12 @@ def _build_run_record(
     stage_results: dict,
     channel_results: list[dict],
     error: str | None,
+    run_payload: dict | None = None,
+    task_version_id: str | None = None,
+    trigger_type: str | None = None,
 ) -> dict:
     candidate_count, selected_count = _estimate_counts(stage_results)
-    return {
+    record = {
         "task_id": task_id,
         "task_name": config.get("_task_name", task_id),
         "started_at": started_at.isoformat(),
@@ -125,6 +128,26 @@ def _build_run_record(
         "channel_results": channel_results,
         "error": error,
     }
+    if task_version_id:
+        record["task_version_id"] = task_version_id
+    if run_payload is not None:
+        from .domain import DiagnosisReport, RunTrace
+
+        trace = RunTrace.from_task_result(
+            run_payload,
+            task_version_id=task_version_id,
+            trigger_type=trigger_type or ("dry_run" if dry_run else "scheduled"),
+        )
+        diagnosis = DiagnosisReport.from_run_trace(trace)
+        record.update(
+            {
+                "run_id": trace.run_id,
+                "task_version_id": trace.task_version_id,
+                "run_trace": trace.to_dict(),
+                "diagnosis": diagnosis.to_dict(),
+            }
+        )
+    return record
 
 
 def _run_editorial_pipeline(*, config: dict, logger) -> dict:
@@ -347,6 +370,9 @@ def run_task(
                     stage_results=stage_results,
                     channel_results=[],
                     error=pipeline_error,
+                    run_payload=payload,
+                    task_version_id=config.get("_task_version_id"),
+                    trigger_type=config.get("_task_trigger_type") or "dry_run",
                 ),
             )
         except Exception as exc:
@@ -379,6 +405,9 @@ def run_task(
                     stage_results=stage_results,
                     channel_results=channel_results,
                     error=pipeline_error,
+                    run_payload=payload,
+                    task_version_id=config.get("_task_version_id"),
+                    trigger_type=config.get("_task_trigger_type") or "manual",
                 ),
             )
         except Exception as exc:
@@ -433,6 +462,9 @@ def run_task(
                 stage_results=stage_results,
                 channel_results=channel_results,
                 error=pipeline_error or delivery_error,
+                run_payload=payload,
+                task_version_id=config.get("_task_version_id"),
+                trigger_type=config.get("_task_trigger_type") or "manual",
             ),
         )
     except Exception as exc:

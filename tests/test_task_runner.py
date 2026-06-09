@@ -30,6 +30,7 @@ class TestRunTaskDryRun:
         fake_config = {
             "_task_pipeline": "editorial",
             "_task_channels": ["wecom_main"],
+            "_task_version_id": "taskv_test123",
             "feeds": {},
             "ai": {"api_url": "...", "api_key": "...", "model": "..."},
         }
@@ -39,7 +40,13 @@ class TestRunTaskDryRun:
             mock_ep.return_value = {
                 "ok": True,
                 "final_markdown": "## 报告内容",
-                "screened_result": {},
+                "global_candidates": [{"id": "c1"}],
+                "screened_result": {"screened": [{"id": "c1"}]},
+                "assignment_result": {
+                    "category_candidate_map": {"Marketing": [{"id": "c1"}]},
+                    "unassigned": [],
+                },
+                "category_results": {"Marketing": {"selected_items": [{"title": "A"}]}},
                 "error": None,
             }
             with patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
@@ -52,6 +59,11 @@ class TestRunTaskDryRun:
                 assert "stage_results" in result
                 mock_send.assert_not_called()
                 mock_history.assert_called_once()
+                history_record = mock_history.call_args.args[1]
+                assert history_record["task_version_id"] == "taskv_test123"
+                assert history_record["run_trace"]["task_version_id"] == "taskv_test123"
+                assert history_record["run_trace"]["trigger_type"] == "dry_run"
+                assert history_record["diagnosis"]["severity"] == "ok"
 
     def test_dry_run_with_classic_pipeline(self):
         from insightbot.task_runner import run_task
@@ -89,6 +101,8 @@ class TestRunTaskReal:
         fake_config = {
             "_task_pipeline": "editorial",
             "_task_channels": ["ch1", "ch2"],
+            "_task_version_id": "taskv_test456",
+            "_task_trigger_type": "manual",
             "feeds": {},
             "ai": {"api_url": "...", "api_key": "...", "model": "..."},
             "settings": {},
@@ -114,6 +128,11 @@ class TestRunTaskReal:
                 assert result["channel_results"][1]["channel_id"] == "ch2"
                 assert result["channel_results"][0]["message_count"] >= 1
                 mock_history.assert_called_once()
+                history_record = mock_history.call_args.args[1]
+                assert history_record["task_version_id"] == "taskv_test456"
+                assert history_record["run_trace"]["trigger_type"] == "manual"
+                assert history_record["run_trace"]["stages"][-1]["stage"] == "send"
+                assert history_record["diagnosis"]["target_id"] == history_record["run_id"]
 
     def test_pipeline_dispatch_editorial(self):
         from insightbot.task_runner import run_task

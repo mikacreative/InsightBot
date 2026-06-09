@@ -22,7 +22,12 @@ def render_task_overview(
     format_timestamp,
     render_operating_chip,
     render_diagnosis_card,
+    workspace_state: dict | None = None,
 ) -> None:
+    workspace_state = workspace_state or {}
+    task_card = workspace_state.get("selected_task_card") or {}
+    source_health = workspace_state.get("selected_source_health") or {}
+    shared_diagnosis = workspace_state.get("human_diagnosis") or {}
     validation_summary = selected_task_validation.get("summary", {}) if selected_task_validation else {}
     section_count = validation_summary.get("section_count", validation_summary.get("category_count", 0))
     rss_source_count = validation_summary.get("rss_source_count", validation_summary.get("feed_count", 0))
@@ -38,12 +43,15 @@ def render_task_overview(
         )
 
     health_counts = (health_snapshot or {}).get("counts", {})
+    shared_status = task_card.get("status") or task_state_label
+    shared_status_reason = task_card.get("status_reason") or task_state_copy
+    shared_source_errors = source_health.get("error_count", health_counts.get("error", 0))
     st.markdown(
         f"""
         <div class="ib-kpi-grid">
           <div class="ib-kpi-card">
             <div class="ib-kpi-label">任务状态</div>
-            <div class="ib-kpi-value" style="font-size:1.05rem;">{task_state_label}</div>
+            <div class="ib-kpi-value" style="font-size:1.05rem;">{shared_status}</div>
           </div>
           <div class="ib-kpi-card">
             <div class="ib-kpi-label">可运行性</div>
@@ -66,14 +74,15 @@ def render_task_overview(
     with top_col1:
         st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
         st.markdown('<div class="ib-section-title">任务状态</div>', unsafe_allow_html=True)
-        render_operating_chip(task_state_label, task_state_class)
+        render_operating_chip(shared_status, task_state_class)
         st.markdown(
             f"""
             <div class="ib-section-copy">
-              {task_state_copy}<br/>
+              {shared_status_reason}<br/>
+              {shared_diagnosis.get('message', '')}<br/>
               板块数：{section_count}<br/>
               RSS 源数：{rss_source_count}<br/>
-              异常 RSS 源：{health_counts.get('error', 0)}<br/>
+              异常 RSS 源：{shared_source_errors}<br/>
               最近运行结果：{run_metrics.get('result_label', '未知')}
             </div>
             """,
