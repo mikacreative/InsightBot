@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from insightbot.domain import TaskSpec, TaskVersion
+from insightbot.feed_health import describe_feed_issue
 
 
 _SENSITIVE_PATH_PARTS = (
@@ -190,6 +191,7 @@ def build_source_health_summary(health: dict[str, Any] | None) -> dict[str, Any]
                         "error_type": feed.get("error_type"),
                         "error_message": feed.get("error_message"),
                         "latest_pub": feed.get("latest_pub"),
+                        "diagnosis": describe_feed_issue(feed),
                     }
                 )
     return {

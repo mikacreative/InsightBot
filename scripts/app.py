@@ -15,7 +15,7 @@ from insightbot.config import (
     save_channels,
     save_tasks,
 )
-from insightbot.feed_health import CACHE_TTL_SECONDS, get_feed_health_snapshot, load_health_cache
+from insightbot.feed_health import CACHE_TTL_SECONDS, describe_feed_issue, get_feed_health_snapshot, load_health_cache
 from insightbot.ids import is_safe_id
 from insightbot.paths import (
     bot_log_file_path,
@@ -2122,7 +2122,10 @@ def main() -> None:
         if source_summary.get("top_failing_sources"):
             with st.expander("⚠️ 异常信源", expanded=False):
                 for item in source_summary.get("top_failing_sources", []):
-                    st.write(f"- {item.get('name') or item.get('url')} | {item.get('status')} | {item.get('error_type') or ''}")
+                    diagnosis = item.get("diagnosis") or describe_feed_issue(item)
+                    st.markdown(f"**{item.get('name') or item.get('url')}**")
+                    st.caption(f"状态：{item.get('status') or 'unknown'} | 类型：{item.get('error_type') or '无'}")
+                    st.warning(f"{diagnosis.get('summary', '暂无法判断问题。')} 建议：{diagnosis.get('action', '先手动检查该信源。')}")
         if stage_counts:
             with st.expander("🧪 开发细节：运行阶段计数", expanded=False):
                 st.json(stage_counts, expanded=False)
@@ -2496,7 +2499,11 @@ def main() -> None:
                         unsafe_allow_html=True,
                     )
                     if feed.get("status") == "error":
-                        st.error(f"{feed.get('error_type', 'unknown_error')}: {feed.get('error_message', '未知错误')}")
+                        diagnosis = describe_feed_issue(feed)
+                        st.error(f"{diagnosis['summary']} 建议：{diagnosis['action']}")
+                    elif feed.get("status") == "stale":
+                        diagnosis = describe_feed_issue(feed)
+                        st.warning(f"{diagnosis['summary']} 建议：{diagnosis['action']}")
                     else:
                         elapsed = feed.get("elapsed_s")
                         if elapsed is not None:

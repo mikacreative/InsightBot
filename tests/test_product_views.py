@@ -119,6 +119,8 @@ def test_build_run_evidence_and_source_health_are_json_safe():
     assert evidence["stage_counts"]["fetch"]["output"] == 8
     assert len(evidence["output_preview"]) == 1200
     assert health["error_count"] == 1
+    assert health["top_failing_sources"][0]["diagnosis"]["summary"] == "请求超时，目标站点响应太慢或暂时不可达。"
+    assert "替换" in health["top_failing_sources"][0]["diagnosis"]["action"]
     assert "api_key" not in str(health)
 
 

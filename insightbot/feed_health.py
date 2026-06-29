@@ -15,6 +15,34 @@ CACHE_TTL_SECONDS = 300
 FEED_FETCH_TIMEOUT_S = 15
 
 
+_ISSUE_DESCRIPTIONS = {
+    "timeout": (
+        "请求超时，目标站点响应太慢或暂时不可达。",
+        "稍后重试；如果连续多次超时，建议降低依赖或替换为更稳定的信源。",
+    ),
+    "unreachable": (
+        "无法连接到目标站点，可能是域名、网络或对方服务异常。",
+        "先在浏览器打开源地址确认是否可访问；不可访问则替换或停用该信源。",
+    ),
+    "blocked_url": (
+        "该地址被安全策略拦截，通常是本机地址、内网地址或不允许访问的目标。",
+        "不要在生产任务中使用该地址；改成公网可访问的 RSS 或配置受控代理服务。",
+    ),
+    "parse_error": (
+        "返回内容无法按 RSS/Atom 正常解析。",
+        "检查该地址是否仍是 RSS；如果网页能打开但不是 feed，需要换成正确订阅地址。",
+    ),
+    "invalid_feed": (
+        "返回内容不是有效 RSS/Atom，或 HTTP 状态异常。",
+        "打开源地址确认格式；如果是普通网页，先用 RSS 发现工具寻找真实 feed。",
+    ),
+    "unknown_error": (
+        "检测时出现未归类错误。",
+        "查看错误原文；如果重复出现，建议先停用该源并记录为待排查。",
+    ),
+}
+
+
 def _now() -> datetime:
     return datetime.now()
 
@@ -46,6 +74,35 @@ def _classify_exception(exc: Exception) -> tuple[str, str]:
     if any(token in text for token in ("connection refused", "name or service not known", "nodename nor servname")):
         return "unreachable", str(exc)
     return "unknown_error", str(exc) or "未知错误"
+
+
+def describe_feed_issue(feed: dict[str, Any]) -> dict[str, str]:
+    """Return a short Chinese diagnosis and suggested action for a feed health result."""
+    status = str(feed.get("status") or "unknown")
+    if status == "ok":
+        return {
+            "severity": "ok",
+            "summary": "信源正常，最近 24 小时内有新内容。",
+            "action": "无需处理。",
+        }
+    if status == "stale":
+        latest_pub = feed.get("latest_pub")
+        if latest_pub:
+            summary = "信源可访问，但最近 24 小时没有新内容。"
+            action = "如果这是低频媒体可以保留；如果连续多天无更新，建议补充或替换信源。"
+        else:
+            summary = "信源可访问，但没有可识别的发布时间。"
+            action = "检查该 feed 是否长期缺少时间字段；必要时换用发布时间更完整的来源。"
+        return {"severity": "warning", "summary": summary, "action": action}
+
+    error_type = str(feed.get("error_type") or "unknown_error")
+    summary, action = _ISSUE_DESCRIPTIONS.get(error_type, _ISSUE_DESCRIPTIONS["unknown_error"])
+    return {
+        "severity": "error",
+        "summary": summary,
+        "action": action,
+        "raw_error": str(feed.get("error_message") or "").strip(),
+    }
 
 
 def _parse_entry_datetime(entry: Any) -> datetime | None:

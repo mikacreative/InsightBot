@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from insightbot.feed_health import (
     CACHE_TTL_SECONDS,
+    describe_feed_issue,
     get_feed_health_snapshot,
     inspect_feed,
     inspect_feeds,
@@ -77,6 +78,37 @@ class TestInspectFeed:
 
         assert result["status"] == "error"
         assert result["error_type"] == "timeout"
+
+    def test_describe_feed_issue_returns_chinese_summary_and_action(self):
+        timeout = describe_feed_issue(
+            {
+                "status": "error",
+                "error_type": "timeout",
+                "error_message": "timed out after 15s",
+            }
+        )
+        blocked = describe_feed_issue(
+            {
+                "status": "error",
+                "error_type": "blocked_url",
+                "error_message": "URL resolves to a disallowed address: 127.0.0.1",
+            }
+        )
+        stale = describe_feed_issue(
+            {
+                "status": "stale",
+                "latest_pub": "2026-06-01T08:00:00",
+            }
+        )
+
+        assert timeout["severity"] == "error"
+        assert timeout["summary"] == "请求超时，目标站点响应太慢或暂时不可达。"
+        assert "替换" in timeout["action"]
+        assert timeout["raw_error"] == "timed out after 15s"
+        assert "安全策略拦截" in blocked["summary"]
+        assert "生产任务" in blocked["action"]
+        assert stale["severity"] == "warning"
+        assert "最近 24 小时没有新内容" in stale["summary"]
 
 
 class TestInspectFeeds:
