@@ -12,9 +12,10 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
-from .channel_rendering import ChannelMessage, build_delivery_plan
-from .channels import get_channel, send_message_to_channel
+from .channel_routes import normalize_channel_routes
+from .channels import is_web_archive_channel, send_to_channel, send_message_to_channel
 from .run_history import append_run_record
+from .web_archive import append_archive_record
 
 logger = logging.getLogger("TaskRunner")
 
@@ -300,7 +301,10 @@ def run_task(
     """
     config = config_loader_fn()
     task_pipeline = config.get("_task_pipeline", "editorial")
-    task_channels = config.get("_task_channels", [])
+    task_channel_routes = config.get("_task_channel_routes")
+    if not task_channel_routes:
+        task_channel_routes = normalize_channel_routes(config.get("_task_channels", []))
+    task_channels = [route["channel_id"] for route in task_channel_routes]
     started_at = datetime.now()
 
     logger.info(
@@ -415,23 +419,52 @@ def run_task(
         return payload
 
     # Real run — send to all configured channels
-    for channel_id in task_channels:
+    channel_results: list[dict] = []
+    for route in task_channel_routes:
+        channel_id = route["channel_id"]
         try:
-            channel = get_channel(channel_id)
-            plan = build_delivery_plan(channel=channel, content=final_markdown, config=config)
-            ok = _send_content_to_channel(channel_id, final_markdown, config, plan=plan)
-            channel_results.append(
-                {
+            if is_web_archive_channel(channel_id):
+                archive_record_id = _write_web_archive_record(
+                    task_id=task_id,
+                    route=route,
+                    content=final_markdown,
+                    config=config,
+                    started_at=started_at,
+                    pipeline_ok=pipeline_ok,
+                    pipeline_error=pipeline_error,
+                    stage_results=stage_results,
+                )
+                ok = bool(archive_record_id)
+                channel_results.append(
+                    {
+                        "channel_id": channel_id,
+                        "ok": ok,
+                        "audience": route.get("audience", ""),
+                        "purpose": route.get("purpose", "default"),
+                        "archive_record_id": archive_record_id,
+                    }
+                )
+            else:
+                ok = _send_content_to_channel(channel_id, final_markdown, config)
+                result_item = {
                     "channel_id": channel_id,
                     "ok": ok,
-                    "message_count": len(plan.messages),
-                    "message_format": plan.messages[0].format if plan.messages else channel.delivery_profile.get("preferred_format"),
+                    "audience": route.get("audience", ""),
+                    "purpose": route.get("purpose", "default"),
                 }
-            )
+                channel_results.append(result_item)
             logger.info(f"TaskRunner: sent to channel '{channel_id}': ok={ok}")
         except Exception as e:
             logger.error(f"TaskRunner: failed to send to '{channel_id}': {e}")
-            channel_results.append({"channel_id": channel_id, "ok": False, "error": str(e)})
+            channel_results.append(
+                {
+                    "channel_id": channel_id,
+                    "ok": False,
+                    "audience": route.get("audience", ""),
+                    "purpose": route.get("purpose", "default"),
+                    "error": str(e),
+                }
+            )
 
     # TV screen side output: render the static big-screen page when enabled.
     # Screen failures must never affect delivery or the run result.
@@ -492,28 +525,77 @@ def run_task(
     return payload
 
 
-def _send_content_to_channel(channel_id: str, content: str, config: dict, plan=None) -> bool:
-    """
-    Build a channel-aware message plan and send it message by message.
-    """
-    channel = get_channel(channel_id)
-    plan = plan or build_delivery_plan(channel=channel, content=content, config=config)
+def _build_report_title(config: dict) -> str:
+    settings = config.get("settings", {})
+    today_str = datetime.now().strftime("%m-%d")
+    title_template = settings.get("report_title", "📅 营销情报早报 | {date}")
+    return title_template.replace("{date}", today_str)
 
-    for index, message in enumerate(plan.messages):
-        outbound = ChannelMessage(
-            content=message.content,
-            format=message.format,
-            title=message.title or plan.title,
-        )
-        if not send_message_to_channel(channel_id, outbound):
-            logger.error(
-                "TaskRunner: channel '%s' failed on message %s/%s",
-                channel_id,
-                index + 1,
-                len(plan.messages),
-            )
+
+def _write_web_archive_record(
+    *,
+    task_id: str,
+    route: dict,
+    content: str,
+    config: dict,
+    started_at: datetime,
+    pipeline_ok: bool,
+    pipeline_error: str | None,
+    stage_results: dict,
+) -> str:
+    ended_at = datetime.now()
+    candidate_count, selected_count = _estimate_counts(stage_results)
+    return append_archive_record(
+        None,
+        {
+            "task_id": task_id,
+            "task_name": config.get("_task_name", task_id),
+            "channel_id": route["channel_id"],
+            "audience": route.get("audience", ""),
+            "audiences": [route.get("audience", "")] if route.get("audience", "") else [],
+            "purpose": route.get("purpose", "default"),
+            "publication_status": route.get("publication_status", "published"),
+            "visibility": route.get("visibility", "audience" if route.get("audience", "") else "public"),
+            "title": _build_report_title(config),
+            "markdown": content,
+            "created_at": ended_at.isoformat(),
+            "started_at": started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
+            "ok": pipeline_ok,
+            "error": pipeline_error,
+            "pipeline": config.get("_task_pipeline", "editorial"),
+            "candidate_count": candidate_count,
+            "selected_count": selected_count,
+        },
+    )
+
+
+def _send_content_to_channel(channel_id: str, content: str, config: dict) -> bool:
+    """
+    Build the full message (header + content + footer/empty) and send via channel.
+    """
+    settings = config.get("settings", {})
+    header_msg = f"# {_build_report_title(config)}\n> 正在为您通过 AI 融合检索定向信源与全网热词..."
+
+    if not content:
+        empty_msg = settings.get("empty_message", "📭 今日全网无重要更新。")
+        return send_to_channel(channel_id, empty_msg)
+
+    # Send header
+    if not send_to_channel(channel_id, header_msg):
+        return False
+    time.sleep(1)
+
+    # Send content blocks
+    if not send_to_channel(channel_id, content):
+        return False
+    time.sleep(1)
+
+    # Send footer
+    if settings.get("show_footer", False):
+        footer = f"\n{settings.get('footer_text', '')}"
+        if not send_to_channel(channel_id, footer):
             return False
-        if index < len(plan.messages) - 1:
-            time.sleep(1)
+        time.sleep(1)
 
     return True

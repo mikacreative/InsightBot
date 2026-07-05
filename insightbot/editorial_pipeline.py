@@ -9,6 +9,7 @@ Stage 4: select_for_category       — AI 板块终筛与最终标题/摘要
 
 from datetime import datetime
 
+import json
 import re
 import time
 import uuid
@@ -31,6 +32,7 @@ from .smart_brief_runner import (
     _render_markdown,
     _truncate_text,
     get_selection_settings,
+    run_prompt_debug,
 )
 
 # ---------- constants ----------
@@ -335,19 +337,32 @@ def _parse_global_screen_response(
     *,
     selection_settings: dict[str, int],
 ) -> list[dict]:
-    """Map minimal AI score lines back to code-owned candidates."""
-    ref_map = _candidate_ref_map(news_list)
-    parsed = _parse_score_lines(raw, set(ref_map))
+    """Parse JSON global screen response and map back to original candidates by link."""
+    link_map = {item.get("link", ""): item for item in news_list if item.get("link")}
+    parsed_items = _validate_global_screen(raw, selection_settings=selection_settings)
     items: list[dict] = []
     max_items = selection_settings["max_selected_items"]
     min_score = float(selection_settings.get("min_priority_score", 0.5))
 
-    for entry in parsed:
-        if entry["score"] < min_score:
+    for item in parsed_items:
+        if item.get("priority_score", 0) < min_score:
             continue
-        candidate = dict(ref_map[entry["ref"]])
-        candidate["priority_score"] = entry["score"]
-        candidate["editorial_note"] = entry["reason"]
+        url = item.get("link", "")
+        candidate = link_map.get(url)
+        if candidate is None:
+            candidate = {
+                "title": item.get("title", ""),
+                "link": url,
+                "summary": item.get("summary", ""),
+            }
+        else:
+            candidate = dict(candidate)
+        candidate["priority_score"] = item.get("priority_score", 0.5)
+        candidate["editorial_note"] = item.get("editorial_note", "")
+        if item.get("summary"):
+            candidate["summary"] = item["summary"]
+        if item.get("title"):
+            candidate["title"] = item["title"]
         items.append(candidate)
         if len(items) >= max_items:
             break
@@ -741,24 +756,70 @@ def _build_global_system_prompt(
     publication_scope: str = "",
 ) -> str:
     max_selected_items = selection_settings["max_selected_items"]
+    title_max_len = selection_settings["title_max_len"]
+    summary_max_len = selection_settings["summary_max_len"]
     _ = base_system_prompt
 
-    prompt = DEFAULT_GLOBAL_SYSTEM_PROMPT.strip()
+    context = _strip_legacy_output_instructions(base_system_prompt or DEFAULT_GLOBAL_SYSTEM_PROMPT)
+    prompt = f"""你是 InsightBot 的候选筛选器，不是最终成稿写手。
+
+【上游编辑目标】
+{context}
+
+【本步骤职责】
+只做全局初筛：从候选列表中挑出值得交给板块继续判断的内容。
+这一轮要比最终成稿更宽松：高确定性内容要保留；有明显中国市场营销、公关、媒介、品牌风险或政策参考价值的边界内容也要保留。
+
+【选择优先级】
+1. 中国大陆品牌营销、公关传播、媒介平台、消费者沟通、声誉风险案例。
+2. AI、平台机制、内容工具、数据能力在营销传播或内容生产中的实际应用。
+3. 中国大陆官方政策、监管口径、央媒导向中会影响企业传播、广告、数据合规或品牌声誉的内容。
+4. 海外内容只有在能直接给中国市场营销/公关策略提供可迁移启发时才保留。
+
+【排除标准】
+- 泛科技、投融资、硬件、手机电脑、论文、基础设施，且看不出营销传播启发的内容。
+- 国际政治、军事、社会治安、宏观经济指标，且不影响企业传播或品牌声誉管理的内容。
+- 纯娱乐八卦、人事变动、低价值通稿、标题党。
+
+【保留方式】
+- title 使用候选的原始标题或轻微清理后的标题，不要改写成 Markdown。
+- summary 用一句中文说明“发生了什么 + 对营销/公关/传播人的具体启示”，最长 {summary_max_len} 字。
+- editorial_note 说明为什么值得进入下一轮，最长 40 字。
+- priority_score 取 0.0-1.0；强相关中国市场案例 0.75 以上，边界但可讨论 0.55-0.74。
+"""
 
     if publication_scope:
         prompt += f"\n\n【刊物整体栏目定位】：\n{publication_scope}"
 
     prompt += f"""
 【输出格式】
-最多 {max_selected_items} 行，每行固定为：
-C001 | 0.90 | 简短筛选理由
+只输出 JSON，最多 {max_selected_items} 条：
+{{
+  "items": [
+    {{
+      "title": "不超过 {title_max_len} 字的标题",
+      "link": "原文链接",
+      "summary": "不超过 {summary_max_len} 字的中文摘要",
+      "priority_score": 0.0-1.0,
+      "editorial_note": "进入下一轮的理由"
+    }}
+  ]
+}}
 
-【关键限制】
-- 只输出候选 ID、0-1 分数、理由
-- 不要输出标题、链接、摘要、JSON、Markdown
-- 只输出分数 >= 0.50 的内容；被排除内容不要输出
-- 没有符合内容时只输出 NONE"""
+- 没有符合内容时返回 {{"items": []}}
+- 不要输出 Markdown、编号列表、解释文字或代码块
+- JSON 必须可被 json.loads 直接解析"""
     return prompt
+
+
+def _strip_legacy_output_instructions(prompt: str) -> str:
+    """Remove final-rendering instructions from legacy prompts before global screening."""
+    text = (prompt or "").strip()
+    if not text:
+        return DEFAULT_GLOBAL_SYSTEM_PROMPT.strip()
+    text = re.split(r"\n【输出(?:标准|要求|格式)[^】]*】", text, maxsplit=1)[0].strip()
+    text = re.sub(r"\n?不要输出任何开场白，直接列出内容。?\s*$", "", text).strip()
+    return text or DEFAULT_GLOBAL_SYSTEM_PROMPT.strip()
 
 
 def _validate_global_screen(raw: str, *, selection_settings: dict[str, int]) -> list[dict]:
@@ -800,6 +861,17 @@ def _validate_global_screen(raw: str, *, selection_settings: dict[str, int]) -> 
         return normalized
     except Exception:
         return []
+
+
+def _is_explicit_empty_global_screen(raw: str) -> bool:
+    """Return True only when the model produced valid JSON with an empty items list."""
+    try:
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        text = match.group(1) if match else raw.strip()
+        data = json.loads(text)
+        return isinstance(data, dict) and data.get("items") == []
+    except Exception:
+        return False
 
 
 def screen_global_candidates(
@@ -890,7 +962,7 @@ def screen_global_candidates(
                 "system_prompt": system_prompt,
                 "error": result["error"],
             }
-        screened = result["items"]
+        screened = _enrich_screened_items_from_candidates(result["items"], candidates)
         selection_mode = "full"
     else:
         # 分片模式
@@ -921,7 +993,7 @@ def screen_global_candidates(
         deduped = _normalize_global_items(stage_one_selected, selection_settings=selection_settings)
         # 取 top target_shortlist
         deduped.sort(key=lambda x: x.get("priority_score", 0), reverse=True)
-        screened = deduped[:target_shortlist]
+        screened = _enrich_screened_items_from_candidates(deduped[:target_shortlist], candidates)
         selection_mode = "chunked"
         if not screened and failed_batches:
             return {
@@ -933,6 +1005,15 @@ def screen_global_candidates(
                 "system_prompt": system_prompt,
                 "error": "; ".join(failed_batches),
             }
+
+    if not screened and _should_use_global_screen_fallback(batch_results):
+        screened = _fallback_global_screen_candidates(
+            candidates,
+            selection_settings=selection_settings,
+            target_shortlist=target_shortlist,
+        )
+        if screened:
+            logger.warning(f"⚠️ 全局初筛模型不可用，启用本地兜底保留 {len(screened)} 条")
 
     logger.info(f"✅ 全局初筛完成：通过 {len(screened)} 条（模式: {selection_mode}）")
     return {
@@ -987,17 +1068,10 @@ def _call_global_screen_once(
             batch_record["raw_response"] = raw
             batch_record["parsed_items"] = items
             batch_record["status"] = "success" if items else "empty"
-            if not items and not _is_explicit_empty_ai_response(raw):
-                batch_record["status"] = "invalid_text"
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY_S)
-                    continue
-                return {
-                    "ok": False,
-                    "record": batch_record,
-                    "items": [],
-                    "error": "AI output did not match score-line contract",
-                }
+            if not items and not _is_explicit_empty_global_screen(raw) and attempt < MAX_RETRIES - 1:
+                batch_record["status"] = "retry_parse_empty"
+                time.sleep(RETRY_DELAY_S)
+                continue
             return {
                 "ok": True,
                 "record": batch_record,
@@ -1051,6 +1125,102 @@ def _normalize_global_items(items: list[dict], *, selection_settings: dict[str, 
         normalized.append(normalized_item)
         seen_urls.add(url)
     return normalized
+
+
+def _enrich_screened_items_from_candidates(screened: list[dict], candidates: list[dict]) -> list[dict]:
+    """Carry non-AI source metadata forward after global screening selects by link."""
+    candidate_by_link = {
+        str(candidate.get("link", "")).strip(): candidate
+        for candidate in candidates
+        if str(candidate.get("link", "")).strip()
+    }
+    enriched: list[dict] = []
+    for item in screened:
+        link = str(item.get("link", "")).strip()
+        source = candidate_by_link.get(link, {})
+        if source:
+            enriched.append({**source, **item})
+        else:
+            enriched.append(item)
+    return enriched
+
+
+def _should_use_global_screen_fallback(batch_results: list[dict]) -> bool:
+    """Use fallback when the model response looked malformed or errored, not for explicit empty JSON."""
+    if not batch_results:
+        return False
+    for record in batch_results:
+        raw = str(record.get("raw_response", "") or "")
+        if record.get("error"):
+            return True
+        if raw and not _is_explicit_empty_global_screen(raw):
+            return True
+    return False
+
+
+def _fallback_global_screen_candidates(
+    candidates: list[dict],
+    *,
+    selection_settings: dict[str, int],
+    target_shortlist: int,
+) -> list[dict]:
+    """Conservative local shortlist when the global AI call returns malformed/partial JSON."""
+    scored: list[tuple[float, dict]] = []
+    for candidate in candidates:
+        score = _score_fallback_candidate(candidate)
+        if score < 0.55:
+            continue
+        item = dict(candidate)
+        item["title"] = _truncate_text(item.get("title", ""), limit=selection_settings["title_max_len"])
+        item["summary"] = _truncate_text(item.get("summary", ""), limit=selection_settings["summary_max_len"])
+        item["priority_score"] = round(score, 2)
+        item["editorial_note"] = "模型初筛不可用，按来源与关键词兜底保留"
+        scored.append((score, item))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in scored[:target_shortlist]]
+
+
+def _score_fallback_candidate(candidate: dict) -> float:
+    text = f"{candidate.get('title', '')} {candidate.get('summary', '')}".lower()
+    hint = str(candidate.get("source_category_hint", "")).strip()
+
+    hard_excludes = [
+        "求职",
+        "offer",
+        "少林寺",
+        "香会",
+        "美防长",
+        "美财长",
+        "特朗普",
+        "美国禁",
+        "军事",
+    ]
+    if any(term.lower() in text for term in hard_excludes):
+        return 0.0
+
+    score = 0.0
+    if hint:
+        score += 0.35
+
+    marketing_terms = ["营销", "品牌", "公关", "传播", "广告", "联名", "案例", "社媒", "小红书", "内容"]
+    ai_terms = ["ai", "大模型", "智能", "平台", "工具", "数据", "算法", "内容生产"]
+    policy_terms = ["政策", "监管", "合规", "数据安全", "广告法", "工信部", "官方"]
+
+    if any(term in text for term in marketing_terms):
+        score += 0.35
+    if any(term in text for term in ai_terms):
+        score += 0.18
+    if any(term in text for term in policy_terms):
+        score += 0.22
+
+    if hint == "💡 营销行业" and any(term in text for term in marketing_terms):
+        score += 0.12
+    if hint == "🤖 数智前沿" and any(term in text for term in ai_terms + marketing_terms):
+        score += 0.08
+    if hint == "📢 政策导向" and any(term in text for term in policy_terms):
+        score += 0.1
+
+    return min(score, 0.9)
 
 
 def _build_publication_scope_summary(config: dict) -> str:
@@ -1237,6 +1407,18 @@ C001 | 板块名称 | 简短分配理由
             assigned_indices.add(idx)
 
     unassigned = [c for i, c in enumerate(candidates) if i not in assigned_indices]
+    if unassigned:
+        still_unassigned = []
+        for candidate in unassigned:
+            fallback_cat = str(candidate.get("source_category_hint", "")).strip()
+            priority = float(candidate.get("priority_score", 0.0) or 0.0)
+            if fallback_cat in result_map and priority >= 0.55:
+                enriched_candidate = dict(candidate)
+                enriched_candidate["assignment_reason"] = "沿用来源板块提示"
+                result_map[fallback_cat].append(enriched_candidate)
+                continue
+            still_unassigned.append(candidate)
+        unassigned = still_unassigned
 
     return {
         "assignments": result_map,
@@ -1291,14 +1473,66 @@ def select_for_category(
         reverse=True,
     )
 
-    final_items, final_record = _final_edit_category_items(
+    category_prompt = _get_sections_config(config).get(category_name, {}).get("prompt", "")
+
+    result = run_prompt_debug(
         config=config,
         category_name=category_name,
-        candidates=ordered_candidates,
-        max_items=max_items,
-        title_max_len=title_max_len,
-        summary_max_len=summary_max_len,
+        news_list=ordered_candidates,
+        category_prompt=category_prompt,
+        logger=logger,
     )
+    if candidates and not _category_selection_result_is_usable(result):
+        logger.warning(f"⚠️ 【{category_name}】最终精选模型不可用，启用候选 Markdown 兜底")
+        return _fallback_category_selection(category_name=category_name, candidates=candidates)
+    return result
+
+
+def _category_selection_result_is_usable(result: dict) -> bool:
+    selected = result.get("selected_items") or []
+    markdown = str(result.get("preview_markdown", "") or "")
+    if not selected or not markdown.strip():
+        return False
+    if "> 💡 **" in markdown or "> 💡 *" in markdown and markdown.rstrip().endswith("*"):
+        return False
+    for item in selected:
+        if not str(item.get("url", "")).strip():
+            return False
+        if not str(item.get("summary", "")).strip():
+            return False
+    return True
+
+
+def _fallback_category_selection(*, category_name: str, candidates: list[dict]) -> dict:
+    selected_items = []
+    lines = [f"## {category_name}"]
+    for candidate in candidates[:5]:
+        title = _clean_fallback_title(candidate.get("title", ""))
+        url = str(candidate.get("link", "")).strip()
+        summary = _truncate_text(candidate.get("summary", ""), limit=50)
+        if not title or not url:
+            continue
+        selected_items.append({"title": title, "url": url, "summary": summary})
+        lines.append(f"### [{title}]({url})")
+        if summary:
+            lines.append(f"> 💡 *{summary}*")
+        lines.append("")
+    return {
+        "status": "fallback",
+        "category": category_name,
+        "candidate_count": len(candidates),
+        "selected_items": selected_items,
+        "preview_markdown": "\n".join(lines).strip(),
+        "batches": [],
+        "selection_mode": "fallback",
+    }
+
+
+def _clean_fallback_title(title: str) -> str:
+    text = str(title or "").strip()
+    text = re.sub(r"^\[RSS\]\s*", "", text)
+    text = re.sub(r"^\[搜索\]\s*", "", text)
+    return _truncate_text(text, limit=50)
 
     if not final_items:
         return {
@@ -1596,7 +1830,7 @@ def run_editorial_pipeline(*, config: dict, logger) -> dict:
         )
         category_results[category] = result
 
-        if result.get("status") == "success" and result.get("preview_markdown"):
+        if result.get("status") in {"success", "fallback"} and result.get("preview_markdown"):
             final_blocks.append(result["preview_markdown"])
             logger.info(f"  ✅ 【{category}】最终输出 {len(result.get('selected_items', []))} 条")
         else:

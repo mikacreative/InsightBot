@@ -1,12 +1,89 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime
+from typing import Any
+
 import streamlit as st
+
+
+def _safe_get_task_feeds(selected_task: dict) -> dict:
+    return dict(selected_task.get("feeds", {})) if isinstance(selected_task, dict) else {}
+
+
+def _safe_dump_dict(data: Any) -> str:
+    try:
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    except TypeError:
+        return json.dumps(str(data), ensure_ascii=False, indent=2)
+
+
+def _build_task_summary(task: dict) -> dict[str, int | str | bool]:
+    if not isinstance(task, dict):
+        task = {}
+    task_channels = task.get("channels", []) or []
+    if isinstance(task_channels, list):
+        channel_count = len(task_channels)
+    elif isinstance(task_channels, dict):
+        channel_count = len(task_channels)
+    else:
+        channel_count = 0
+    feed_count = 0
+    feeds = _safe_get_task_feeds(task)
+    for feed in feeds.values():
+        feed_count += len(feed.get("rss", [])) if isinstance(feed, dict) else 0
+    return {
+        "boards": len(feeds),
+        "feeds": feed_count,
+        "channels": channel_count,
+        "pipeline": task.get("pipeline", "editorial"),
+        "search_enabled": bool((task.get("search", {}) or {}).get("enabled", False)),
+    }
+
+
+def _diff_raw_vs_effective_task_config(raw_task: dict, effective_task: dict) -> list[str]:
+    raw_task = raw_task or {}
+    effective_task = effective_task or {}
+    notes: list[str] = []
+
+    raw_feeds = _safe_get_task_feeds(raw_task)
+    effective_feeds = _safe_get_task_feeds(effective_task)
+    missing_raw_feeds = sorted(set(effective_feeds) - set(raw_feeds))
+    if missing_raw_feeds:
+        notes.append("运行时注入了额外板块（未在任务 JSON 显式定义）：" + "、".join(missing_raw_feeds))
+
+    raw_channels = set(raw_task.get("channels", []) or [])
+    effective_channels = set(effective_task.get("channels", []) or [])
+    if not raw_task.get("channels") and effective_channels:
+        notes.append("运行时注入了默认频道清单（raw 配置未显式指定）。")
+    if raw_channels != effective_channels and raw_task.get("channels") and effective_channels:
+        added = sorted(effective_channels - raw_channels)
+        removed = sorted(raw_channels - effective_channels)
+        if added:
+            notes.append("运行时补齐新增了频道："
+                         + "、".join(added))
+        if removed:
+            notes.append("运行时移除了以下频道："
+                         + "、".join(removed))
+
+    raw_queries = (raw_task.get("search", {}) or {}).get("queries", []) or []
+    effective_queries = (effective_task.get("search", {}) or {}).get("queries", []) or []
+    if not raw_queries and effective_queries:
+        notes.append("运行时使用了基础配置中的搜索参数（raw 配置未显式定义 search）。")
+
+    raw_pipeline = raw_task.get("pipeline", None)
+    effective_pipeline = effective_task.get("pipeline", "editorial")
+    if raw_pipeline != effective_pipeline:
+        notes.append(f"pipeline 发生回退/覆盖：raw={raw_pipeline or '未设置'}，effective={effective_pipeline}")
+
+    return notes
 
 
 def render_task_overview(
     *,
     selected_task_id: str | None,
     selected_task: dict,
+    selected_effective_task: dict,
     selected_task_categories: list[str],
     selected_task_validation: dict,
     selected_task_state: dict,
@@ -70,6 +147,10 @@ def render_task_overview(
         unsafe_allow_html=True,
     )
 
+    selected_task_raw_summary = _build_task_summary(selected_task)
+    selected_task_effective_summary = _build_task_summary(selected_task_effective)
+    config_deltas = _diff_raw_vs_effective_task_config(selected_task, selected_effective_task)
+
     top_col1, top_col2 = st.columns([1.35, 1.0])
     with top_col1:
         st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
@@ -89,6 +170,95 @@ def render_task_overview(
             unsafe_allow_html=True,
         )
         st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+    st.markdown('<div class="ib-section-title">Raw / Effective 配置语义</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="ib-section-copy">Raw（编辑态）是控制台当前保存内容；Effective（执行态）为运行时实际生效内容。对照可帮助你确认是否有回退/补齐。</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"""
+        <div class="ib-kpi-grid">
+          <div class="ib-kpi-card">
+            <div class="ib-kpi-label">Raw 板块 / RSS</div>
+            <div class="ib-kpi-value" style="font-size:1.05rem;">{selected_task_raw_summary['boards']} / {selected_task_raw_summary['feeds']}</div>
+          </div>
+          <div class="ib-kpi-card">
+            <div class="ib-kpi-label">Effective 板块 / RSS</div>
+            <div class="ib-kpi-value" style="font-size:1.05rem;">{selected_task_effective_summary['boards']} / {selected_task_effective_summary['feeds']}</div>
+          </div>
+          <div class="ib-kpi-card">
+            <div class="ib-kpi-label">Raw 频道数</div>
+            <div class="ib-kpi-value" style="font-size:1.05rem;">{selected_task_raw_summary['channels']}</div>
+          </div>
+          <div class="ib-kpi-card">
+            <div class="ib-kpi-label">Effective 频道数</div>
+            <div class="ib-kpi-value" style="font-size:1.05rem;">{selected_task_effective_summary['channels']}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if config_deltas:
+        for item in config_deltas:
+            st.warning(item)
+    else:
+        st.success("Raw 与 Effective 在关键字段上保持一致。")
+
+    snapshot_payload = {
+        "snapshot_at": datetime.now().isoformat(timespec="seconds"),
+        "task_id": selected_task_id,
+        "raw_task": selected_task,
+        "effective_task": selected_effective_task,
+    }
+    st.download_button(
+        "📸 生成本地配置快照（JSON）",
+        data=_safe_dump_dict(snapshot_payload),
+        file_name=f"{selected_task_id or 'selected-task'}-config-snapshot.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    st.caption("快照仅本地下载，不写入数据库或生产环境；用于排查与回溯。")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="ib-panel">', unsafe_allow_html=True)
+    st.markdown('<div class="ib-section-title">内容源与板块</div>', unsafe_allow_html=True)
+    st.markdown('<div class="ib-section-copy">按实际运行口径展示当前任务绑定的板块、RSS 源与关键词。</div>', unsafe_allow_html=True)
+    task_feeds = _safe_get_task_feeds(selected_effective_task)
+    if not task_feeds:
+        st.info("当前任务暂无内容板块。可在「任务管理」中补齐后查看。")
+    else:
+        for idx, (category_name, feed_cfg) in enumerate(task_feeds.items()):
+            feed_cfg = feed_cfg or {}
+            rss_items = list(feed_cfg.get("rss", []) or [])
+            keywords = list(feed_cfg.get("keywords", []) or [])
+            prompt = (feed_cfg.get("prompt", "") or "").strip()
+            with st.expander(f"📂 {category_name}", expanded=(idx == 0)):
+                st.markdown(
+                    f"RSS 数：{len(rss_items)} | 关键词数：{len(keywords)}",
+                    unsafe_allow_html=True,
+                )
+                if rss_items:
+                    st.markdown("**RSS 源**")
+                    for item in rss_items:
+                        st.code(item)
+                else:
+                    st.caption("尚未配置 RSS 源。")
+
+                if keywords:
+                    st.markdown("**关键词**")
+                    st.markdown("、".join(keywords))
+                else:
+                    st.caption("尚未配置关键词。")
+
+                if prompt:
+                    st.markdown("**板块筛选 Prompt（摘要）**")
+                    st.caption(prompt[:220] + ("..." if len(prompt) > 220 else ""))
+                else:
+                    st.caption("尚未配置 Prompt。")
+    st.markdown("</div>", unsafe_allow_html=True)
 
     with top_col2:
         st.markdown('<div class="ib-panel">', unsafe_allow_html=True)

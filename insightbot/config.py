@@ -3,6 +3,7 @@ import os
 import re
 from copy import deepcopy
 
+from .channel_routes import normalize_channel_routes, route_channel_ids
 from .paths import (
     channels_file_path,
     config_content_file_path,
@@ -338,12 +339,20 @@ def load_tasks_config(task_id: str, bot_dir: str | None = None) -> dict:
     # Merge pipeline_config into ai section
     pipeline_config = task_def.get("pipeline_config", {})
     if pipeline_config:
+        config["pipeline_config"] = deepcopy(pipeline_config)
         ai = config.setdefault("ai", {})
         editorial = ai.setdefault("editorial_pipeline", {})
         editorial.update(deepcopy(pipeline_config))
 
-    # Inject task's channels list so task_runner can read it
-    config["_task_channels"] = list(task_def.get("channels", []))
+    # Merge search if present in task
+    search = task_def.get("search", {})
+    if search:
+        config["search"] = deepcopy(search)
+
+    # Inject normalized channel routes so task_runner can read legacy ids and rich route objects.
+    task_channel_routes = normalize_channel_routes(task_def.get("channels", []), load_channels(bot_dir))
+    config["_task_channel_routes"] = task_channel_routes
+    config["_task_channels"] = route_channel_ids(task_channel_routes)
 
     # Inject pipeline type
     config["_task_pipeline"] = task_def.get("pipeline", "editorial")

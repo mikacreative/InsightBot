@@ -54,6 +54,33 @@ class TestTaskValidation:
         assert "missing_sections" in codes
         assert "missing_channels" in codes
 
+    def test_accepts_rich_channel_routes(self):
+        from insightbot.task_validation import validate_task_definition
+
+        task_def = {
+            "name": "Daily",
+            "pipeline": "editorial",
+            "channels": [
+                {
+                    "channel_id": "subscriber_page",
+                    "audience": "订阅者",
+                    "purpose": "archive",
+                }
+            ],
+            "schedule": {"hour": 8, "minute": 0},
+            "feeds": {"A": {"rss": ["https://example.com/rss"], "keywords": []}},
+            "pipeline_config": {"max_items": 3},
+        }
+
+        result = validate_task_definition(
+            "daily_brief",
+            task_def,
+            {"channels": {"subscriber_page": {"type": "web_archive"}}},
+        )
+
+        assert result["is_runnable"] is True
+        assert result["summary"]["channel_count"] == 1
+
     def test_warning_when_search_enabled_without_queries(self):
         task_def = _base_task_def()
         task_def["sources"]["search"] = {"enabled": True, "provider": "baidu", "queries": []}

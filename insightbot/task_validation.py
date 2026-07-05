@@ -1,5 +1,7 @@
 from typing import Any
 
+from .channel_routes import normalize_channel_routes
+
 
 from .config import normalize_task_definition
 
@@ -21,6 +23,7 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
     search = sources.get("search", {}) or {}
     schedule = task_def.get("schedule", {}) or {}
     channels = task_def.get("channels", []) or []
+    channel_routes = normalize_channel_routes(channels, channels_data)
     pipeline = task_def.get("pipeline", "editorial")
     pipeline_config = task_def.get("pipeline_config", {}) or {}
     known_channels = set((channels_data.get("channels", {}) or {}).keys())
@@ -57,28 +60,7 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
                 )
             )
 
-    for section_name, section_data in sections.items():
-        if not str((section_data or {}).get("prompt", "")).strip():
-            issues.append(
-                _issue(
-                    code="missing_section_prompt",
-                    level="warning",
-                    message=f"栏目「{section_name}」还没有填写筛选 Prompt。",
-                    field_path=f"sections.{section_name}.prompt",
-                )
-            )
-
-    if not enabled_rss_sources and not search.get("enabled", False):
-        issues.append(
-            _issue(
-                code="missing_sources",
-                level="error",
-                message="当前任务没有任何可用信源：既没有启用 RSS，也没有启用搜索补充。",
-                field_path="sources",
-            )
-        )
-
-    if not channels:
+    if not channel_routes:
         issues.append(
             _issue(
                 code="missing_channels",
@@ -88,7 +70,8 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
             )
         )
     else:
-        for channel_id in channels:
+        for route in channel_routes:
+            channel_id = route["channel_id"]
             if channel_id not in known_channels:
                 issues.append(
                     _issue(
@@ -159,7 +142,7 @@ def validate_task_definition(task_id: str, task_def: dict[str, Any], channels_da
         "summary": {
             "section_count": len(sections),
             "rss_source_count": rss_source_count,
-            "channel_count": len(channels),
+            "channel_count": len(channel_routes),
             "has_schedule": "hour" in schedule and "minute" in schedule,
             "search_query_count": len([item for item in search.get("queries", []) if str((item or {}).get("keywords", "")).strip()]),
             "pipeline": pipeline,

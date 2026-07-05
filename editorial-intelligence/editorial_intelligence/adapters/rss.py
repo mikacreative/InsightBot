@@ -9,7 +9,10 @@ import logging
 from datetime import datetime
 from typing import Any
 
-import feedparser
+try:
+    import feedparser
+except ImportError:  # pragma: no cover - depends on optional environment dependency
+    feedparser = None
 
 from .base import NormalizedSignal, SourceAdapter
 
@@ -70,6 +73,8 @@ class RSSAdapter(SourceAdapter):
         return signals
 
     def _fetch_feed(self, feed_id: str, url: str) -> list[NormalizedSignal]:
+        if feedparser is None:
+            raise RuntimeError("feedparser package is required for RSS collection")
         parsed = feedparser.parse(url)
         signals: list[NormalizedSignal] = []
 

@@ -23,11 +23,12 @@ sys.modules['feedparser'] = _mock_feedparser
 sys.modules['requests'] = _mock_requests
 
 from insightbot.editorial_pipeline import (
+    _assign_batch_once,
+    _build_global_system_prompt,
     _build_publication_scope_summary,
     _call_global_screen_once,
-    _resolve_category_name,
-    _normalize_search_result,
     _normalize_global_items,
+    _normalize_search_result,
     _parse_assignment_lines,
     _parse_assignment_response,
     _parse_final_edit_lines,
@@ -324,6 +325,96 @@ class TestScreenGlobalCandidates:
         assert "💡 营销行业" in captured_prompts[0]
         assert "🤖 数智前沿" in captured_prompts[0]
 
+    def test_screened_items_keep_source_category_hint_from_original_candidate(self, silent_logger):
+        config = _editorial_config()
+        candidates = [
+            {
+                "title": "品牌活人感",
+                "link": "https://example.com/brand-human",
+                "summary": "品牌社媒内容策略",
+                "source_category_hint": "💡 营销行业",
+                "source_name": "测试源",
+            }
+        ]
+
+        with patch("insightbot.editorial_pipeline._call_global_screen_once", return_value={
+            "ok": True,
+            "record": {"status": "success"},
+            "items": [
+                {
+                    "title": "品牌活人感",
+                    "link": "https://example.com/brand-human",
+                    "summary": "讲品牌如何提升社媒真实感。",
+                    "priority_score": 0.86,
+                    "editorial_note": "品牌内容策略参考",
+                }
+            ],
+            "error": None,
+        }):
+            result = screen_global_candidates(config=config, candidates=candidates, logger=silent_logger)
+
+        assert result["screened"][0]["source_category_hint"] == "💡 营销行业"
+        assert result["screened"][0]["source_name"] == "测试源"
+
+    def test_uses_conservative_fallback_when_global_ai_returns_empty_from_bad_response(self, silent_logger):
+        config = _editorial_config()
+        candidates = [
+            {
+                "title": "女性营销频频翻车，品牌没学会这3件事",
+                "link": "https://example.com/marketing-risk",
+                "summary": "盒马包装争议体现女性营销中的低俗暗示风险。",
+                "source_category_hint": "💡 营销行业",
+            },
+            {
+                "title": "Former Shaolin Temple Abbot Sentenced",
+                "link": "https://example.com/shaolin",
+                "summary": "A legal news item unrelated to marketing.",
+                "source_category_hint": "📢 政策导向",
+            },
+        ]
+
+        with patch("insightbot.editorial_pipeline._call_global_screen_once", return_value={
+            "ok": True,
+            "record": {"status": "empty", "raw_response": '{"items": [', "error": "timeout"},
+            "items": [],
+            "error": None,
+        }):
+            result = screen_global_candidates(config=config, candidates=candidates, logger=silent_logger)
+
+        assert result["ok"] is True
+        assert [item["link"] for item in result["screened"]] == ["https://example.com/marketing-risk"]
+        assert result["screened"][0]["editorial_note"] == "模型初筛不可用，按来源与关键词兜底保留"
+
+
+class TestBuildGlobalSystemPrompt:
+    """测试全局初筛 prompt 构建"""
+
+    def test_removes_legacy_markdown_output_instructions_from_base_prompt(self):
+        base_prompt = """你是一个资深营销情报官。
+
+【输出标准 - 必须严格遵守】
+1. 格式：
+### [重构后的标题](原文链接)
+> 💡 *摘要内容*
+
+不要输出任何开场白，直接列出内容。"""
+
+        prompt = _build_global_system_prompt(
+            base_prompt,
+            selection_settings={
+                "max_selected_items": 10,
+                "title_max_len": 50,
+                "summary_max_len": 60,
+            },
+            publication_scope="【营销行业】只保留中国大陆营销案例",
+        )
+
+        assert "### [重构后的标题]" not in prompt
+        assert "> 💡 *摘要内容*" not in prompt
+        assert "候选筛选器" in prompt
+        assert "不要改写成 Markdown" in prompt
+        assert "只输出 JSON" in prompt
+
 
 class TestValidateGlobalScreen:
     """测试全局初筛 AI 返回解析"""
@@ -377,8 +468,18 @@ class TestValidateGlobalScreen:
         assert items[0]["link"] == "https://example.com/1"
 
     def test_retries_invalid_text_before_returning_items(self):
-        raw = "C001 | 0.80 | 理由"
-        with patch("insightbot.editorial_pipeline.chat_completion", side_effect=["not json", raw]) as mock_ai:
+        valid = json.dumps({
+            "items": [
+                {
+                    "title": "新闻",
+                    "link": "https://example.com/1",
+                    "summary": "摘要",
+                    "priority_score": 0.8,
+                    "editorial_note": "理由",
+                }
+            ]
+        }, ensure_ascii=False)
+        with patch("insightbot.editorial_pipeline.chat_completion", side_effect=["not json", valid]) as mock_ai:
             with patch("insightbot.editorial_pipeline.time.sleep"):
                 result = _call_global_screen_once(
                     config=_editorial_config(),
@@ -390,7 +491,7 @@ class TestValidateGlobalScreen:
                             "source_section_hints": ["💡 营销行业"],
                         }
                     ],
-                    system_prompt="只输出行协议",
+                    system_prompt="只输出 JSON",
                     selection_settings={
                         "max_selected_items": 10,
                         "title_max_len": 50,
@@ -409,8 +510,14 @@ class TestValidateGlobalScreen:
             {"title": "保留", "link": "https://example.com/keep", "summary": "摘要"},
             {"title": "排除", "link": "https://example.com/drop", "summary": "摘要"},
         ]
+        raw = json.dumps({
+            "items": [
+                {"title": "保留", "link": "https://example.com/keep", "summary": "摘要", "priority_score": 0.75, "editorial_note": "有价值"},
+                {"title": "排除", "link": "https://example.com/drop", "summary": "摘要", "priority_score": 0.10, "editorial_note": "排除"},
+            ]
+        }, ensure_ascii=False)
         result = _parse_global_screen_response(
-            "C001 | 0.75 | 有价值\nC002 | 0.10 | 排除",
+            raw,
             candidates,
             selection_settings={
                 "max_selected_items": 10,
@@ -421,6 +528,66 @@ class TestValidateGlobalScreen:
         )
 
         assert [item["link"] for item in result] == ["https://example.com/keep"]
+
+
+class TestCallGlobalScreenOnce:
+    """测试全局初筛单次调用的重试语义"""
+
+    def test_retries_when_response_is_malformed_json_then_uses_valid_result(self):
+        malformed = '{\n  "items": [    {      "": "  "      ,      ,      "'
+        valid = json.dumps({
+            "items": [
+                {
+                    "title": "盒马粉木耳包装翻车",
+                    "link": "https://example.com/hema",
+                    "summary": "女性营销符号误用，品牌需避开低俗暗示。",
+                    "priority_score": 0.82,
+                    "editorial_note": "中国消费品牌传播风险案例",
+                }
+            ]
+        }, ensure_ascii=False)
+
+        with patch("insightbot.editorial_pipeline.chat_completion", side_effect=[malformed, valid]) as mock_chat:
+            with patch("insightbot.editorial_pipeline.time.sleep"):
+                result = _call_global_screen_once(
+                    config=_editorial_config(),
+                    news_list=[{"title": "盒马粉木耳包装翻车", "link": "https://example.com/hema", "summary": "摘要"}],
+                    system_prompt="只输出 JSON",
+                    selection_settings={
+                        "max_selected_items": 10,
+                        "title_max_len": 50,
+                        "summary_max_len": 60,
+                    },
+                    stage_label="global_full",
+                    batch_no=1,
+                )
+
+        assert mock_chat.call_count == 2
+        assert result["ok"] is True
+        assert result["items"][0]["link"] == "https://example.com/hema"
+        assert result["record"]["status"] == "success"
+
+    def test_does_not_retry_explicit_empty_items(self):
+        raw = json.dumps({"items": []}, ensure_ascii=False)
+
+        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw) as mock_chat:
+            result = _call_global_screen_once(
+                config=_editorial_config(),
+                news_list=[{"title": "无关内容", "link": "https://example.com/off", "summary": "摘要"}],
+                system_prompt="只输出 JSON",
+                selection_settings={
+                    "max_selected_items": 10,
+                    "title_max_len": 50,
+                    "summary_max_len": 60,
+                },
+                stage_label="global_full",
+                batch_no=1,
+            )
+
+        assert mock_chat.call_count == 1
+        assert result["ok"] is True
+        assert result["items"] == []
+        assert result["record"]["status"] == "empty"
 
 
 class TestNormalizeGlobalItems:
@@ -512,110 +679,37 @@ class TestAssignCandidatesToCategories:
         assert len(result["unassigned"]) == 1
         assert result["unassigned"][0]["link"] == "https://example.com/irrelevant"
 
-    def test_resolves_category_without_emoji(self):
-        category_list = ["💡 营销行业", "🤖 数智前沿"]
-        assert _resolve_category_name("营销行业", category_list) == "💡 营销行业"
-        assert _resolve_category_name("数智前沿", category_list) == "🤖 数智前沿"
-
-    def test_assign_batch_accepts_normalized_category_name(self, silent_logger):
-        candidates = [
-            {"title": "文章1", "link": "https://example.com/1", "summary": "摘要"},
-        ]
+    def test_assign_batch_falls_back_to_source_category_hint_when_ai_returns_empty(self, silent_logger):
         config = _editorial_config()
+        candidates = [
+            {
+                "title": "女性营销翻车案例",
+                "link": "https://example.com/marketing",
+                "summary": "中国品牌沟通风险案例。",
+                "priority_score": 0.9,
+                "source_category_hint": "💡 营销行业",
+            },
+            {
+                "title": "AI 营销工具实战",
+                "link": "https://example.com/ai",
+                "summary": "AI 工具在内容生产中的应用。",
+                "priority_score": 0.7,
+                "source_category_hint": "🤖 数智前沿",
+            },
+        ]
 
-        raw_response = "C001 | 营销行业 | 匹配营销案例"
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw_response):
+        with patch("insightbot.editorial_pipeline._assign_batch_once", return_value={
+            "assignments": {},
+            "unassigned": candidates,
+            "record": {"status": "empty"},
+        }):
             result = assign_candidates_to_categories(
                 config=config, screened_candidates=candidates, logger=silent_logger
             )
 
-        assert len(result["category_candidate_map"]["💡 营销行业"]) == 1
-        assert result["category_candidate_map"]["💡 营销行业"][0]["assignment_reason"] == "匹配营销案例"
+        assert [item["link"] for item in result["category_candidate_map"]["💡 营销行业"]] == ["https://example.com/marketing"]
+        assert [item["link"] for item in result["category_candidate_map"]["🤖 数智前沿"]] == ["https://example.com/ai"]
         assert result["unassigned"] == []
-
-    def test_assignment_uses_ai_before_source_section_hints(self, silent_logger):
-        candidates = [
-            {
-                "title": "AI营销文章",
-                "link": "https://example.com/ai",
-                "summary": "摘要",
-                "source_section_hints": ["🤖 数智前沿"],
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="C001 | 营销行业 | AI判断为营销案例") as mock_ai:
-            result = assign_candidates_to_categories(
-                config=config, screened_candidates=candidates, logger=silent_logger
-            )
-
-        mock_ai.assert_called_once()
-        assert len(result["category_candidate_map"]["💡 营销行业"]) == 1
-        assert result["category_candidate_map"]["💡 营销行业"][0]["assignment_reason"] == "AI判断为营销案例"
-
-    def test_assignment_falls_back_to_source_section_hints_when_ai_empty(self, silent_logger):
-        candidates = [
-            {
-                "title": "AI营销文章",
-                "link": "https://example.com/ai",
-                "summary": "摘要",
-                "source_section_hints": ["🤖 数智前沿"],
-            },
-        ]
-        config = _editorial_config()
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="NONE"):
-            result = assign_candidates_to_categories(
-                config=config, screened_candidates=candidates, logger=silent_logger
-            )
-
-        assert len(result["category_candidate_map"]["🤖 数智前沿"]) == 1
-        assert result["category_candidate_map"]["🤖 数智前沿"][0]["assignment_reason"] == "source_hint_fallback"
-
-    def test_policy_hint_requires_policy_evidence(self, silent_logger):
-        candidates = [
-            {
-                "title": "China Robotaxi Firms Expand Fleet",
-                "link": "https://example.com/robotaxi",
-                "summary": "Robotaxi companies expand commercial operations.",
-                "source_url": "https://www.chinanews.com.cn/cj/2026/05-29/example.shtml",
-                "source_section_hints": ["📢 政策导向"],
-            },
-        ]
-        config = _editorial_config()
-        config["sections"]["📢 政策导向"] = {
-            "keywords": [],
-            "source_hints": ["policy"],
-            "prompt": "政策导向",
-        }
-
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value="NONE") as mock_ai:
-            result = assign_candidates_to_categories(
-                config=config, screened_candidates=candidates, logger=silent_logger
-            )
-
-        mock_ai.assert_called_once()
-        assert result["category_candidate_map"]["📢 政策导向"] == []
-        assert result["unassigned"][0]["link"] == "https://example.com/robotaxi"
-
-    def test_assignment_parser_extracts_json_from_surrounding_text(self):
-        raw = '输出：{"assignments":[{"candidate_index":1,"assigned_category":"💡 营销行业","reason":"匹配"}]}'
-        assignments = _parse_assignment_response(raw)
-        assert assignments == [
-            {"candidate_index": 1, "assigned_category": "💡 营销行业", "reason": "匹配"}
-        ]
-
-    def test_assignment_line_parser_extracts_minimal_contract(self):
-        assignments = _parse_assignment_lines(
-            "C001 | 营销行业 | 匹配\nC002 | 数智前沿 | AI应用",
-            {"C001", "C002"},
-            ["💡 营销行业", "🤖 数智前沿"],
-        )
-        assert assignments == [
-            {"ref": "C001", "assigned_category": "💡 营销行业", "reason": "匹配"},
-            {"ref": "C002", "assigned_category": "🤖 数智前沿", "reason": "AI应用"},
-        ]
 
 
 class TestBuildPublicationScopeSummary:
@@ -648,9 +742,18 @@ class TestSelectForCategory:
             }
         ]
         config = _editorial_config()
-        raw = "C001 | KEEP | AI改写标题 | AI改写摘要，说明营销启示 | 适合发布"
+        fake_result = {
+            "status": "success",
+            "category": "💡 营销行业",
+            "selected_items": [
+                {"title": "AI改写标题", "url": "https://example.com/1", "summary": "AI改写摘要，说明营销启示"}
+            ],
+            "preview_markdown": "## 💡 营销行业\n\n### [AI改写标题](https://example.com/1)\n> 💡 AI改写摘要，说明营销启示",
+            "batches": [],
+            "selection_mode": "ai_final_edit",
+        }
 
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw) as mock_ai:
+        with patch("insightbot.editorial_pipeline.run_prompt_debug", return_value=fake_result) as mock_run:
             result = select_for_category(
                 config=config,
                 category_name="💡 营销行业",
@@ -658,8 +761,7 @@ class TestSelectForCategory:
                 logger=silent_logger,
             )
 
-        mock_ai.assert_called_once()
-        assert mock_ai.call_args[1]["json_mode"] is False
+        mock_run.assert_called_once()
         assert result["selection_mode"] == "ai_final_edit"
         assert result["status"] == "success"
         assert result["selected_items"] == [
@@ -678,15 +780,19 @@ class TestSelectForCategory:
             for i in range(1, 6)
         ]
         config = _editorial_config()
-        raw = (
-            "C001 | KEEP | 保留一 | 摘要一说明营销启示 | 合格\n"
-            "C002 | KEEP | 保留二 | 摘要二说明营销启示 | 合格\n"
-            "C003 | DROP | - | - | 边缘\n"
-            "C004 | DROP | - | - | 边缘\n"
-            "C005 | DROP | - | - | 边缘"
-        )
+        fake_result = {
+            "status": "success",
+            "category": "💡 营销行业",
+            "selected_items": [
+                {"title": "保留一", "url": "https://example.com/1", "summary": "摘要一说明营销启示"},
+                {"title": "保留二", "url": "https://example.com/2", "summary": "摘要二说明营销启示"},
+            ],
+            "preview_markdown": "## 💡 营销行业\n\n### [保留一](https://example.com/1)\n> 💡 摘要一\n\n### [保留二](https://example.com/2)\n> 💡 摘要二",
+            "batches": [],
+            "selection_mode": "ai_final_edit",
+        }
 
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw):
+        with patch("insightbot.editorial_pipeline.run_prompt_debug", return_value=fake_result):
             result = select_for_category(
                 config=config,
                 category_name="💡 营销行业",
@@ -707,9 +813,16 @@ class TestSelectForCategory:
             },
         ]
         config = _editorial_config()
-        raw = "C001 | KEEP | Nike Reveals a World Cup Unive... | Nike Reveals a World Cup Unive...，需关注其对品牌传播与消费沟通的影响 | 合格"
+        fake_result = {
+            "status": "success",
+            "category": "💡 营销行业",
+            "selected_items": [],
+            "preview_markdown": "",
+            "batches": [],
+            "selection_mode": "ai_final_edit",
+        }
 
-        with patch("insightbot.editorial_pipeline.chat_completion", return_value=raw):
+        with patch("insightbot.editorial_pipeline.run_prompt_debug", return_value=fake_result):
             with patch("insightbot.editorial_pipeline.time.sleep"):
                 result = select_for_category(
                     config=config,
@@ -718,8 +831,8 @@ class TestSelectForCategory:
                     logger=silent_logger,
                 )
 
-        assert result["status"] == "empty"
-        assert result["selected_items"] == []
+        assert result["status"] == "fallback"
+        assert len(result["selected_items"]) >= 1
 
     def test_final_edit_parser_rejects_truncated_and_generic_fallback_copy(self):
         parsed = _parse_final_edit_lines(
@@ -769,29 +882,58 @@ class TestSelectForCategory:
         )
         assert result["status"] == "empty_candidates"
 
-    def test_returns_empty_when_ai_final_edit_fails(self, silent_logger):
+    def test_falls_back_to_candidate_markdown_when_final_ai_returns_empty(self, silent_logger):
+        config = _editorial_config()
         candidates = [
             {
-                "title": "测试标题",
-                "link": "https://example.com/1",
-                "summary": "原始摘要内容",
-                "priority_score": 0.8,
+                "title": "[RSS] 女性营销频频翻车，品牌没学会这3件事",
+                "link": "https://example.com/marketing-risk",
+                "summary": "盒马包装争议体现女性营销中的低俗暗示风险。",
+                "priority_score": 0.82,
             }
         ]
+
+        with patch("insightbot.smart_brief_runner.run_prompt_debug", return_value={
+            "status": "empty",
+            "selected_items": [],
+            "preview_markdown": "",
+        }):
+            result = select_for_category(
+                config=config,
+                category_name="💡 营销行业",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert result["status"] == "fallback"
+        assert result["selected_items"][0]["url"] == "https://example.com/marketing-risk"
+        assert "女性营销频频翻车" in result["preview_markdown"]
+
+    def test_falls_back_when_final_ai_output_has_empty_summary(self, silent_logger):
         config = _editorial_config()
+        candidates = [
+            {
+                "title": "[RSS] AI的下一个战场是宠物机器人",
+                "link": "https://example.com/ai-pet",
+                "summary": "AI宠物机器人反映年轻人情感陪伴消费趋势。",
+                "priority_score": 0.9,
+            }
+        ]
 
-        with patch("insightbot.editorial_pipeline.chat_completion", side_effect=TimeoutError("timeout")):
-            with patch("insightbot.editorial_pipeline.time.sleep"):
-                result = select_for_category(
-                    config=config,
-                    category_name="💡 营销行业",
-                    candidates=candidates,
-                    logger=silent_logger,
-                )
+        with patch("insightbot.smart_brief_runner.run_prompt_debug", return_value={
+            "status": "success",
+            "selected_items": [{"title": "AI宠物机器人", "url": "https://example.com/ai-pet", "summary": ""}],
+            "preview_markdown": "## 🤖 数智前沿\n### [AI宠物机器人](https://example.com/ai-pet)\n> 💡 **",
+        }):
+            result = select_for_category(
+                config=config,
+                category_name="🤖 数智前沿",
+                candidates=candidates,
+                logger=silent_logger,
+            )
 
-        assert result["status"] == "empty"
-        assert result["selected_items"] == []
-        assert result["batches"][0]["status"] == "error"
+        assert result["status"] == "fallback"
+        assert "AI宠物机器人反映年轻人情感陪伴消费趋势" in result["preview_markdown"]
 
 
 # ---------- Orchestration: run_editorial_pipeline ----------
@@ -879,6 +1021,39 @@ class TestRunEditorialPipeline:
         assert "assignment_result" in result
         assert "category_results" in result
         assert "final_markdown" in result
+
+    def test_includes_fallback_category_markdown_in_final_output(self, silent_logger):
+        config = _editorial_config()
+
+        with patch("insightbot.editorial_pipeline.build_global_candidates", return_value=[
+            {"title": "新闻", "link": "https://example.com/1", "summary": "摘要"}
+        ]):
+            with patch("insightbot.editorial_pipeline.screen_global_candidates", return_value={
+                "ok": True,
+                "screened": [{"title": "新闻", "link": "https://example.com/1", "summary": "摘要"}],
+                "global_shortlist_size": 1,
+                "selection_mode": "full",
+                "batches": [],
+                "system_prompt": "",
+                "error": None,
+            }):
+                with patch("insightbot.editorial_pipeline.assign_candidates_to_categories", return_value={
+                    "ok": True,
+                    "category_candidate_map": {
+                        "💡 营销行业": [{"title": "新闻", "link": "https://example.com/1", "summary": "摘要"}],
+                        "🤖 数智前沿": [],
+                    },
+                    "unassigned": [],
+                    "error": None,
+                }):
+                    with patch("insightbot.editorial_pipeline.select_for_category", return_value={
+                        "status": "fallback",
+                        "selected_items": [{"title": "新闻", "url": "https://example.com/1", "summary": "摘要"}],
+                        "preview_markdown": "## 💡 营销行业\n### [新闻](https://example.com/1)",
+                    }):
+                        result = run_editorial_pipeline(config=config, logger=silent_logger)
+
+        assert "## 💡 营销行业" in result["final_markdown"]
 
 
 # ---------- Rollout: enabled flag ----------

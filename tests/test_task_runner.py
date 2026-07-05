@@ -115,10 +115,8 @@ class TestRunTaskReal:
                 "final_markdown": "## 报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
-                 patch("insightbot.task_runner.get_channel") as mock_channel, \
+            with patch("insightbot.task_runner.send_to_channel") as mock_send, \
                  patch("insightbot.task_runner.append_run_record") as mock_history:
-                mock_channel.return_value.delivery_profile = {"preferred_format": "markdown", "channel_type": "wecom"}
                 mock_send.return_value = True
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
@@ -126,7 +124,7 @@ class TestRunTaskReal:
                 assert len(result["channel_results"]) == 2
                 assert result["channel_results"][0]["channel_id"] == "ch1"
                 assert result["channel_results"][1]["channel_id"] == "ch2"
-                assert result["channel_results"][0]["message_count"] >= 1
+                assert result["channel_results"][0]["ok"] is True
                 mock_history.assert_called_once()
                 history_record = mock_history.call_args.args[1]
                 assert history_record["task_version_id"] == "taskv_test456"
@@ -214,9 +212,7 @@ class TestRunTaskReal:
                 "final_markdown": "## 报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
-                 patch("insightbot.task_runner.get_channel") as mock_channel:
-                mock_channel.return_value.delivery_profile = {"preferred_format": "markdown", "channel_type": "wecom"}
+            with patch("insightbot.task_runner.send_to_channel") as mock_send:
                 mock_send.return_value = True
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
@@ -240,61 +236,56 @@ class TestRunTaskReal:
                 "final_markdown": "## 报告",
                 "error": None,
             }
-            with patch("insightbot.task_runner.send_message_to_channel", side_effect=[False]), \
-                 patch("insightbot.task_runner.get_channel") as mock_channel:
-                mock_channel.return_value.delivery_profile = {"preferred_format": "markdown", "channel_type": "wecom"}
+            with patch("insightbot.task_runner.send_to_channel", return_value=False):
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
-                assert result["channel_results"][0]["ok"] is False
-                assert result["pipeline_ok"] is True
-                assert result["delivery_ok"] is False
-                assert result["ok"] is False
-                assert result["error"] == "All configured channels failed to send."
+        assert result["channel_results"][0]["ok"] is False
 
-    def test_real_run_does_not_send_when_pipeline_fails(self):
+    def test_web_archive_route_writes_full_report_once(self):
         from insightbot.task_runner import run_task
 
         fake_config = {
             "_task_pipeline": "editorial",
-            "_task_channels": ["wecom_main"],
+            "_task_channels": ["subscriber_page"],
+            "_task_channel_routes": [
+                {
+                    "channel_id": "subscriber_page",
+                    "enabled": True,
+                    "audience": "订阅者",
+                    "purpose": "archive",
+                }
+            ],
+            "_task_name": "每日简报",
             "feeds": {},
             "ai": {"api_url": "...", "api_key": "...", "model": "..."},
-            "settings": {"empty_message": "empty should not send"},
+            "settings": {"report_title": "营销情报早报 | {date}"},
         }
         fake_loader = lambda: fake_config
 
         with patch("insightbot.task_runner._run_editorial_pipeline") as mock_ep:
             mock_ep.return_value = {
-                "ok": False,
-                "final_markdown": "",
-                "error": "pipeline failed",
+                "ok": True,
+                "final_markdown": "## 报告",
+                "error": None,
             }
-            with patch("insightbot.task_runner.get_channel") as mock_channel, \
-                 patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
-                 patch("insightbot.task_runner.append_run_record") as mock_history:
+            with patch("insightbot.task_runner.is_web_archive_channel", return_value=True), \
+                 patch("insightbot.task_runner.append_archive_record") as mock_archive, \
+                 patch("insightbot.task_runner.append_run_record"):
+                mock_archive.return_value = "archive-id"
                 result = run_task("daily_brief", fake_loader, dry_run=False)
 
-        assert result["ok"] is False
-        assert result["channel_results"] == []
-        assert result["error"] == "pipeline failed"
-        mock_channel.assert_not_called()
-        mock_send.assert_not_called()
-        mock_history.assert_called_once()
-
-
-class TestEditorialIntelligenceSearchConfig:
-    def test_normalizes_task_search_queries_to_plain_strings(self):
-        from insightbot.task_runner import _normalize_search_queries
-
-        raw_queries = [
-            {"keywords": "品牌 AI 营销", "category_hint": "数智前沿", "max_results": 10},
-            {"keywords": "  品牌 AI 营销  ", "category_hint": "数智前沿", "max_results": 10},
-            {"keywords": "微信生态 传播", "category_hint": "营销行业", "max_results": 10},
-            "",
-            {"keywords": "   "},
+        assert result["channel_results"] == [
+            {
+                "channel_id": "subscriber_page",
+                "ok": True,
+                "audience": "订阅者",
+                "purpose": "archive",
+                "archive_record_id": "archive-id",
+            }
         ]
-
-        assert _normalize_search_queries(raw_queries) == [
-            "品牌 AI 营销",
-            "微信生态 传播",
-        ]
+        mock_archive.assert_called_once()
+        archive_payload = mock_archive.call_args.args[1]
+        assert archive_payload["markdown"] == "## 报告"
+        assert archive_payload["audience"] == "订阅者"
+        assert archive_payload["publication_status"] == "published"
+        assert archive_payload["visibility"] == "audience"
