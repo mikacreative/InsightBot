@@ -215,6 +215,26 @@ class FeishuAppChannel:
         )
 
 
+class WebArchiveChannel:
+    """Virtual channel for subscriber-facing web archive storage."""
+
+    def __init__(
+        self,
+        channel_id: str,
+        name: str,
+        public_name: str = "",
+    ):
+        self.channel_id = channel_id
+        self.name = name
+        self.public_name = public_name or name
+
+    def send(self, content: str) -> bool:
+        return bool(str(content).strip())
+
+    def test(self) -> bool:
+        return True
+
+
 def validate_channel_definition(channel_id: str, channel_def: dict) -> dict:
     channel_type = channel_def.get("type", "wecom")
     issues = []
@@ -244,6 +264,8 @@ def validate_channel_definition(channel_id: str, channel_def: dict) -> dict:
     elif channel_type == "feishu_bot":
         if not str(channel_def.get("webhook_url", "")).strip():
             issue("missing_webhook_url", "飞书机器人 Webhook URL 未填写。", "webhook_url")
+    elif channel_type == "web_archive":
+        pass
     else:
         issue("unsupported_channel_type", f"不支持的频道类型：{channel_type}", "type")
 
@@ -281,6 +303,12 @@ def build_channel(channel_id: str, ch_def: dict) -> Channel:
             receive_id=ch_def.get("receive_id", ""),
             receive_id_type=ch_def.get("receive_id_type", "chat_id"),
             message_template=ch_def.get("message_template", "interactive"),
+        )
+    if ch_type == "web_archive":
+        return WebArchiveChannel(
+            channel_id=channel_id,
+            name=ch_def.get("name", channel_id),
+            public_name=ch_def.get("public_name", ch_def.get("name", channel_id)),
         )
     raise ValueError(f"Unsupported channel type: {ch_type}")
 
@@ -348,6 +376,12 @@ def test_channel(channel_id: str) -> bool:
 def test_channel_config(channel_id: str, channel_def: dict) -> bool:
     """Send a connectivity test using the provided config, without saving it."""
     return build_channel(channel_id, channel_def).test()
+
+
+def is_web_archive_channel(channel_id: str) -> bool:
+    if _registry is None:
+        return False
+    return isinstance(_registry.get(channel_id), WebArchiveChannel)
 
 
 def all_channel_ids() -> list[str]:

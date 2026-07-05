@@ -80,6 +80,21 @@ def screen_output_dir(bot_dir: str | None = None) -> str:
     return os.getenv("SCREEN_OUTPUT_DIR", os.path.join(bot_dir, "scripts", "static", "screen"))
 
 
+def web_archive_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("WEB_ARCHIVE_FILE", os.path.join(data_dir(bot_dir), "web_archive.jsonl"))
+
+
+def subscribers_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SUBSCRIBERS_FILE", os.path.join(bot_dir, "subscribers.json"))
+
+
+def audit_log_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("AUDIT_LOG_FILE", os.path.join(data_dir(bot_dir), "audit_log.jsonl"))
+
+
 def task_health_cache_file_path(task_id: str, bot_dir: str | None = None) -> str:
     bot_dir = bot_dir or default_bot_dir()
     override = os.getenv("TASK_HEALTH_CACHE_FILE")
