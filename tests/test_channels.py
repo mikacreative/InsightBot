@@ -174,6 +174,20 @@ class TestFeishuAppChannel:
         assert mock_send.call_args.kwargs["title"] == "日报标题"
 
 
+class TestWebArchiveChannel:
+    def test_send_accepts_non_empty_content(self):
+        from insightbot.channels import WebArchiveChannel
+
+        ch = WebArchiveChannel(
+            channel_id="subscriber_page",
+            name="订阅者页面",
+            public_name="InsightBot 简报",
+        )
+
+        assert ch.send("## 报告") is True
+        assert ch.send("") is False
+
+
 class TestChannelRegistry:
     def test_get_returns_channel(self):
         from insightbot.channels import ChannelRegistry, WeChatChannel
@@ -248,6 +262,23 @@ class TestChannelRegistry:
         channel = registry.get("feishu_app")
         assert isinstance(channel, FeishuAppChannel)
         assert channel.receive_id_type == "open_id"
+
+    def test_supports_web_archive(self):
+        from insightbot.channels import ChannelRegistry, WebArchiveChannel
+
+        registry = ChannelRegistry({
+            "channels": {
+                "subscriber_page": {
+                    "type": "web_archive",
+                    "name": "订阅者页面",
+                    "public_name": "InsightBot 简报",
+                }
+            }
+        })
+
+        channel = registry.get("subscriber_page")
+        assert isinstance(channel, WebArchiveChannel)
+        assert channel.public_name == "InsightBot 简报"
 
 
 class TestModuleLevelFunctions:
@@ -328,3 +359,17 @@ class TestModuleLevelFunctions:
         assert result["is_ready"] is False
         codes = {issue["code"] for issue in result["issues"]}
         assert {"missing_app_id", "missing_app_secret", "missing_receive_id"} <= codes
+
+    def test_validate_channel_definition_for_web_archive(self):
+        from insightbot.channels import validate_channel_definition
+
+        result = validate_channel_definition(
+            "subscriber_page",
+            {
+                "type": "web_archive",
+                "name": "订阅者页面",
+                "public_name": "InsightBot 简报",
+            },
+        )
+
+        assert result["is_ready"] is True

@@ -29,6 +29,9 @@ python -m insightbot --task daily_brief --dry-run
 ~/Library/Application Support/InsightBot/   # 默认 bot_dir
 ├── tasks.json        # 任务定义
 ├── channels.json     # 频道配置
+├── subscribers.json  # 订阅者 token 与 audience 映射
+├── data/
+│   └── web_archive.jsonl  # web_archive 虚拟频道写入的订阅者资讯存档
 ├── config.json        # 主配置（已废弃，迁移到 tasks.json）
 └── logs/
     ├── bot.log
@@ -68,6 +71,38 @@ https://rsshub.example.com:1200/weibo/user/123456789
 
 ### 方式 B: WebSocket 机器人（规划中）
 参考 `wecom.py` 的 channel 协议，注册企业微信应用时开启「接收消息」模式，获取 `WECOM_AES_KEY` 和 `WECOM_TOKEN`，通过 WebSocket 长连接接收用户消息并回复。
+
+## 订阅者页面与 Web Archive
+
+如需让订阅者在线浏览和回溯任务资讯，在 `channels.json` 添加虚拟频道：
+
+```json
+{
+  "channels": {
+    "subscriber_page": {
+      "type": "web_archive",
+      "name": "订阅者页面",
+      "public_name": "InsightBot Briefing"
+    }
+  }
+}
+```
+
+再在目标任务的 `channels` 中加入路由：
+
+```json
+"channels": [
+  {"channel_id": "subscriber_page", "audience": "订阅者", "purpose": "archive"}
+]
+```
+
+只读订阅者入口可单独启动：
+
+```bash
+streamlit run scripts/subscriber_app.py --server.port 8502
+```
+
+订阅者访问时可使用 `http://localhost:8502?token=<subscriber-token>`。无 token 或 token 无效时，只能看到 `public` 内容。
 
 ## 开机自启（macOS launchd）
 

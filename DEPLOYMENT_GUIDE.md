@@ -140,6 +140,10 @@ docker-compose up -d
   ```bash
   CHANNELS_FILE=/root/marketing_bot/channels.json
   TASKS_FILE=/root/marketing_bot/tasks.json
+  WEB_ARCHIVE_FILE=/root/marketing_bot/data/web_archive.jsonl
+  SUBSCRIBERS_FILE=/root/marketing_bot/subscribers.json
+  AUDIT_LOG_FILE=/root/marketing_bot/data/audit_log.jsonl
+  INSIGHTBOT_CONSOLE_AUTH_REQUIRED=1
   MARKETING_BOT_DIR=/root/marketing_bot
   ```
 
@@ -148,9 +152,31 @@ docker-compose up -d
 *   `wecom`：适合企业微信应用推送
 *   `feishu_app`：推荐的飞书接入方式。通过飞书应用鉴权后走 OpenAPI，可发送 richer message 卡片
 *   `feishu_bot`：适合轻量 webhook 推送或兜底通知
+*   `web_archive`：虚拟频道，不需要外部凭证。任务发送到它时会把完整简报写入 `WEB_ARCHIVE_FILE`，供订阅者页面浏览和回溯
 
 > 飞书的推荐接入方式是 `feishu_app`。  
 > WebSocket 更适合事件订阅，生产发送链路仍建议使用应用鉴权 + OpenAPI。
+
+任务需要细分“通过什么渠道发送给谁”时，在 `tasks.json` 里使用对象格式：
+
+```json
+"channels": [
+  {"channel_id": "feishu_exec", "audience": "管理层", "purpose": "summary"},
+  {"channel_id": "subscriber_page", "audience": "订阅者", "purpose": "archive"}
+]
+```
+
+面向订阅者的只读页面建议独立部署，不和管理台共用公网入口：
+
+```bash
+streamlit run scripts/subscriber_app.py \
+  --server.address 0.0.0.0 \
+  --server.port 8502
+```
+
+订阅者访问范围通过 `subscribers.json` 控制。公开访问或无效 token 只看到 `public` 内容；带 `?token=<subscriber-token>` 访问时，会按 token 对应的 `audiences` 过滤。
+
+控制台同样支持 `?token=<token>`。生产环境建议启用 `INSIGHTBOT_CONSOLE_AUTH_REQUIRED=1`，并在 `subscribers.json` 中至少配置一个 `admin` token；`operator` 可以管理发布状态，但不能管理 Channels 或权限。通过权限页新增的 token 会以 `token_hash` 保存；任务、Channels、发布状态和权限变更会写入 `AUDIT_LOG_FILE`，且敏感字段会自动脱敏。
 
 ### 5. 验证部署
 

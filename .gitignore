@@ -52,6 +52,9 @@ scripts/static/screen/img/
 # OS/editor
 .DS_Store
 
+# WorkBuddy IDE
+.workbuddy/
+
 # Claude Code
 .claude/
 

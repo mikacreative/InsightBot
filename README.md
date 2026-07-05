@@ -10,7 +10,9 @@
 一个 "RSS + AI + 多频道推送" 的多任务营销情报简报机器人。
 
 - **多任务**：每个任务有独立的 RSS 源、Pipeline、频道和调度时间
-- **多频道**：Channels 抽象层，支持企业微信、飞书应用、飞书机器人
+- **多频道**：Channels 抽象层，支持企业微信、飞书应用、飞书机器人等多样化推送渠道
+- **精细路由**：任务可声明“通过哪个频道、面向谁、用于什么场景”
+- **订阅者页面**：`web_archive` 虚拟频道会把任务资讯沉淀为可在线浏览和回溯的 Web 存档
 - **内置调度器**：前台阻塞循环，只需守护一个进程，无需外部 cron
 - **任务中心控制台**：管理台按“当前任务”组织内容源、搜索补充、诊断、日志与 Dry Run
 - **调试友好**：控制台 Dry Run 永远不发送真实消息，仅在面板展示结果
@@ -21,18 +23,27 @@
 | 模块 | 说明 |
 |------|------|
 | `insightbot/channels.py` | Channel 抽象层（WeChatChannel、ChannelRegistry） |
-| `insightbot/channel_rendering.py` | 按频道能力渲染消息、企业微信分片、飞书卡片批次规划 |
+| `insightbot/channel_routes.py` | 任务频道路由归一化，兼容旧列表与新对象格式 |
+| `insightbot/web_archive.py` | Web 存档 JSONL 读写与记录回溯 |
+| `insightbot/subscribers.py` | 订阅者、运营者、管理员 token 与权限矩阵 |
+| `insightbot/audit_log.py` | 发布与权限变更审计日志 |
 | `insightbot/scheduler.py` | 内置调度器（小时/分钟调度 + 70s 幂等保护） |
 | `insightbot/task_runner.py` | 任务执行引擎（dry_run / 真实发送） |
 | `insightbot/migrate.py` | v1 → v2 自动迁移 |
 | `insightbot/editorial_pipeline.py` | Editorial Pipeline（默认主流程） |
 | `insightbot/smart_brief_runner.py` | 经典简报流程 |
-| `scripts/app.py` | Streamlit 管理台（当前为 7 个主标签页） |
+| `scripts/app.py` | Streamlit 管理台 |
+| `scripts/subscriber_app.py` | 面向订阅者的只读 Web 存档页面 |
+
+### v0.4.0 新能力
 
 - **多任务多频道**：每个任务独立配置 feeds、pipeline、channels、schedule
 - **Channels 抽象**：企业微信凭证单独存储在 `channels.json`
-- **内置调度器**：无需外部 cron，直接守护 `python -m insightbot` 即可
-- **调试控制台**：Dry Run 在面板内展示完整简报预览 + 中间结果，零频道发送
+- **频道路由**：`tasks.json` 的 `channels` 既支持旧字符串列表，也支持带 audience/purpose 的对象列表
+- **Web Archive**：新增 `web_archive` 虚拟频道，任务发送到该频道时写入 `data/web_archive.jsonl`
+- **角色分层**：`subscriber` 只看内容，`operator` 可管理发布状态，`admin` 可管理任务、Channels 与权限
+- **内置调度器**：无需外部 cron，直接守护 `python -m insightbot.cli` 即可
+- **调试控制台（tab8）**：Dry Run 在面板内展示完整简报预览 + 中间结果，零频道发送
 - **自动迁移**：首次启动会自动从旧版单任务配置生成 `channels.json` + `tasks.json`
 
 ### 当前发送策略
@@ -48,25 +59,12 @@
 | tab0 | 🏠 概览 | 当前任务运营总览、异常摘要、最近调试动态 |
 | tab1 | 📋 任务管理 | 当前任务的 feeds、搜索补充、pipeline、频道、调度 |
 | tab2 | 📡 Channels | 频道 CRUD + 联通性测试 |
-| tab3 | 🧪 验证与调试 | 健康检查、No Push Diagnosis、板块调试、日志摘要 |
+| tab3 | 🧪 验证与调试 | 最近运行、健康检查、Prompt Debug 与 No Push Diagnosis |
 | tab4 | 📝 运行日志 | 当前任务优先的运行日志追踪 |
 | tab5 | ⚙️ 推送版式定制 | 早报标题、无更新提示语、底部链接 |
 | tab6 | 🔬 任务调试 | 任务级 Dry Run 面板（零频道发送） |
-
-> 说明：
-> - 旧的 `AI 提示词调优` / `RSS 健康度` / `信源发现` 已不再作为一级标签页长期保留
-> - Prompt Debug 能力正在合并到 `验证与调试`
-
-### 当前支持的频道类型
-
-| 类型 | 用途 | 推荐程度 |
-|------|------|------|
-| `wecom` | 企业微信应用推送 | 推荐 |
-| `feishu_app` | 飞书应用鉴权后通过 OpenAPI 发送，支持 richer message 卡片 | 推荐 |
-| `feishu_bot` | 飞书群机器人 webhook，适合作为轻量 fallback | 可选 |
-
-> 对飞书来说，默认推荐 `feishu_app`。
-> 它通过飞书应用鉴权后走官方消息 API，支持 `interactive` 卡片；`feishu_bot` 更适合作为 webhook 兜底通道。
+| tab7 | 🌐 订阅者页面 | Web Archive 历史资讯浏览与回溯 |
+| tab8 | 👥 权限 | 管理 token、角色和 audience |
 
 ### 数据模型
 
@@ -98,12 +96,29 @@
       "name": "飞书机器人兜底",
       "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
       "mention_all": false
+    },
+    "subscriber_page": {
+      "type": "web_archive",
+      "name": "订阅者页面",
+      "public_name": "InsightBot Briefing"
     }
   }
 }
 ```
 
-**`tasks.json`** — 任务定义（当前主结构）
+### 当前支持的频道类型
+
+| 类型 | 用途 | 推荐程度 |
+|------|------|------|
+| `wecom` | 企业微信应用推送 | 推荐 |
+| `feishu_app` | 飞书应用鉴权后通过 OpenAPI 发送，支持 richer message 卡片 | 推荐 |
+| `feishu_bot` | 飞书群机器人 webhook，适合作为轻量 fallback | 可选 |
+| `web_archive` | 虚拟频道，不外发消息；将任务结果存入 Web 存档供订阅者浏览和回溯 | 推荐用于订阅页 |
+
+> 对飞书来说，**推荐默认接入 `feishu_app`**。  
+> 它通过飞书应用鉴权后走官方消息 API，支持 `interactive` 卡片；`feishu_bot` 仍可用，但更适合作为 webhook 兜底通道。
+
+**`tasks.json`** — 任务定义（替代原来的内联配置）
 ```json
 {
   "tasks": {
@@ -119,21 +134,76 @@
         "💡 营销行业": { "prompt": "...", "keywords": ["营销"], "source_hints": ["marketing"] }
       },
       "pipeline_config": {},
-      "channels": ["wecom_main"],
+      "channels": [
+        "wecom_main",
+        {
+          "channel_id": "subscriber_page",
+          "audience": "订阅者",
+          "purpose": "archive"
+        }
+      ],
       "schedule": { "hour": 8, "minute": 0 }
     }
   }
 }
 ```
 
-> 当前 `dev-editorial` 开发基线已经把任务模型主入口切到：
->
-> - `sources`
-> - `sections`
-> - `pipeline_config`
->
-> 运行时内部仍会临时派生一份 `feeds` 视图，用于兼容 Prompt Debug、健康检查和少量 legacy 路径；这层适配不是长期主模型。  
-> 设计稿见：[Task Schema 重构：从 feeds 到 sources + sections](./docs/task_schema_sources_sections.md)
+`channels` 仍兼容旧格式 `["wecom_main"]`。当需要精细控制“什么任务通过什么渠道发送给谁”时，使用对象格式：
+
+```json
+{
+  "channel_id": "feishu_exec",
+  "audience": "管理层",
+  "purpose": "summary",
+  "enabled": true
+}
+```
+
+### 订阅者页面与 Web 存档
+
+- 管理台的 `🌐 订阅者页面` 标签可用于运营侧检查历史资讯。
+- 管理台里可以把存档设为 `published`、`draft` 或 `unpublished`，并调整 `public` / `audience` 可见性。
+- 面向订阅者时，推荐单独启动只读页面：
+
+```bash
+streamlit run scripts/subscriber_app.py \
+  --server.address 0.0.0.0 \
+  --server.port 8502
+```
+
+- 默认存档位置是 `data/web_archive.jsonl`，可用 `WEB_ARCHIVE_FILE` 覆盖。
+- 每条存档都有 `record_id`，可以用 `?record_id=<id>` 直接定位某次任务结果。
+- 订阅者访问范围由 `subscribers.json` 控制；只读页面用 `?token=<subscriber-token>` 解析订阅者受众组。
+
+**`subscribers.json`** — 订阅者 token 与受众组
+
+```json
+{
+  "subscribers": {
+    "demo-admin-token": {
+      "name": "管理员",
+      "role": "admin",
+      "audiences": ["management", "paid_subscribers", "public"]
+    },
+    "demo-operator-token": {
+      "name": "运营者",
+      "role": "operator",
+      "audiences": ["management", "paid_subscribers", "public"]
+    },
+    "demo-management-token": {
+      "name": "管理层读者",
+      "role": "subscriber",
+      "audiences": ["management", "public"]
+    }
+  }
+}
+```
+
+没有 token 或 token 无效时，只能访问 `public` 范围。
+
+控制台也支持 `?token=<token>`。生产环境建议设置 `INSIGHTBOT_CONSOLE_AUTH_REQUIRED=1`，这样无 token 不能进入管理员能力；本地默认可作为 Local Admin 进入，方便调试。通过权限页新增 token 时会保存 `token_hash`，避免继续把新 token 明文写入配置。
+
+任务、Channels、发布状态和权限变更会写入 `data/audit_log.jsonl`，可用 `AUDIT_LOG_FILE` 覆盖；审计日志会自动脱敏 `secret`、`app_secret`、`api_key`、`webhook_url`、`token` 等字段。
 
 ### 快速启动
 
@@ -160,6 +230,7 @@ cp config/examples/tasks.example.json tasks.json
 - `wecom`：`cid` / `secret` / `agent_id`
 - `feishu_app`：`app_id` / `app_secret` / `receive_id` / `receive_id_type`
 - `feishu_bot`：`webhook_url`
+- `web_archive`：无需外部凭证，只需设置页面显示名称
 
 > 生产环境的 `tasks.json` / `channels.json` / `config.content.json` / `config.secrets.json` 应视为 runtime 配置。部署前先备份生产配置，再更新代码，不要用本地样例覆盖生产文件。
 
@@ -199,11 +270,15 @@ python -m insightbot --webhook
 
 | 变量 | 说明 |
 |------|------|
-| `MARKETING_BOT_DIR` | 工作目录，生产默认 `/home/ubuntu/marketing_bot`，兼容 `/root/marketing_bot`，本地默认当前 repo |
-| `CONFIG_CONTENT_FILE` | 覆盖 `config.content.json` 路径 |
-| `CONFIG_SECRETS_FILE` | 覆盖 `config.secrets.json` 路径 |
-| `CHANNELS_FILE` | 覆盖 `channels.json` 路径 |
-| `TASKS_FILE` | 覆盖 `tasks.json` 路径 |
+| `MARKETING_BOT_DIR` | 工作目录，默认 `/root/marketing_bot` 或当前目录 |
+| `CONFIG_CONTENT_FILE` | 覆盖 config.content.json 路径 |
+| `CONFIG_SECRETS_FILE` | 覆盖 config.secrets.json 路径 |
+| `CHANNELS_FILE` | 覆盖 channels.json 路径 |
+| `TASKS_FILE` | 覆盖 tasks.json 路径 |
+| `WEB_ARCHIVE_FILE` | 覆盖 Web 存档 JSONL 路径 |
+| `SUBSCRIBERS_FILE` | 覆盖 subscribers.json 路径 |
+| `AUDIT_LOG_FILE` | 覆盖审计日志 JSONL 路径 |
+| `INSIGHTBOT_CONSOLE_AUTH_REQUIRED` | 设为 `1` 时，控制台必须通过 token 获取管理权限 |
 | `INSIGHTBOT_DRY_RUN` | 测试模式，频道发送不真实投递 |
 | `AI_API_KEY` / `AI_API_URL` / `AI_MODEL` | 覆盖 AI 设置 |
 

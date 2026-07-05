@@ -19,12 +19,15 @@ from insightbot.paths import (
     config_content_file_path,
     config_file_path,
     config_secrets_file_path,
+    audit_log_file_path,
     bot_log_file_path,
     feed_health_cache_file_path,
     logs_dir,
     task_health_cache_file_path,
     task_runs_file_path,
     task_state_file_path,
+    subscribers_file_path,
+    web_archive_file_path,
 )
 from insightbot.config import load_json_config, load_runtime_config
 
@@ -115,6 +118,33 @@ class TestSplitConfigPaths:
         with patch.dict(os.environ, env_without, clear=True):
             result = task_runs_file_path(str(tmp_path))
         assert result == str(tmp_path / "data" / "task_runs.jsonl")
+
+    def test_web_archive_path_defaults_to_data_dir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("WEB_ARCHIVE_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = web_archive_file_path(str(tmp_path))
+        assert result == str(tmp_path / "data" / "web_archive.jsonl")
+
+    def test_subscribers_path_defaults_to_bot_dir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("SUBSCRIBERS_FILE", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = subscribers_file_path(str(tmp_path))
+        assert result == str(tmp_path / "subscribers.json")
+
+    def test_audit_log_path_defaults_to_data_dir(self, tmp_path):
+        env_without = {
+            k: v for k, v in os.environ.items()
+            if k not in ("AUDIT_LOG_FILE", "DATA_DIR", "MARKETING_BOT_DIR")
+        }
+        with patch.dict(os.environ, env_without, clear=True):
+            result = audit_log_file_path(str(tmp_path))
+        assert result == str(tmp_path / "data" / "audit_log.jsonl")
 
     def test_task_health_cache_path_defaults_to_task_health_subdir(self, tmp_path):
         env_without = {
