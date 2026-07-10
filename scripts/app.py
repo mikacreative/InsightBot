@@ -954,6 +954,14 @@ def main() -> None:
         config["ai"] = {}
 
     with st.sidebar:
+        product_mode = st.selectbox(
+            "产品模式",
+            options=["Control Center", "Signal Desk"],
+            index=0,
+            key="product_mode",
+            help="Control Center：任务编排三栏工作台；Signal Desk：情报房间与简报。",
+        )
+        st.divider()
         st.header("👤 当前角色")
         st.caption(f"{console_actor.get('name')} · {console_actor.get('role')}")
         if console_actor.get("role") == "subscriber":
@@ -1102,6 +1110,26 @@ def main() -> None:
         latest_success_record,
         selected_task_state,
     )
+
+    if product_mode == "Signal Desk":
+        from scripts.ui.signal_desk.rooms import render_rooms_tab
+        from scripts.ui.signal_desk.signals import render_signals_tab
+        from scripts.ui.signal_desk.saved_signals import render_saved_signals_tab
+        from scripts.ui.signal_desk.briefs import render_briefs_tab
+
+        st.header("📡 Signal Desk")
+        sd_rooms, sd_signals, sd_saved, sd_briefs = st.tabs(
+            ["Rooms", "Signals", "Saved", "Briefs"]
+        )
+        with sd_rooms:
+            render_rooms_tab(bot_dir, channels_data, save_task_definition)
+        with sd_signals:
+            render_signals_tab(bot_dir)
+        with sd_saved:
+            render_saved_signals_tab(bot_dir)
+        with sd_briefs:
+            render_briefs_tab(bot_dir)
+        return
 
     tab_today, tab_investigate, tab_configure = st.tabs([
         "Today",
