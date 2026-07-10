@@ -1,0 +1,166 @@
+import json
+
+import pytest
+
+from insightbot.paths import (
+    signal_desk_dir,
+    signal_desk_rooms_file_path,
+    signal_desk_saved_signals_file_path,
+    signal_desk_feedback_file_path,
+)
+from insightbot.signal_desk.models import BriefingRoom
+from insightbot.signal_desk.patterns import IntentContract
+from insightbot.signal_desk import storage
+from insightbot.signal_desk.storage import load_rooms, save_room, delete_room
+
+
+def test_signal_desk_paths_respect_bot_dir(tmp_path):
+    bot_dir = str(tmp_path)
+
+    assert signal_desk_dir(bot_dir) == str(tmp_path / "data" / "signal_desk")
+    assert signal_desk_rooms_file_path(bot_dir) == str(tmp_path / "data" / "signal_desk" / "rooms.json")
+    assert signal_desk_saved_signals_file_path(bot_dir) == str(tmp_path / "data" / "signal_desk" / "saved_signals.jsonl")
+    assert signal_desk_feedback_file_path(bot_dir) == str(tmp_path / "data" / "signal_desk" / "feedback.jsonl")
+
+
+def test_briefing_room_round_trip_dict():
+    room = BriefingRoom(
+        id="client_radar_beauty",
+        name="Beauty Client Opportunity Radar",
+        topic="Beauty and retail marketing signals in China",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance", "pitch_potential"],
+        channels=["wecom_main"],
+        schedule={"hour": 8, "minute": 0},
+    )
+
+    payload = room.to_dict()
+    restored = BriefingRoom.from_dict(payload)
+
+    assert restored.id == "client_radar_beauty"
+    assert restored.compiled_task_id == "room_client_radar_beauty"
+    assert restored.use_case_template_id == "client_opportunity_radar"
+    assert restored.channels == ["wecom_main"]
+    assert restored.schedule == {"hour": 8, "minute": 0}
+
+
+def test_save_load_and_delete_room(tmp_path):
+    bot_dir = str(tmp_path)
+    room = BriefingRoom(
+        id="client_radar_beauty",
+        name="Beauty Client Opportunity Radar",
+        topic="Beauty signals",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance"],
+        channels=["wecom_main"],
+        schedule={"hour": 8, "minute": 0},
+    )
+
+    save_room(room, bot_dir=bot_dir)
+    rooms = load_rooms(bot_dir=bot_dir)
+
+    assert list(rooms.keys()) == ["client_radar_beauty"]
+    assert rooms["client_radar_beauty"].name == "Beauty Client Opportunity Radar"
+
+    delete_room("client_radar_beauty", bot_dir=bot_dir)
+
+    assert load_rooms(bot_dir=bot_dir) == {}
+
+
+def test_load_rooms_rejects_malformed_room_entry(tmp_path):
+    bot_dir = str(tmp_path)
+    rooms_file = signal_desk_rooms_file_path(bot_dir)
+    rooms_path = tmp_path / "data" / "signal_desk"
+    rooms_path.mkdir(parents=True)
+    with open(rooms_file, "w", encoding="utf-8") as f:
+        json.dump({"rooms": {"client_radar_beauty": "malformed"}}, f)
+
+    with pytest.raises(ValueError, match="Room entry must be an object"):
+        load_rooms(bot_dir=bot_dir)
+
+
+def test_save_room_uses_lock_file_and_cleans_it_up(tmp_path, monkeypatch):
+    bot_dir = str(tmp_path)
+    lock_path = signal_desk_rooms_file_path(bot_dir) + ".lock"
+    original_atomic_write_json = storage._atomic_write_json
+    saw_lock = False
+
+    def tracking_atomic_write_json(path, payload):
+        nonlocal saw_lock
+        saw_lock = saw_lock or (path == signal_desk_rooms_file_path(bot_dir) and storage.os.path.exists(lock_path))
+        original_atomic_write_json(path, payload)
+
+    monkeypatch.setattr(storage, "_atomic_write_json", tracking_atomic_write_json)
+    room = BriefingRoom(
+        id="client_radar_beauty",
+        name="Beauty Client Opportunity Radar",
+        topic="Beauty signals",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance"],
+        channels=["wecom_main"],
+        schedule={"hour": 8, "minute": 0},
+    )
+
+    save_room(room, bot_dir=bot_dir)
+
+    assert saw_lock is True
+    assert not storage.os.path.exists(lock_path)
+
+
+def test_save_room_retries_lock_on_permission_error(tmp_path, monkeypatch):
+    bot_dir = str(tmp_path)
+    original_open = storage.os.open
+    attempts = 0
+
+    def permission_error_once(path, flags):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("simulated Windows lock contention")
+        return original_open(path, flags)
+
+    monkeypatch.setattr(storage.os, "open", permission_error_once)
+    room = BriefingRoom(
+        id="client_radar_beauty",
+        name="Beauty Client Opportunity Radar",
+        topic="Beauty signals",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance"],
+        channels=["wecom_main"],
+        schedule={"hour": 8, "minute": 0},
+    )
+
+    save_room(room, bot_dir=bot_dir)
+
+    assert attempts == 2
+    assert list(load_rooms(bot_dir=bot_dir).keys()) == ["client_radar_beauty"]
+
+
+def test_room_stores_pattern_intent_context():
+    intent = IntentContract(
+        pattern_id="client_opportunity_radar",
+        room_id="beauty_radar",
+        client="Sephora",
+        category="beauty retail",
+        focus_topics=["AI retail"],
+        output_intent="client_conversation",
+    )
+    room = BriefingRoom(
+        id="beauty_radar",
+        name="Beauty Radar",
+        topic="Beauty retail signals",
+        source_pack_ids=["marketing_comms_cn"],
+        editorial_preset_id="client_opportunity_radar",
+        judgement_lens_ids=["client_relevance"],
+        channels=[],
+        schedule={"hour": 8, "minute": 0},
+        client_context={"intent": intent.to_dict()},
+    )
+
+    restored = BriefingRoom.from_dict(room.to_dict())
+
+    assert restored.client_context["intent"]["client"] == "Sephora"

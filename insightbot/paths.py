@@ -119,3 +119,28 @@ def task_state_file_path(task_id: str, bot_dir: str | None = None) -> str:
     if base_dir.resolve() not in target.parents:
         raise ValueError("Task state path escaped task_state directory.")
     return str(target)
+
+
+def signal_desk_dir(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_DIR", os.path.join(data_dir(bot_dir), "signal_desk"))
+
+
+def signal_desk_rooms_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_ROOMS_FILE", os.path.join(signal_desk_dir(bot_dir), "rooms.json"))
+
+
+def signal_desk_saved_signals_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_SAVED_SIGNALS_FILE", os.path.join(signal_desk_dir(bot_dir), "saved_signals.jsonl"))
+
+
+def signal_desk_feedback_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_FEEDBACK_FILE", os.path.join(signal_desk_dir(bot_dir), "feedback.jsonl"))
+
+
+def signal_desk_briefs_file_path(bot_dir: str | None = None) -> str:
+    bot_dir = bot_dir or default_bot_dir()
+    return os.getenv("SIGNAL_DESK_BRIEFS_FILE", os.path.join(signal_desk_dir(bot_dir), "briefs.jsonl"))

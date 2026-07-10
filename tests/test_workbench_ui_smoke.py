@@ -40,7 +40,7 @@ def test_streamlit_app_uses_product_task_card_view_model():
     assert "1. 信源" in source
     assert "2. 候选" in source
     assert "变更确认卡" in source
-    assert "approve_and_apply_changeset" in source
+    assert "保存当前任务配置" in source
     assert 'st.session_state[f"pending_changeset::{task_id}"]' in source
     assert "Add RSS source from Workbench" in source
     assert "Update section prompt from Workbench" in source

@@ -6,6 +6,8 @@ from copy import deepcopy
 from datetime import datetime
 
 import streamlit as st
+from insightbot.channel_routes import normalize_channel_routes
+from insightbot.audit_log import append_audit_event
 
 # Defense in depth for static Content-Type: Streamlit can serve
 # /app/static/** without ever running this script (no session), so the
@@ -45,7 +47,7 @@ from insightbot.prompt_debug_history import (
     load_prompt_debug_history,
     make_draft_run_record,
 )
-from insightbot.product import build_change_proposal, build_task_card
+from insightbot.subscribers import has_permission, resolve_console_actor
 from insightbot.run_history import get_latest_run, get_latest_successful_send
 from insightbot.run_diagnosis import build_no_push_diagnosis, parse_recent_run_summary, summarize_recent_run
 from insightbot.scheduler import create_scheduler
@@ -66,28 +68,29 @@ from insightbot.editorial_pipeline import (
     select_for_category,
     run_editorial_pipeline,
 )
+from insightbot.product import build_change_proposal, build_task_card
 try:
-    from scripts.ui.dry_run import _command_result_to_ui_result, render_inline_dry_run_panel, render_task_run_result
+    from scripts.ui.access_control import render_access_control_page
+    from scripts.ui.dry_run import (
+        analyze_task_execution_readiness,
+        render_dry_run_tab,
+        render_execution_precheck_card,
+        render_inline_dry_run_panel,
+    )
     from scripts.ui.overview import render_task_overview
     from scripts.ui.task_config import render_task_empty_state_wizard
-    from scripts.ui.workbench_layout import (
-        bordered_section,
-        render_page_map,
-        render_section_heading,
-        render_section_note,
-        render_workbench_styles,
-    )
+    from scripts.ui.web_archive import render_web_archive_page
 except ModuleNotFoundError:
-    from ui.dry_run import _command_result_to_ui_result, render_inline_dry_run_panel, render_task_run_result
+    from ui.access_control import render_access_control_page
+    from ui.dry_run import (
+        analyze_task_execution_readiness,
+        render_dry_run_tab,
+        render_execution_precheck_card,
+        render_inline_dry_run_panel,
+    )
     from ui.overview import render_task_overview
     from ui.task_config import render_task_empty_state_wizard
-    from ui.workbench_layout import (
-        bordered_section,
-        render_page_map,
-        render_section_heading,
-        render_section_note,
-        render_workbench_styles,
-    )
+    from ui.web_archive import render_web_archive_page
 
 def main() -> None:
     bot_dir = default_bot_dir()
@@ -122,6 +125,15 @@ def main() -> None:
     def save_secrets_config(secrets: dict) -> None:
         with open(secrets_config_path, "w", encoding="utf-8") as f:
             json.dump(secrets, f, indent=4, ensure_ascii=False)
+
+    def query_param(name: str) -> str:
+        try:
+            value = st.query_params.get(name, "")
+        except Exception:
+            value = ""
+        if isinstance(value, list):
+            return str(value[0]).strip() if value else ""
+        return str(value).strip()
 
     def build_ui_logger() -> logging.Logger:
         logger = logging.getLogger("InsightBot.PromptDebug")
@@ -209,7 +221,8 @@ def main() -> None:
         tasks_data = get_tasks_data()
         referenced = []
         for task_id, task_def in tasks_data.get("tasks", {}).items():
-            if channel_id in (task_def.get("channels", []) or []):
+            task_routes = normalize_channel_routes(task_def.get("channels", []), channels_data={"channels": channels_data.get("channels", {})})
+            if channel_id in [route["channel_id"] for route in task_routes if route.get("channel_id")]:
                 referenced.append(task_def.get("name", task_id))
         return referenced
 
@@ -788,6 +801,15 @@ def main() -> None:
             st.error(f"生成变更提案失败：{exc}")
             return False
 
+    def write_audit(action: str, target: dict, changes: dict) -> None:
+        append_audit_event(
+            bot_dir,
+            actor=console_actor,
+            action=action,
+            target=target,
+            changes=changes,
+        )
+
     def build_task_runtime_config(task_id: str | None) -> dict:
         if not task_id:
             return runtime_config
@@ -795,6 +817,22 @@ def main() -> None:
             return load_tasks_config(task_id, bot_dir)
         except Exception:
             return runtime_config
+
+    def build_effective_task_definition(task_id: str | None, task_def: dict | None, runtime_task_config: dict) -> dict:
+        effective = deepcopy(task_def or {})
+        if not task_id:
+            return effective
+        effective.setdefault("name", runtime_task_config.get("_task_name", task_id))
+        effective.setdefault("pipeline", runtime_task_config.get("_task_pipeline", effective.get("pipeline", "editorial")))
+        if not effective.get("feeds"):
+            effective["feeds"] = deepcopy(runtime_task_config.get("feeds", {}))
+        if not effective.get("search"):
+            effective["search"] = deepcopy(runtime_task_config.get("search", {}))
+        if not effective.get("pipeline_config"):
+            effective["pipeline_config"] = deepcopy((runtime_task_config.get("ai", {}) or {}).get("editorial_pipeline", {}))
+        if not effective.get("channels"):
+            effective["channels"] = deepcopy(runtime_task_config.get("_task_channels", []))
+        return effective
 
     def add_rss_feed_to_task(task_id: str, category: str, feed_url: str, feed_name: str = "") -> bool:
         """Add a single RSS feed into a task section."""
@@ -868,7 +906,9 @@ def main() -> None:
 
     selected_task_id, selected_task = get_selected_task(tasks_data)
     selected_task_runtime_config = build_task_runtime_config(selected_task_id)
-    selected_task_feeds = deepcopy(selected_task_runtime_config.get("feeds", {})) if selected_task else {}
+    selected_effective_task = build_effective_task_definition(selected_task_id, selected_task, selected_task_runtime_config)
+    active_task_name = selected_effective_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
+    selected_task_feeds = deepcopy(selected_effective_task.get("feeds", {})) if selected_effective_task else {}
     selected_task_categories = list(selected_task_feeds.keys())
     selected_task_state = load_task_state(selected_task_id, bot_dir) if selected_task_id else {}
     if selected_task_id:
@@ -883,7 +923,18 @@ def main() -> None:
             )
     else:
         current_revision = ""
-    selected_task_validation = build_task_validation(selected_task_id, selected_task)
+    selected_task_validation = (
+        validate_task_definition(selected_task_id, selected_effective_task, channels_data)
+        if selected_task_id and selected_task
+        else {"status": "not_ready", "is_runnable": False, "issues": [], "summary": {}}
+    )
+    console_actor = resolve_console_actor(query_param("token"), bot_dir=bot_dir)
+    can_manage_tasks = has_permission(console_actor, "manage_tasks")
+    can_run_tasks = has_permission(console_actor, "run_tasks")
+    can_manage_channels = has_permission(console_actor, "manage_channels")
+    can_manage_publication = has_permission(console_actor, "manage_publication")
+    can_manage_subscribers = has_permission(console_actor, "manage_subscribers")
+    can_run_or_manage_tasks = can_manage_tasks or can_run_tasks
 
     st.set_page_config(page_title="营销情报站 | 控制台", layout="wide")
     render_prompt_debug_styles()
@@ -903,6 +954,11 @@ def main() -> None:
         config["ai"] = {}
 
     with st.sidebar:
+        st.header("👤 当前角色")
+        st.caption(f"{console_actor.get('name')} · {console_actor.get('role')}")
+        if console_actor.get("role") == "subscriber":
+            st.warning("当前角色只有查看权限。请使用 operator/admin token 进入管理视图。")
+        st.divider()
         st.header("⚡ 快捷操作")
         task_ids = list(tasks_data.get("tasks", {}).keys())
         if task_ids:
@@ -916,7 +972,9 @@ def main() -> None:
             st.session_state["selected_task_id"] = active_task_id
             selected_task = tasks_data["tasks"].get(selected_task_id, {})
             selected_task_runtime_config = build_task_runtime_config(selected_task_id)
-            selected_task_feeds = deepcopy(selected_task_runtime_config.get("feeds", {}))
+            selected_effective_task = build_effective_task_definition(selected_task_id, selected_task, selected_task_runtime_config)
+            active_task_name = selected_effective_task.get("name", selected_task_id) if selected_task_id else "未选择任务"
+            selected_task_feeds = deepcopy(selected_effective_task.get("feeds", {}))
             selected_task_categories = list(selected_task_feeds.keys())
             selected_task_state = load_task_state(selected_task_id, bot_dir)
             current_revision = build_task_revision(selected_task_runtime_config)
@@ -928,102 +986,79 @@ def main() -> None:
                     bot_dir=bot_dir,
                     last_validated_revision=selected_task_state.get("last_validated_revision"),
                 )
-            selected_task_validation = build_task_validation(selected_task_id, selected_task)
-            selected_pipeline_label = PIPELINE_LABELS.get(
-                selected_task.get("pipeline", "editorial"),
-                selected_task.get("pipeline", "editorial"),
-            )
+            selected_task_validation = validate_task_definition(selected_task_id, selected_effective_task, channels_data)
             st.caption(
-                f"生成流程：{selected_pipeline_label} | "
-                f"频道：{len(selected_task.get('channels', []))} 个 | "
-                f"栏目：{len(selected_task_categories)} 个"
+                f"Pipeline: `{selected_effective_task.get('pipeline', 'editorial')}` | "
+                f"Channels: {len(selected_effective_task.get('channels', []))} | "
+                f"Categories: {len(selected_task_categories)}"
             )
         else:
             st.info("暂无任务，请先在任务管理页面创建。")
 
-        st.markdown("**➕ 创建新任务**")
-        quick_new_task_id = st.text_input(
-            "任务 ID",
-            placeholder="e.g. weekly_report",
-            key="quick_create_task_id",
-        )
-        quick_new_task_name = st.text_input(
-            "任务名称",
-            placeholder="每周深度报告",
-            key="quick_create_task_name",
-        )
-        quick_col1, quick_col2, quick_col3 = st.columns([1.2, 1, 1])
-        with quick_col1:
-            quick_new_task_pipeline = st.selectbox(
-                "生成流程",
-                options=["editorial", "classic"],
-                index=0,
-                key="quick_create_task_pipeline",
-                format_func=label_for(PIPELINE_LABELS),
+        if can_manage_tasks:
+            st.markdown("**➕ 创建新任务**")
+            quick_new_task_id = st.text_input(
+                "任务 ID",
+                placeholder="e.g. weekly_report",
+                key="quick_create_task_id",
             )
-        with quick_col2:
-            quick_new_task_hour = st.number_input("小时", 0, 23, 8, key="quick_create_task_hour")
-        with quick_col3:
-            quick_new_task_min = st.number_input("分钟", 0, 59, 0, key="quick_create_task_min")
+            quick_new_task_name = st.text_input(
+                "任务名称",
+                placeholder="每周深度报告",
+                key="quick_create_task_name",
+            )
+            quick_col1, quick_col2, quick_col3 = st.columns([1.2, 1, 1])
+            with quick_col1:
+                quick_new_task_pipeline = st.selectbox(
+                    "Pipeline",
+                    options=["editorial", "classic"],
+                    index=0,
+                    key="quick_create_task_pipeline",
+                )
+            with quick_col2:
+                quick_new_task_hour = st.number_input("小时", 0, 23, 8, key="quick_create_task_hour")
+            with quick_col3:
+                quick_new_task_min = st.number_input("分钟", 0, 59, 0, key="quick_create_task_min")
 
-        if st.button("创建任务", key="quick_create_task_btn", use_container_width=True):
-            tasks_data = get_tasks_data()
-            tasks = tasks_data.get("tasks", {})
-            if quick_new_task_id and not is_safe_id(quick_new_task_id):
-                st.error("任务 ID 只能使用英文字母、数字、下划线和连字符，长度 1-64。")
-            elif quick_new_task_id and quick_new_task_id not in tasks:
-                new_task_def = {
-                    "name": quick_new_task_name or quick_new_task_id,
-                    "enabled": False,
-                    "pipeline": quick_new_task_pipeline,
-                    "sources": deepcopy(get_task_sources(selected_task)),
-                    "sections": deepcopy(get_task_sections(selected_task)),
-                    "pipeline_config": deepcopy(get_editorial_defaults()),
-                    "channels": deepcopy((selected_task or {}).get("channels", [])),
-                    "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
-                }
-                if hasattr(scheduler, "create_task_command"):
-                    result = scheduler.create_task_command(
-                        quick_new_task_id,
-                        new_task_def,
-                        intent="Create task from Streamlit quick action",
-                        rationale="User created a task in the sidebar quick action.",
-                    )
-                    if not result.ok:
-                        st.error(result.error or "创建任务失败")
-                        st.stop()
-                    else:
-                        st.session_state[f"last_changeset::{quick_new_task_id}"] = result.changeset.to_dict() if result.changeset else None
-                else:
-                    tasks[quick_new_task_id] = new_task_def
+            if st.button("创建任务", key="quick_create_task_btn", use_container_width=True):
+                tasks_data = get_tasks_data()
+                tasks = tasks_data.get("tasks", {})
+                if quick_new_task_id and quick_new_task_id not in tasks:
+                    tasks[quick_new_task_id] = {
+                        "name": quick_new_task_name or quick_new_task_id,
+                        "enabled": False,
+                        "pipeline": quick_new_task_pipeline,
+                        "feeds": deepcopy(selected_task_feeds or config.get("feeds", {})),
+                        "pipeline_config": deepcopy(get_editorial_defaults()),
+                        "search": deepcopy((selected_task or {}).get("search", config.get("search", {}))),
+                        "channels": deepcopy((selected_task or {}).get("channels", [])),
+                        "schedule": {"hour": int(quick_new_task_hour), "minute": int(quick_new_task_min)},
+                    }
                     save_tasks(tasks_data, bot_dir)
                     scheduler.reload()
-                mark_task_changed(quick_new_task_id)
-                st.session_state["selected_task_id"] = quick_new_task_id
-                st.success(f"任务「{quick_new_task_id}」已创建。")
-                st.rerun()
-            elif quick_new_task_id in tasks:
-                st.error("任务 ID 已存在。")
+                    mark_task_changed(quick_new_task_id)
+                    write_audit(
+                        "tasks.create",
+                        {"type": "task", "id": quick_new_task_id},
+                        tasks[quick_new_task_id],
+                    )
+                    st.session_state["selected_task_id"] = quick_new_task_id
+                    st.success(f"任务「{quick_new_task_id}」已创建。")
+                    st.rerun()
+                elif quick_new_task_id in tasks:
+                    st.error("任务 ID 已存在。")
+        else:
+            st.info("当前角色不能创建或修改任务。")
 
-        if st.button("准备 Run & Send 确认", type="primary", use_container_width=True, disabled=not bool(selected_task_id)):
-            latest_run_for_approval = get_latest_run(selected_task_id, bot_dir) if selected_task_id else None
-            approval_card = build_task_card(
-                selected_task_spec,
-                selected_task_validation,
-                latest_run_for_approval,
-                get_latest_successful_send(selected_task_id, bot_dir) if selected_task_id else None,
-                load_task_health(selected_task_id, bot_dir) if selected_task_id else None,
-            )
-            st.session_state[f"pending_send::{selected_task_id}"] = {
-                "task_id": selected_task_id,
-                "task_name": approval_card.get("name") or selected_task_id,
-                "task_version_id": approval_card.get("task_version_id"),
-                "channels": approval_card.get("channels") or [],
-                "risk_summary": approval_card.get("risk_summary") or {},
-                "dry_run_checked": bool(latest_run_for_approval and latest_run_for_approval.get("dry_run")),
-                "diagnosis": {},
-            }
-            st.info("已生成发送确认卡。请到 Today 检查后确认发送。")
+        if st.button(
+            "▶️ 立即手动运行",
+            type="primary",
+            use_container_width=True,
+            disabled=not can_run_or_manage_tasks,
+        ):
+            with st.spinner("AI 正在全网检索并撰写简报..."):
+                subprocess.run([sys.executable, "-m", "insightbot.cli"])
+                st.success("运行指令已发送，请查看企业微信或日志。")
 
         st.divider()
         st.header("⏳ 调度器状态")
@@ -1033,7 +1068,7 @@ def main() -> None:
         total_count = len(tasks_def.get("tasks", {}))
         st.metric("活跃任务", f"{enabled_count}/{total_count}")
 
-        if st.button("🚀 运行所有已启用任务", use_container_width=True):
+        if st.button("🚀 运行所有已启用任务", use_container_width=True, disabled=not can_run_or_manage_tasks):
             with st.spinner("正在运行所有已启用任务..."):
                 results = scheduler.run_all_enabled()
             for r in results:
@@ -1079,16 +1114,30 @@ def main() -> None:
     tab3 = tab_investigate
     tab4 = tab_investigate
     tab5 = tab_configure
+    tab6 = tab_investigate
+    tab7 = tab_investigate
+    tab8 = tab_configure
 
     with tab0:
-        render_page_map(
-            "本页板块",
-            [
-                ("✅ 今天判断", "today-decision"),
-                ("📤 发送确认", "today-send"),
-                ("🧾 最近操作", "today-result"),
-                ("🗂️ 运营细节", "today-operations"),
-            ],
+        render_task_overview(
+            selected_task_id=selected_task_id,
+            selected_task=selected_task,
+            selected_effective_task=selected_effective_task,
+            selected_task_categories=selected_task_categories,
+            selected_task_validation=selected_task_validation,
+            selected_task_state=selected_task_state,
+            latest_run_record=latest_run_record,
+            latest_success_record=latest_success_record,
+            health_snapshot=overview_health_snapshot,
+            run_metrics=overview_run_metrics,
+            diagnosis_cards=overview_diagnosis_cards,
+            prompt_history=overview_prompt_history,
+            task_state_label=task_state_label,
+            task_state_class=task_state_class,
+            task_state_copy=task_state_copy,
+            format_timestamp=format_timestamp,
+            render_operating_chip=render_operating_chip,
+            render_diagnosis_card=render_diagnosis_card,
         )
         if selected_task_id:
             task_card = workspace_state.get("selected_task_card") or build_task_card(
@@ -1254,7 +1303,7 @@ def main() -> None:
     # ── Tab 1: 任务管理 ────────────────────────────────────────────────────────
     with tab1:
         st.subheader("Configure / 任务设置")
-        st.caption("按顺序完成：任务基本信息 -> 信源 -> 栏目 -> 生成策略 -> 变更确认。日常只需要改前两步，高级项默认折叠。")
+        st.caption("按顺序完成：任务基本信息 -> 信源 -> 栏目 -> 生成策略 -> 变更确认卡。日常只需要改前两步，高级项默认折叠。")
         render_page_map(
             "本页板块",
             [
@@ -1263,12 +1312,14 @@ def main() -> None:
                 ("📂 栏目", "configure-sections"),
                 ("🔎 搜索补充", "configure-search"),
                 ("🧠 生成策略", "configure-strategy"),
-                ("🔐 变更确认", "configure-approval"),
+                ("🔐 变更确认卡", "configure-approval"),
             ],
         )
 
         tasks = tasks_data.get("tasks", {})
-        if not tasks or not selected_task_id:
+        if not can_manage_tasks:
+            st.warning("当前角色不能修改任务配置。管理员可以通过 token 进入任务管理视图。")
+        elif not tasks or not selected_task_id:
             st.info("暂没有任务，请先在下方创建。")
         else:
             task_def = normalize_task_definition(deepcopy(tasks.get(selected_task_id, {})))
@@ -1347,13 +1398,94 @@ def main() -> None:
 
             channels_data = load_channels(bot_dir)
             all_channel_ids = list(channels_data.get("channels", {}).keys())
+            existing_channel_routes = normalize_channel_routes(task_def.get("channels", []), channels_data)
+            existing_route_map = {
+                route["channel_id"]: route
+                for route in existing_channel_routes
+            }
             selected_channels = st.multiselect(
                 "目标频道",
                 options=all_channel_ids,
-                default=task_def.get("channels", []),
+                default=[route["channel_id"] for route in existing_channel_routes if route["channel_id"] in all_channel_ids],
                 key=f"task_channels_{selected_task_id}",
                 format_func=lambda channel_id: format_channel_option(channel_id, channels_data),
             )
+            channel_route_rows: list[dict] = []
+            if selected_channels:
+                with st.expander("频道路由细节", expanded=False):
+                    st.caption("用于精细控制：什么任务，通过什么渠道，发给谁，用于什么场景。留空则按默认推送处理。")
+                    for route_channel_id in selected_channels:
+                        route_defaults = existing_route_map.get(route_channel_id, {})
+                        route_col1, route_col2, route_col3 = st.columns([1.2, 1.2, 1])
+                        with route_col1:
+                            audience = st.text_input(
+                                f"{route_channel_id} 接收对象",
+                                value=route_defaults.get("audience", ""),
+                                placeholder="例如：管理层 / 订阅者 / 运营组",
+                                key=f"task_route_audience_{selected_task_id}_{route_channel_id}",
+                            ).strip()
+                        with route_col2:
+                            purpose = st.text_input(
+                                f"{route_channel_id} 用途",
+                                value="" if route_defaults.get("purpose", "default") == "default" else route_defaults.get("purpose", ""),
+                                placeholder="例如：summary / archive / alert",
+                                key=f"task_route_purpose_{selected_task_id}_{route_channel_id}",
+                            ).strip()
+                        with route_col3:
+                            enabled = st.toggle(
+                                "启用",
+                                value=bool(route_defaults.get("enabled", True)),
+                                key=f"task_route_enabled_{selected_task_id}_{route_channel_id}",
+                            )
+                        channel_route_rows.append(
+                            {
+                                "channel_id": route_channel_id,
+                                "audience": audience,
+                                "purpose": purpose or "default",
+                                "enabled": bool(enabled),
+                            }
+                        )
+
+                if channel_route_rows:
+                    st.table(
+                        [
+                            {
+                                "频道": row["channel_id"],
+                                "接收对象": row["audience"] or "默认对象",
+                                "用途": row["purpose"] or "default",
+                                "启用": "是" if row["enabled"] else "否",
+                            }
+                            for row in channel_route_rows
+                        ]
+                    )
+
+                route_preview = [
+                    f"{item['channel_id']} → {item.get('audience') or '默认接收对象'} → {item.get('purpose') or 'default'}"
+                    for item in channel_route_rows
+                    if item.get("enabled")
+                ]
+                if route_preview:
+                    st.caption("路由预览：" + "；".join(route_preview))
+
+            def _build_normalized_task_channels(
+                channel_rows: list[dict],
+            ) -> tuple[list[str], list[str] | list[dict[str, object]]]:
+                """返回落盘渠道 ID 列表与落盘内容（字符串列表或路由对象列表）。"""
+                enabled_rows = [row for row in channel_rows if row.get("enabled")]
+                explicit_route_payload: list[dict[str, object]] = []
+                for row in enabled_rows:
+                    explicit_route_payload.append(
+                        {
+                            "channel_id": row["channel_id"],
+                            "enabled": True,
+                            "audience": row.get("audience", ""),
+                            "purpose": row.get("purpose", "default"),
+                        }
+                    )
+
+                if any((row.get("audience") or row.get("purpose", "default") != "default") for row in enabled_rows):
+                    return [row["channel_id"] for row in enabled_rows], explicit_route_payload
+                return [row["channel_id"] for row in enabled_rows], [row["channel_id"] for row in enabled_rows]
 
             render_section_heading(
                 "📺 大屏:这条任务要不要上电视",
@@ -1812,6 +1944,8 @@ def main() -> None:
                     ).strip()
                     st.caption("运行时凭证会优先写入 config.secrets.json；如果你改用本地 runtime，后续也可以完全迁移到环境变量。")
 
+            _, planned_channel_payload = _build_normalized_task_channels(channel_route_rows)
+
             save_col1, save_col2 = st.columns([1, 1])
             with save_col1:
                 if st.button("生成配置变更提案", key=f"save_task_all_{selected_task_id}", use_container_width=True):
@@ -1822,7 +1956,7 @@ def main() -> None:
                     proposed_task_def["name"] = new_name
                     proposed_task_def["enabled"] = new_enabled
                     proposed_task_def["pipeline"] = new_pipeline
-                    proposed_task_def["channels"] = selected_channels
+                    proposed_task_def["channels"] = planned_channel_payload
                     proposed_task_def["screen"] = {
                         "enabled": bool(screen_enabled),
                         "theme": screen_theme,
@@ -1939,6 +2073,7 @@ def main() -> None:
             with save_col2:
                 if st.button("🗑️ 删除当前任务", key=f"del_task_{selected_task_id}", use_container_width=True):
                     tasks_data = get_tasks_data()
+                    deleted_task = tasks_data.get("tasks", {}).get(selected_task_id)
                     if hasattr(scheduler, "delete_task_command"):
                         result = scheduler.delete_task_command(
                             selected_task_id,
@@ -1953,6 +2088,11 @@ def main() -> None:
                         save_tasks(tasks_data, bot_dir)
                         scheduler.reload()
                     st.session_state.pop(f"task_search_queries::{selected_task_id}", None)
+                    write_audit(
+                        "tasks.delete",
+                        {"type": "task", "id": selected_task_id},
+                        deleted_task or {},
+                    )
                     tasks_data = get_tasks_data()
                     next_task_id = next(iter(tasks_data.get("tasks", {})), None)
                     st.session_state["selected_task_id"] = next_task_id
@@ -1974,203 +2114,209 @@ def main() -> None:
             ],
         )
 
-        channels_data = load_channels(bot_dir)
-        if "channels" not in channels_data:
-            channels_data = {"channels": {}}
+        if not can_manage_channels:
+            st.warning("当前角色不能管理 Channels。请使用管理员 token。")
+        else:
+            channels_data = load_channels(bot_dir)
+            if "channels" not in channels_data:
+                channels_data = {"channels": {}}
 
-        channel_ids = list(channels_data["channels"].keys())
-        render_section_heading(
-            "📣 已有频道",
-            "每个频道以卡片折叠呈现；先看名称和类型，需要改凭证时再展开。",
-            anchor="channels-existing",
-        )
-        for ch_id in channel_ids:
-            ch = channels_data["channels"][ch_id]
-            channel_type_label = CHANNEL_TYPE_LABELS.get(ch.get("type", ""), ch.get("type", "未指定类型"))
-            with st.expander(f"📣 {ch.get('name', ch_id)}（{channel_type_label}）", expanded=False):
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    new_ch_name = st.text_input("名称", value=ch.get("name", ""), key=f"ch_name_{ch_id}")
-                channel_type_options = ["wecom", "feishu_app", "feishu_bot"]
-                current_type = ch.get("type", "wecom")
-                if current_type not in channel_type_options:
-                    current_type = "wecom"
-                with col2:
-                    new_ch_type = st.selectbox(
-                        "类型",
-                        options=channel_type_options,
-                        index=channel_type_options.index(current_type),
-                        key=f"ch_type_{ch_id}",
-                        format_func=label_for(CHANNEL_TYPE_LABELS),
-                    )
+            channel_ids = list(channels_data["channels"].keys())
+            for ch_id in channel_ids:
+                ch = channels_data["channels"][ch_id]
+                with st.expander(f"**{ch.get('name', ch_id)}** (`{ch_id}`)"):
+                    col1, col2 = st.columns([1, 1])
+                    with col1:
+                        new_ch_name = st.text_input("名称", value=ch.get("name", ""), key=f"ch_name_{ch_id}")
+                    channel_type_options = ["wecom", "feishu_app", "feishu_bot", "web_archive"]
+                    current_type = ch.get("type", "wecom")
+                    if current_type not in channel_type_options:
+                        current_type = "wecom"
+                    with col2:
+                        new_ch_type = st.selectbox(
+                            "类型",
+                            options=channel_type_options,
+                            index=channel_type_options.index(current_type),
+                            format_func=label_for(CHANNEL_TYPE_LABELS),
+                            key=f"ch_type_{ch_id}",
+                        )
 
-                channel_payload = {
-                    "type": new_ch_type,
-                    "name": new_ch_name,
-                }
-                if new_ch_type == "wecom":
-                    new_cid = st.text_input("企业 ID（Corp ID / cid）", value=ch.get("cid", ""), key=f"ch_cid_{ch_id}")
-                    new_secret = st.text_input("应用密钥（Secret）", value=ch.get("secret", ""), type="password", key=f"ch_secret_{ch_id}")
-                    new_agent_id = st.text_input("应用 Agent ID", value=ch.get("agent_id", ""), key=f"ch_agent_{ch_id}")
-                    channel_payload.update({
-                        "cid": new_cid,
-                        "secret": new_secret,
-                        "agent_id": new_agent_id,
-                    })
-                elif new_ch_type == "feishu_app":
-                    st.caption("推荐方式：飞书应用鉴权后走官方消息 API；消息发送支持 richer message 卡片。")
-                    new_app_id = st.text_input("飞书 App ID", value=ch.get("app_id", ""), key=f"ch_feishu_app_id_{ch_id}")
-                    new_app_secret = st.text_input(
-                        "飞书 App Secret",
-                        value=ch.get("app_secret", ""),
-                        type="password",
-                        key=f"ch_feishu_app_secret_{ch_id}",
-                    )
-                    new_receive_id = st.text_input(
-                        "接收对象 ID",
-                        value=ch.get("receive_id", ""),
-                        key=f"ch_feishu_receive_id_{ch_id}",
-                    )
-                    receive_id_type_options = ["chat_id", "open_id", "user_id", "union_id", "email"]
-                    current_receive_id_type = ch.get("receive_id_type", "chat_id")
-                    if current_receive_id_type not in receive_id_type_options:
-                        current_receive_id_type = "chat_id"
-                    new_receive_id_type = st.selectbox(
-                        "接收对象类型",
-                        options=receive_id_type_options,
-                        index=receive_id_type_options.index(current_receive_id_type),
-                        key=f"ch_feishu_receive_id_type_{ch_id}",
-                        format_func=label_for(RECEIVE_ID_TYPE_LABELS),
-                    )
-                    message_template_options = ["interactive", "text"]
-                    current_message_template = ch.get("message_template", "interactive")
-                    if current_message_template not in message_template_options:
-                        current_message_template = "interactive"
-                    new_message_template = st.selectbox(
-                        "消息模板",
-                        options=message_template_options,
-                        index=message_template_options.index(current_message_template),
-                        key=f"ch_feishu_message_template_{ch_id}",
-                        format_func=label_for(MESSAGE_TEMPLATE_LABELS),
-                    )
-                    channel_payload.update({
-                        "app_id": new_app_id,
-                        "app_secret": new_app_secret,
-                        "receive_id": new_receive_id,
-                        "receive_id_type": new_receive_id_type,
-                        "message_template": new_message_template,
-                    })
-                else:
-                    new_webhook_url = st.text_input(
-                        "Webhook 地址",
-                        value=ch.get("webhook_url", ""),
-                        key=f"ch_webhook_{ch_id}",
-                    )
-                    new_mention_all = st.toggle(
-                        "测试和发送时 @所有人",
-                        value=bool(ch.get("mention_all", False)),
-                        key=f"ch_mention_all_{ch_id}",
-                    )
-                    channel_payload.update({
-                        "webhook_url": new_webhook_url,
-                        "mention_all": new_mention_all,
-                    })
+                    channel_payload = {
+                        "type": new_ch_type,
+                        "name": new_ch_name,
+                    }
+                    if new_ch_type == "wecom":
+                        new_cid = st.text_input("Corp ID (cid)", value=ch.get("cid", ""), key=f"ch_cid_{ch_id}")
+                        new_secret = st.text_input("Secret", value=ch.get("secret", ""), type="password", key=f"ch_secret_{ch_id}")
+                        new_agent_id = st.text_input("Agent ID", value=ch.get("agent_id", ""), key=f"ch_agent_{ch_id}")
+                        channel_payload.update({
+                            "cid": new_cid,
+                            "secret": new_secret,
+                            "agent_id": new_agent_id,
+                        })
+                    elif new_ch_type == "feishu_app":
+                        st.caption("推荐方式：飞书应用鉴权后走官方消息 API；消息发送支持 richer message 卡片。")
+                        new_app_id = st.text_input("App ID", value=ch.get("app_id", ""), key=f"ch_feishu_app_id_{ch_id}")
+                        new_app_secret = st.text_input(
+                            "App Secret",
+                            value=ch.get("app_secret", ""),
+                            type="password",
+                            key=f"ch_feishu_app_secret_{ch_id}",
+                        )
+                        new_receive_id = st.text_input(
+                            "接收对象 ID",
+                            value=ch.get("receive_id", ""),
+                            key=f"ch_feishu_receive_id_{ch_id}",
+                        )
+                        receive_id_type_options = ["chat_id", "open_id", "user_id", "union_id", "email"]
+                        current_receive_id_type = ch.get("receive_id_type", "chat_id")
+                        if current_receive_id_type not in receive_id_type_options:
+                            current_receive_id_type = "chat_id"
+                        new_receive_id_type = st.selectbox(
+                            "接收对象类型",
+                            options=receive_id_type_options,
+                            index=receive_id_type_options.index(current_receive_id_type),
+                            key=f"ch_feishu_receive_id_type_{ch_id}",
+                        )
+                        message_template_options = ["interactive", "text"]
+                        current_message_template = ch.get("message_template", "interactive")
+                        if current_message_template not in message_template_options:
+                            current_message_template = "interactive"
+                        new_message_template = st.selectbox(
+                            "消息模板",
+                            options=message_template_options,
+                            index=message_template_options.index(current_message_template),
+                            key=f"ch_feishu_message_template_{ch_id}",
+                        )
+                        channel_payload.update({
+                            "app_id": new_app_id,
+                            "app_secret": new_app_secret,
+                            "receive_id": new_receive_id,
+                            "receive_id_type": new_receive_id_type,
+                            "message_template": new_message_template,
+                        })
+                    elif new_ch_type == "feishu_bot":
+                        new_webhook_url = st.text_input(
+                            "Webhook URL",
+                            value=ch.get("webhook_url", ""),
+                            key=f"ch_webhook_{ch_id}",
+                        )
+                        new_mention_all = st.toggle(
+                            "测试和发送时 @所有人",
+                            value=bool(ch.get("mention_all", False)),
+                            key=f"ch_mention_all_{ch_id}",
+                        )
+                        channel_payload.update({
+                            "webhook_url": new_webhook_url,
+                            "mention_all": new_mention_all,
+                        })
+                    else:
+                        st.caption("Web Archive 是虚拟频道：任务发送到这里时，会保存成订阅者页面可浏览的历史记录。")
+                        public_name = st.text_input(
+                            "页面显示名称",
+                            value=ch.get("public_name", ch.get("name", "")),
+                            key=f"ch_web_archive_public_name_{ch_id}",
+                        )
+                        channel_payload.update({"public_name": public_name})
 
-                render_channel_validation(ch_id, channel_payload)
+                    render_channel_validation(ch_id, channel_payload)
 
-                col_btn1, col_btn2, col_btn3 = st.columns(3)
-                with col_btn1:
-                    if st.button("💾 保存", key=f"ch_save_{ch_id}"):
-                        channels_data["channels"][ch_id] = channel_payload
-                        save_channels(channels_data, bot_dir)
-                        init_channels(channels_data)
-                        mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
-                        st.success("已保存！")
-                        st.rerun()
-                with col_btn2:
-                    if st.button("🧪 测试联通性", key=f"ch_test_{ch_id}"):
-                        try:
-                            ok = test_channel_config(ch_id, channel_payload)
-                            if ok:
-                                st.success("✅ 频道连通性测试成功！")
-                            else:
-                                st.error("❌ 频道连通性测试失败，请检查配置。")
-                        except Exception as e:
-                            st.error(f"错误: {e}")
-                with col_btn3:
-                    if st.button("🗑️ 删除", key=f"ch_del_{ch_id}"):
-                        referenced_tasks = get_channel_reference_tasks(ch_id)
-                        if referenced_tasks:
-                            st.error(
-                                "该频道仍被以下任务引用，不能直接删除："
-                                + "、".join(referenced_tasks)
-                            )
-                        else:
-                            channels_data["channels"].pop(ch_id, None)
+                    col_btn1, col_btn2, col_btn3 = st.columns(3)
+                    with col_btn1:
+                        if st.button("💾 保存", key=f"ch_save_{ch_id}"):
+                            channels_data["channels"][ch_id] = channel_payload
                             save_channels(channels_data, bot_dir)
                             init_channels(channels_data)
                             mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
-                            st.success("已删除！")
+                            write_audit(
+                                "channels.update",
+                                {"type": "channel", "id": ch_id},
+                                channel_payload,
+                            )
+                            st.success("已保存！")
                             st.rerun()
+                    with col_btn2:
+                        if st.button("🧪 测试联通性", key=f"ch_test_{ch_id}"):
+                            try:
+                                ok = test_channel_config(ch_id, channel_payload)
+                                if ok:
+                                    st.success("✅ 频道连通性测试成功！")
+                                else:
+                                    st.error("❌ 频道连通性测试失败，请检查配置。")
+                            except Exception as e:
+                                st.error(f"错误: {e}")
+                    with col_btn3:
+                        if st.button("🗑️ 删除", key=f"ch_del_{ch_id}"):
+                            referenced_tasks = get_channel_reference_tasks(ch_id)
+                            if referenced_tasks:
+                                st.error(
+                                    "该频道仍被以下任务引用，不能直接删除："
+                                    + "、".join(referenced_tasks)
+                                )
+                            else:
+                                deleted_channel = channels_data["channels"].pop(ch_id, None)
+                                save_channels(channels_data, bot_dir)
+                                init_channels(channels_data)
+                                mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
+                                write_audit(
+                                    "channels.delete",
+                                    {"type": "channel", "id": ch_id},
+                                    deleted_channel or {},
+                                )
+                                st.success("已删除！")
+                                st.rerun()
 
-        render_section_heading(
-            "🧪 联通测试",
-            "展开任一频道卡片后，可使用卡片内的测试按钮检查凭证和通道是否可用。",
-            anchor="channels-test",
-        )
-        if not channel_ids:
-            st.info("暂无频道。先在下方添加频道后再测试联通性。")
+            st.divider()
+            st.markdown("**➕ 添加新频道**")
+            col_n1, col_n2, col_n3 = st.columns([2, 1, 1])
+            with col_n1:
+                new_ch_id = st.text_input("频道 ID（唯一标识）", placeholder="wecom_test")
+            with col_n2:
+                new_ch_name_input = st.text_input("名称", placeholder="测试频道")
+            with col_n3:
+                new_ch_type_input = st.selectbox("类型", options=["wecom", "feishu_app", "feishu_bot", "web_archive"], index=0)
 
-        st.divider()
-        render_section_heading("➕ 添加新频道", "新增后再展开频道卡片补齐凭证并测试联通性。", anchor="channels-add")
-        col_n1, col_n2, col_n3 = st.columns([2, 1, 1])
-        with col_n1:
-            new_ch_id = st.text_input("频道 ID（唯一标识）", placeholder="wecom_test")
-        with col_n2:
-            new_ch_name_input = st.text_input("名称", placeholder="测试频道")
-        with col_n3:
-            new_ch_type_input = st.selectbox(
-                "类型",
-                options=["wecom", "feishu_app", "feishu_bot"],
-                index=0,
-                format_func=label_for(CHANNEL_TYPE_LABELS),
-            )
-
-        if st.button("添加频道", key="add_channel_btn"):
-            if new_ch_id and not is_safe_id(new_ch_id):
-                st.error("频道 ID 只能使用英文字母、数字、下划线和连字符，长度 1-64。")
-            elif new_ch_id and new_ch_id not in channels_data["channels"]:
-                channels_data["channels"][new_ch_id] = {
-                    "type": new_ch_type_input,
-                    "name": new_ch_name_input or new_ch_id,
-                }
-                if new_ch_type_input == "wecom":
-                    channels_data["channels"][new_ch_id].update({
-                        "cid": "",
-                        "secret": "",
-                        "agent_id": "",
-                    })
-                elif new_ch_type_input == "feishu_app":
-                    channels_data["channels"][new_ch_id].update({
-                        "app_id": "",
-                        "app_secret": "",
-                        "receive_id": "",
-                        "receive_id_type": "chat_id",
-                        "message_template": "interactive",
-                    })
-                else:
-                    channels_data["channels"][new_ch_id].update({
-                        "webhook_url": "",
-                        "mention_all": False,
-                    })
-                save_channels(channels_data, bot_dir)
-                init_channels(channels_data)
-                mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
-                st.success(f"频道「{new_ch_id}」已添加！")
-                st.rerun()
-            elif new_ch_id in channels_data["channels"]:
-                st.error("频道 ID 已存在。")
-
+            if st.button("添加频道", key="add_channel_btn"):
+                if new_ch_id and new_ch_id not in channels_data["channels"]:
+                    channels_data["channels"][new_ch_id] = {
+                        "type": new_ch_type_input,
+                        "name": new_ch_name_input or new_ch_id,
+                    }
+                    if new_ch_type_input == "wecom":
+                        channels_data["channels"][new_ch_id].update({
+                            "cid": "",
+                            "secret": "",
+                            "agent_id": "",
+                        })
+                    elif new_ch_type_input == "feishu_app":
+                        channels_data["channels"][new_ch_id].update({
+                            "app_id": "",
+                            "app_secret": "",
+                            "receive_id": "",
+                            "receive_id_type": "chat_id",
+                            "message_template": "interactive",
+                        })
+                    elif new_ch_type_input == "feishu_bot":
+                        channels_data["channels"][new_ch_id].update({
+                            "webhook_url": "",
+                            "mention_all": False,
+                        })
+                    else:
+                        channels_data["channels"][new_ch_id].update({
+                            "public_name": new_ch_name_input or new_ch_id,
+                        })
+                    save_channels(channels_data, bot_dir)
+                    init_channels(channels_data)
+                    mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
+                    write_audit(
+                        "channels.create",
+                        {"type": "channel", "id": new_ch_id},
+                        channels_data["channels"][new_ch_id],
+                    )
+                    st.success(f"频道「{new_ch_id}」已添加！")
+                    st.rerun()
+                elif new_ch_id in channels_data["channels"]:
+                    st.error("频道 ID 已存在。")
     with tab3:
         st.subheader("Investigate / 排查")
         st.caption("先看证据链判断卡在哪里：信源、候选、AI 筛选、输出或发送。需要深挖时再展开下面的调试工具。")
@@ -2249,11 +2395,64 @@ def main() -> None:
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
+        precheck_col1, precheck_col2 = st.columns([1.2, 1])
+        with precheck_col1:
+            if st.button(
+                "🧪 一键预检（Dry Run + 刷新健康）",
+                type="secondary",
+                key=f"run_verification_precheck::{selected_task_id}",
+                disabled=not bool(selected_task_id and can_run_or_manage_tasks),
+                use_container_width=True,
+            ):
+                if not selected_task_id:
+                    st.warning("请先选择任务后再运行预检。")
+                else:
+                    with st.spinner("正在执行本地预检（Dry Run + 健康快照）..."):
+                        health_snapshot = get_feed_health_snapshot(
+                            selected_task_feeds,
+                            bot_dir=bot_dir,
+                            use_cache=False,
+                            force_refresh=True,
+                        )
+                        save_task_health(health_snapshot, selected_task_id, bot_dir)
+                        selected_task_state = touch_revalidation_state(
+                            task_id=selected_task_id,
+                            config_revision=selected_task_state.get("config_revision", current_revision),
+                            needs_revalidation=False,
+                            bot_dir=bot_dir,
+                            last_validated_revision=selected_task_state.get("config_revision", current_revision),
+                        )
+                        run_dry_run_task(
+                            scheduler=scheduler,
+                            task_id=selected_task_id,
+                            task_def=selected_effective_task,
+                            state_key=f"verification_dry_run::{selected_task_id}",
+                        )
+                    st.success("本地预检完成：健康快照已刷新，Dry Run 已执行（未触发真实发送）。")
+                    st.rerun()
+        with precheck_col2:
+            st.caption("预检会触发两件事：重新取 RSS 健康快照 + Dry Run。都不涉及真实渠道发送。")
+
+        readiness = analyze_task_execution_readiness(
+            selected_task_id=selected_task_id,
+            selected_task=selected_effective_task,
+            task_validation=selected_task_validation,
+            task_state=selected_task_state,
+            channels_data=channels_data,
+            run_summary=run_summary,
+            latest_run_record=latest_run_record,
+            latest_success_record=latest_success_record,
+            health_snapshot=health_snapshot,
+            latest_dry_run=st.session_state.get(f"verification_dry_run::{selected_task_id}") if selected_task_id else None,
+        )
+        render_execution_precheck_card(readiness)
+
         render_inline_dry_run_panel(
             selected_task_id=selected_task_id,
             selected_task=selected_task,
             scheduler=scheduler,
             summarize_task_debug_result=summarize_task_debug_result,
+            run_enabled=can_run_or_manage_tasks,
         )
 
         if focused_category:
@@ -2619,15 +2818,6 @@ def main() -> None:
     with tab4:
         st.subheader("Investigate / 深度日志")
         st.caption("日志已开启企业级轮转模式（自动保留 30 天，每日切割）。默认优先展示当前任务相关日志，便于快速排查。")
-        render_page_map(
-            "本页板块",
-            [
-                ("🔄 刷新日志", "deep-logs-refresh"),
-                ("📥 下载完整日志", "deep-logs-download"),
-                ("📜 当前任务相关日志", "deep-logs-task"),
-                ("🧾 最近全量日志", "deep-logs-all"),
-            ],
-        )
         st.markdown(
             f'<div class="ib-chip-row"><span class="ib-chip ib-chip-neutral">当前任务: {active_task_name}</span>'
             f'<span class="ib-chip ib-chip-neutral">任务 ID: {selected_task_id or "未选择"}</span></div>',
@@ -2706,6 +2896,29 @@ def main() -> None:
             save_config(config)
             mark_tasks_changed(list(get_tasks_data().get("tasks", {}).keys()))
             st.toast("设置已生效！")
+
+    with tab6:
+        render_dry_run_tab(
+            tasks=load_tasks(bot_dir).get("tasks", {}),
+            selected_task_id=selected_task_id,
+            scheduler=scheduler,
+            summarize_task_debug_result=summarize_task_debug_result,
+        )
+
+    with tab7:
+        render_web_archive_page(
+            bot_dir=bot_dir,
+            can_manage_publication=can_manage_publication,
+            actor=console_actor,
+        )
+
+    with tab8:
+        if can_manage_subscribers:
+            render_access_control_page(bot_dir=bot_dir, actor=console_actor)
+        else:
+            st.subheader("权限")
+            st.warning("当前角色不能管理订阅者与权限。请使用管理员 token。")
+
 
 if __name__ == "__main__":
     main()
