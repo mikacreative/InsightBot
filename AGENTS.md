@@ -6,7 +6,7 @@ InsightBot is Mika's marketing intelligence bot. Use Chinese for working communi
 
 - Product and usage entrypoint: `README.md`.
 - Local verification: `LOCAL_TESTING_GUIDE.md`.
-- Deployment operations: `DEPLOYMENT_GUIDE.md` and `docs/github_actions_production_deploy.md`.
+- Deployment operations: `docs/github_actions_production_deploy.md`.
 - Editorial architecture and contracts: `docs/editorial_pipeline_design.md`, `docs/editorial_briefing_skill_contract.md`, and code/tests under `insightbot/` and `tests/`.
 - Do not store dated incidents, source-health snapshots, recorded commit hashes, or changing task configuration in this file.
 
@@ -14,7 +14,7 @@ InsightBot is Mika's marketing intelligence bot. Use Chinese for working communi
 
 - Production runs from `/home/ubuntu/marketing_bot` on branch `main`; verify the live branch, commit, working tree, services, and health before and after deployment.
 - `tasks.json`, `channels.json`, `config.content.json`, `config.secrets.json`, and `data/` are environment-specific runtime state. Never overwrite them blindly from Git.
-- Follow the existing deployment guide and workflow. A production deployment or external change requires Mika's explicit approval.
+- Follow the current GitHub Actions deployment runbook. A production deployment or external change requires Mika's explicit approval.
 - Public product access should use the shared gateway on `80/443`; application services bind locally and support the configured path prefix. Direct Streamlit ports are not the finished product surface.
 - Validate gateway routing, static assets, redirects, downloads, WebSockets, refresh, and exposed health/config endpoints before calling a gateway cutover complete.
 
