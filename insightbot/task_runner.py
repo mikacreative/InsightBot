@@ -433,6 +433,18 @@ def run_task(
             logger.error(f"TaskRunner: failed to send to '{channel_id}': {e}")
             channel_results.append({"channel_id": channel_id, "ok": False, "error": str(e)})
 
+    # TV screen side output: render the static big-screen page when enabled.
+    # Screen failures must never affect delivery or the run result.
+    screen_path = None
+    if (config.get("_task_screen") or {}).get("enabled"):
+        try:
+            from .screen import generate_screen_for_task
+
+            screen_path = str(generate_screen_for_task(task_id, config, final_markdown))
+            logger.info(f"TaskRunner: screen page updated: {screen_path}")
+        except Exception as e:
+            logger.warning(f"TaskRunner: failed to render screen page: {e}")
+
     delivery_ok = any(item.get("ok") for item in channel_results) if task_channels else True
     overall_ok = pipeline_ok and delivery_ok
     delivery_error = None if delivery_ok else "All configured channels failed to send."
@@ -447,6 +459,7 @@ def run_task(
         "channel_results": channel_results,
         "stage_results": stage_results,
         "error": pipeline_error or delivery_error,
+        "screen_path": screen_path,
     }
     try:
         append_run_record(

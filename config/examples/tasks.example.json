@@ -48,6 +48,12 @@
         "allow_empty_sections": true
       },
       "channels": ["wecom_main"],
+      "screen": {
+        "enabled": false,
+        "refresh_seconds": 300,
+        "rotate_seconds": 15,
+        "theme": "auto"
+      },
       "schedule": {
         "hour": 10,
         "minute": 0
