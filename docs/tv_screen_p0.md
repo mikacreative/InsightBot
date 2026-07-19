@@ -44,6 +44,19 @@ P0 只做一件事:把一个任务(Daily_brief 行业雷达)的简报产出渲�
 - 视觉风格:YGGBi 官网编辑风(深绿 `#0b4022` / 奶白 `#f2ecd4` 双色、报纸版式、emoji 在渲染层剥除)。
 - 生成目录默认 `scripts/static/screen/`,可用环境变量 `SCREEN_OUTPUT_DIR` 覆盖。
 
+## 新闻配图(P1)
+
+任务跑完生成大屏页时,右屏图片可来自新闻本身:
+
+1. **图源提取**:候选构建时从 RSS entry 提取 `media:content`/thumbnail/图片 enclosure/摘要首个 `<img>`,写入 `candidate.image_url`(`editorial_pipeline._extract_entry_image`),经 Stage 3 候选字典、Stage 4 `selected_items` 由代码带出(AI 始终不经手)。
+2. **og:image 兜底**:终选条目无 feed 图时,抓文章页 `og:image` 补齐(并发、超时、失败静默)。
+3. **服务端缓存**:所有图下载到 `img/news/`(URL 哈希命名),微信图片自动带 `mp.weixin.qq.com` Referer 绕防盗链;过滤非图片响应、<8KB 小文件和 <400×240 的图标图;每次刷新清理不再引用的旧图。实现:`insightbot/screen_images.py`。
+4. **板块联动呈现**:右屏图片跟随左侧板块切换——当前板块有条目图就轮它的图,没有则回退 `img/` 通用占位图。
+
+数据流:`run_task` hook 从 `stage_results` 提取 url→image 映射(`collect_selected_image_map`)→ `prepare_section_images` 解析+下载 → 渲染时注入 `SECTION_IMAGES` JSON。下载在任务线程内并发执行(≤终选条数张),全部失败也不影响运行结果。
+
+注意:`python -m insightbot.screen` 从历史记录重生成时没有 image_map,只渲染通用占位图;classic 管线不带图。
+
 ## URL 与静态服务
 
 `.streamlit/config.toml` 已开启 `server.enableStaticServing`,`scripts/static/**` 挂载在 `/app/static/**`(Streamlit 1.56 的固定端点前缀):

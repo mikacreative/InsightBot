@@ -21,9 +21,11 @@ sys.modules.setdefault("requests", MagicMock())
 from insightbot.screen import (  # noqa: E402
     EMPTY_MESSAGE,
     build_screen_html,
+    collect_selected_image_map,
     generate_screen_from_latest_run,
     list_screen_images,
     parse_brief_markdown,
+    prepare_section_images,
     render_screen_html,
     write_screen_html,
 )
@@ -127,15 +129,23 @@ class TestRenderScreenHtml:
 
     def test_photo_pane_with_images(self):
         page = self._render(images=["img/a.jpg", "img/b.jpg"], image_rotate_seconds=8)
-        assert '<img class="slide" src="img/a.jpg" alt="">' in page
-        assert '<img class="slide" src="img/b.jpg" alt="">' in page
+        assert 'var FALLBACK_IMAGES = ["img/a.jpg", "img/b.jpg"];' in page
         assert "8000" in page  # 图片轮播间隔毫秒
-        assert '<div class="photo-fallback">' not in page
+
+    def test_section_images_json_and_fallback(self):
+        page = self._render(
+            images=["img/generic.jpg"],
+            section_images=[["img/news/x.jpg"], []],
+        )
+        assert 'var SECTION_IMAGES = [["img/news/x.jpg"], []];' in page
+        assert 'var FALLBACK_IMAGES = ["img/generic.jpg"];' in page
+        # 板块无图时回退到通用图
+        assert "(own && own.length) ? own : FALLBACK_IMAGES" in page
 
     def test_photo_pane_fallback_without_images(self):
         page = self._render()
-        assert '<div class="photo-fallback">' in page
-        assert '<img class="slide"' not in page
+        assert 'id="photo-fallback"' in page
+        assert "var FALLBACK_IMAGES = [];" in page
 
     def test_refresh_and_rotate_overrides(self):
         page = self._render(refresh_seconds=60, rotate_seconds=5)
@@ -187,6 +197,49 @@ class TestListScreenImages:
     def test_missing_dir_returns_empty(self, tmp_path, monkeypatch):
         monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path / "nope"))
         assert list_screen_images() == []
+
+
+class TestCollectSelectedImageMap:
+    def test_maps_urls_from_stage_results(self):
+        stage_results = {
+            "category_results": {
+                "板块A": {
+                    "selected_items": [
+                        {"title": "t1", "url": "https://a.com/1", "summary": "s", "image_url": "https://img.com/1.jpg"},
+                        {"title": "t2", "url": "https://a.com/2", "summary": "s", "image_url": ""},
+                    ]
+                },
+                "板块B": "not-a-dict",
+            }
+        }
+        assert collect_selected_image_map(stage_results) == {"https://a.com/1": "https://img.com/1.jpg"}
+
+    def test_empty_stage_results(self):
+        assert collect_selected_image_map({}) == {}
+
+
+class TestPrepareSectionImages:
+    def test_feed_image_with_og_fallback(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setattr(
+            "insightbot.screen_images.fetch_og_image_urls",
+            lambda urls: {"https://example.com/b": "https://cdn.example.com/og-b.jpg"},
+        )
+        monkeypatch.setattr(
+            "insightbot.screen_images.cache_news_images",
+            lambda urls, cache_dir: {u: "h1.jpg" for u in urls},
+        )
+        sections = parse_brief_markdown(SAMPLE_MARKDOWN)
+        result = prepare_section_images(sections, {"https://example.com/a": "https://img.example.com/a.jpg"})
+        # 板块一:a 用 feed 图,b 走 og:image 兜底;板块二:c 无图
+        assert result == [["img/news/h1.jpg", "img/news/h1.jpg"], []]
+
+    def test_no_images_returns_empty_lists(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setattr("insightbot.screen_images.fetch_og_image_urls", lambda urls: {})
+        monkeypatch.setattr("insightbot.screen_images.cache_news_images", lambda urls, cache_dir: {})
+        result = prepare_section_images(parse_brief_markdown(SAMPLE_MARKDOWN), {})
+        assert result == [[], []]
 
 
 class TestBuildScreenHtml:
@@ -281,7 +334,9 @@ class TestTaskRunnerScreenHook:
             mock_ep.return_value = {"ok": True, "final_markdown": SAMPLE_MARKDOWN, "error": None}
             with patch("insightbot.task_runner.send_message_to_channel") as mock_send, \
                  patch("insightbot.task_runner.get_channel") as mock_channel, \
-                 patch("insightbot.task_runner.append_run_record"):
+                 patch("insightbot.task_runner.append_run_record"), \
+                 patch("insightbot.screen_images.fetch_og_image_urls", return_value={}), \
+                 patch("insightbot.screen_images.cache_news_images", return_value={}):
                 mock_channel.return_value.delivery_profile = {
                     "preferred_format": "markdown",
                     "channel_type": "wecom",
@@ -305,7 +360,45 @@ class TestTaskRunnerScreenHook:
         monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path / "screen"))
         result = self._run(self._fake_config({"enabled": True}))
         page = (tmp_path / "screen" / "Daily_brief.html").read_text(encoding="utf-8")
-        assert '<img class="slide" src="img/photo.jpg" alt="">' in page
+        assert 'var FALLBACK_IMAGES = ["img/photo.jpg"];' in page
+        assert result["ok"] is True
+
+    def test_enabled_screen_writes_section_images(self, tmp_path, monkeypatch):
+        """hook 把 stage_results 里的 image_url 传给渲染,写入 SECTION_IMAGES。"""
+        monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path / "screen"))
+        monkeypatch.setattr(
+            "insightbot.screen_images.cache_news_images",
+            lambda urls, cache_dir: {u: "cached1.jpg" for u in urls},
+        )
+        monkeypatch.setattr("insightbot.screen_images.fetch_og_image_urls", lambda urls: {})
+        from insightbot.task_runner import run_task
+
+        config = self._fake_config({"enabled": True})
+        stage = {
+            "ok": True,
+            "final_markdown": SAMPLE_MARKDOWN,
+            "error": None,
+            "category_results": {
+                "💡 营销行业": {
+                    "selected_items": [
+                        {
+                            "title": "某品牌 campaign 案例",
+                            "url": "https://example.com/a",
+                            "summary": "…",
+                            "image_url": "https://cdn.example.com/a.jpg",
+                        }
+                    ]
+                }
+            },
+        }
+        with patch("insightbot.task_runner._run_editorial_pipeline", return_value=stage), \
+             patch("insightbot.task_runner.send_message_to_channel", return_value=True), \
+             patch("insightbot.task_runner.get_channel") as mock_channel, \
+             patch("insightbot.task_runner.append_run_record"):
+            mock_channel.return_value.delivery_profile = {"preferred_format": "markdown", "channel_type": "wecom"}
+            result = run_task("Daily_brief", lambda: config, dry_run=False)
+        page = (tmp_path / "screen" / "Daily_brief.html").read_text(encoding="utf-8")
+        assert 'var SECTION_IMAGES = [["img/news/cached1.jpg"], []];' in page
         assert result["ok"] is True
 
     def test_disabled_screen_writes_nothing(self, tmp_path, monkeypatch):

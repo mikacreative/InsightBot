@@ -644,6 +644,7 @@ class TestSelectForCategory:
                 "summary": "测试摘要",
                 "priority_score": 0.8,
                 "editorial_note": "理由",
+                "image_url": "https://cdn.example.com/cover.jpg",
             }
         ]
         config = _editorial_config()
@@ -662,7 +663,12 @@ class TestSelectForCategory:
         assert result["selection_mode"] == "ai_final_edit"
         assert result["status"] == "success"
         assert result["selected_items"] == [
-            {"title": "AI改写标题", "url": "https://example.com/1", "summary": "AI改写摘要，说明营销启示"}
+            {
+                "title": "AI改写标题",
+                "url": "https://example.com/1",
+                "summary": "AI改写摘要，说明营销启示",
+                "image_url": "https://cdn.example.com/cover.jpg",
+            }
         ]
         assert "### [AI改写标题](https://example.com/1)" in result["preview_markdown"]
 
