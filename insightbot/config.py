@@ -354,4 +354,7 @@ def load_tasks_config(task_id: str, bot_dir: str | None = None) -> dict:
     # Inject task metadata for status/history layers
     config["_task_name"] = task_def.get("name", task_id)
 
+    # Inject TV screen output config (tasks.json "screen" key)
+    config["_task_screen"] = deepcopy(task_def.get("screen", {}) or {})
+
     return config

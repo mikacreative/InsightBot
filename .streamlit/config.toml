@@ -1,0 +1,4 @@
+[server]
+# Serve scripts/static/** at /app/static/** so the TV screen pages are reachable
+# at /app/static/screen/<task_id>.html without an extra web service.
+enableStaticServing = true

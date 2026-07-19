@@ -44,6 +44,11 @@ data/*.jsonl
 data/task_health/*.json
 data/task_state/*.json
 
+# Generated TV screen pages
+scripts/static/screen/*.html
+scripts/static/screen/*.tmp
+scripts/static/screen/img/
+
 # OS/editor
 .DS_Store
 
