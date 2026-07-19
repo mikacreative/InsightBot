@@ -634,6 +634,35 @@ def _search_duckduckgo(keywords: str, max_results: int) -> list[dict]:
 # ---------- Stage 1: Build Global Candidates ----------
 
 
+def _extract_entry_image(entry) -> str:
+    """Best-effort image URL extraction from an RSS entry.
+
+    Order: media:content → media:thumbnail → image enclosure → first <img>
+    in the summary HTML. Returns "" when nothing usable is found. The URL is
+    carried through the pipeline by code only; AI never sees it.
+    """
+    for media in getattr(entry, "media_content", []) or []:
+        url = str((media or {}).get("url", "") or "").strip()
+        if url.startswith(("http://", "https://")):
+            return url
+    for thumb in getattr(entry, "media_thumbnail", []) or []:
+        url = str((thumb or {}).get("url", "") or "").strip()
+        if url.startswith(("http://", "https://")):
+            return url
+    for enclosure in getattr(entry, "enclosures", []) or []:
+        enc_type = str((enclosure or {}).get("type", "") or "")
+        url = str((enclosure or {}).get("href", "") or "").strip()
+        if enc_type.startswith("image/") and url.startswith(("http://", "https://")):
+            return url
+    summary_html = str(getattr(entry, "summary", "") or "")
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', summary_html)
+    if match:
+        url = match.group(1).strip()
+        if url.startswith(("http://", "https://")):
+            return url
+    return ""
+
+
 def build_global_candidates(*, config: dict, logger) -> list[dict]:
     """
     聚合所有板块 RSS 源 + 搜索结果，形成统一候选池（GlobalCandidate 列表）。
@@ -680,6 +709,7 @@ def build_global_candidates(*, config: dict, logger) -> list[dict]:
                     "source_name": getattr(entry, "author_detail", {}).get("name", url),
                     "source_category_hint": section_hints[0] if section_hints else "",
                     "source_section_hints": section_hints,
+                    "image_url": _extract_entry_image(entry),
                 })
             logger.info(f"✅ 全局抓取 [{source.get('id', url)}] [{url}] — {len(feed.entries)} 条")
         except Exception as e:
@@ -1397,6 +1427,7 @@ C002 | DROP | - | - | reason
             "title": item["title"],
             "url": url,
             "summary": item["summary"],
+            "image_url": str(candidate.get("image_url", "") or ""),
         })
         if len(selected_items) >= max_items:
             break
