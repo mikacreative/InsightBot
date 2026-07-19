@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import logging
 import os
 import re
@@ -248,8 +249,8 @@ main { flex: 1; position: relative; }
 $pages
   </main>
 </div>
-<div class="photo-pane">
-$photo_content
+<div class="photo-pane" id="photo-pane">
+  <div class="photo-fallback" id="photo-fallback">Signal Desk</div>
   <div class="scrim"></div>
   <div class="photo-clock"><div class="time" id="clock-time">--:--:--</div><div class="date" id="clock-date"></div></div>
 </div>
@@ -278,6 +279,42 @@ $photo_content
   tick();
   setInterval(tick, 1000);
 
+  var SECTION_IMAGES = $section_images_json;
+  var FALLBACK_IMAGES = $fallback_images_json;
+  var photoPane = document.getElementById("photo-pane");
+  var photoFallback = document.getElementById("photo-fallback");
+  var slideEls = [];
+  var slideIndex = 0;
+  function clearSlides() {
+    for (var j = 0; j < slideEls.length; j += 1) { photoPane.removeChild(slideEls[j]); }
+    slideEls = [];
+  }
+  function showSlide(i) {
+    for (var j = 0; j < slideEls.length; j += 1) { slideEls[j].classList.toggle("active", j === i); }
+  }
+  function buildSlides(list) {
+    clearSlides();
+    if (!list || !list.length) { photoFallback.style.display = "flex"; return; }
+    photoFallback.style.display = "none";
+    for (var i = 0; i < list.length; i += 1) {
+      var img = document.createElement("img");
+      img.className = "slide";
+      img.alt = "";
+      img.src = list[i];
+      photoPane.insertBefore(img, photoPane.firstChild);
+      slideEls.push(img);
+    }
+    slideIndex = 0;
+    showSlide(0);
+  }
+  function imagesForPage(i) {
+    var own = SECTION_IMAGES[i];
+    return (own && own.length) ? own : FALLBACK_IMAGES;
+  }
+  setInterval(function () {
+    if (slideEls.length > 1) { slideIndex = (slideIndex + 1) % slideEls.length; showSlide(slideIndex); }
+  }, $image_rotate_ms);
+
   var pages = document.querySelectorAll(".page");
   var progress = document.getElementById("progress");
   var index = 0;
@@ -292,22 +329,11 @@ $photo_content
   function show(i) {
     for (var j = 0; j < pages.length; j += 1) { pages[j].classList.toggle("active", j === i); }
     restartProgress();
+    buildSlides(imagesForPage(i));
   }
   show(0);
   if (pages.length > 1) {
     setInterval(function () { index = (index + 1) % pages.length; show(index); }, $rotate_ms);
-  }
-
-  var slides = document.querySelectorAll(".slide");
-  var slideIndex = 0;
-  function showSlide(i) {
-    for (var j = 0; j < slides.length; j += 1) { slides[j].classList.toggle("active", j === i); }
-  }
-  if (slides.length > 0) {
-    showSlide(0);
-    if (slides.length > 1) {
-      setInterval(function () { slideIndex = (slideIndex + 1) % slides.length; showSlide(slideIndex); }, $image_rotate_ms);
-    }
   }
 })();
 </script>
@@ -327,6 +353,7 @@ def render_screen_html(
     theme: str = "auto",
     images: list[str] | None = None,
     image_rotate_seconds: int = DEFAULT_IMAGE_ROTATE_SECONDS,
+    section_images: list[list[str]] | None = None,
 ) -> str:
     """Render the self-contained TV page. All text is HTML-escaped and emoji-free."""
     refresh_seconds = _positive_int(refresh_seconds, DEFAULT_REFRESH_SECONDS)
@@ -367,12 +394,8 @@ def render_screen_html(
         )
 
     image_list = [str(src).strip() for src in (images or []) if str(src).strip()]
-    if image_list:
-        photo_content = "\n".join(
-            f'  <img class="slide" src="{html.escape(src, quote=True)}" alt="">' for src in image_list
-        )
-    else:
-        photo_content = '  <div class="photo-fallback">Signal Desk</div>'
+    fallback_images_json = json.dumps(image_list, ensure_ascii=False).replace("</", "<\\/")
+    section_images_json = json.dumps(section_images or [], ensure_ascii=False).replace("</", "<\\/")
 
     return _HTML_TEMPLATE.substitute(
         refresh_seconds=refresh_seconds,
@@ -383,7 +406,8 @@ def render_screen_html(
         pages="\n".join(pages),
         theme=theme,
         theme_class=_initial_theme_class(theme, generated_at),
-        photo_content=photo_content,
+        section_images_json=section_images_json,
+        fallback_images_json=fallback_images_json,
         image_rotate_ms=image_rotate_seconds * 1000,
     )
 
@@ -431,6 +455,7 @@ def build_screen_html(
     markdown: str,
     *,
     images: list[str] | None = None,
+    section_images: list[list[str]] | None = None,
 ) -> str:
     """Build the page for one task from its runtime config and final_markdown."""
     screen_cfg = config.get("_task_screen") or {}
@@ -453,7 +478,80 @@ def build_screen_html(
         image_rotate_seconds=_positive_int(
             screen_cfg.get("image_rotate_seconds"), DEFAULT_IMAGE_ROTATE_SECONDS
         ),
+        section_images=section_images,
     )
+
+
+def collect_selected_image_map(stage_results: dict[str, Any]) -> dict[str, str]:
+    """Map item URL -> RSS-provided image URL from a pipeline's stage_results.
+
+    image_url is extracted at candidate build time and carried to selected
+    items by code only (AI never sees it), so this map is the code-owned
+    bridge from pipeline output to the screen renderer.
+    """
+    mapping: dict[str, str] = {}
+    for result in (stage_results.get("category_results") or {}).values():
+        if not isinstance(result, dict):
+            continue
+        for item in result.get("selected_items") or []:
+            url = str((item or {}).get("url", "")).strip()
+            img = str((item or {}).get("image_url", "")).strip()
+            if url and img:
+                mapping[url] = img
+    return mapping
+
+
+def prepare_section_images(
+    sections: list[dict[str, Any]],
+    image_map: dict[str, str],
+    *,
+    bot_dir: str | None = None,
+) -> list[list[str]]:
+    """Resolve per-section news images to locally cached relative paths.
+
+    Item images come from the pipeline (RSS media). Items without one fall
+    back to an og:image lookup on the article page. Everything is downloaded
+    server-side into img/news/ (anti-hotlink + offline resilience); items
+    whose images cannot be fetched simply contribute nothing, and the page
+    falls back to the generic photos for that section.
+    """
+    from .screen_images import cache_news_images, fetch_og_image_urls
+
+    image_map = {
+        str(url).strip(): str(img).strip()
+        for url, img in (image_map or {}).items()
+        if str(url).strip() and str(img).strip()
+    }
+    per_item: list[list[str | None]] = []
+    missing_pages: list[str] = []
+    for section in sections:
+        row: list[str | None] = []
+        for item in section["items"]:
+            page_url = str(item.get("url", "")).strip()
+            img = image_map.get(page_url) or None
+            if img is None and page_url:
+                missing_pages.append(page_url)
+            row.append(img)
+        per_item.append(row)
+
+    og_map = fetch_og_image_urls(missing_pages) if missing_pages else {}
+
+    section_urls: list[list[str]] = []
+    all_urls: list[str] = []
+    seen: set[str] = set()
+    for section, row in zip(sections, per_item):
+        urls: list[str] = []
+        for item, img in zip(section["items"], row):
+            resolved = img or og_map.get(str(item.get("url", "")).strip(), "")
+            if resolved and resolved not in seen:
+                seen.add(resolved)
+                urls.append(resolved)
+                all_urls.append(resolved)
+        section_urls.append(urls)
+
+    cache_dir = Path(screen_output_dir(bot_dir)) / "img" / "news"
+    cached = cache_news_images(all_urls, cache_dir) if all_urls else {}
+    return [[f"img/news/{cached[url]}" for url in urls if url in cached] for urls in section_urls]
 
 
 def generate_screen_for_task(
@@ -462,9 +560,19 @@ def generate_screen_for_task(
     markdown: str,
     *,
     bot_dir: str | None = None,
+    image_map: dict[str, str] | None = None,
 ) -> Path:
     """Render and write the TV page for a task run that just produced markdown."""
-    page = build_screen_html(task_id, config, markdown, images=list_screen_images(bot_dir))
+    section_images = None
+    if image_map is not None:
+        section_images = prepare_section_images(parse_brief_markdown(markdown), image_map, bot_dir=bot_dir)
+    page = build_screen_html(
+        task_id,
+        config,
+        markdown,
+        images=list_screen_images(bot_dir),
+        section_images=section_images,
+    )
     return write_screen_html(task_id, page, bot_dir=bot_dir)
 
 

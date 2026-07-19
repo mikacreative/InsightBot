@@ -438,9 +438,16 @@ def run_task(
     screen_path = None
     if (config.get("_task_screen") or {}).get("enabled"):
         try:
-            from .screen import generate_screen_for_task
+            from .screen import collect_selected_image_map, generate_screen_for_task
 
-            screen_path = str(generate_screen_for_task(task_id, config, final_markdown))
+            screen_path = str(
+                generate_screen_for_task(
+                    task_id,
+                    config,
+                    final_markdown,
+                    image_map=collect_selected_image_map(stage_results),
+                )
+            )
             logger.info(f"TaskRunner: screen page updated: {screen_path}")
         except Exception as e:
             logger.warning(f"TaskRunner: failed to render screen page: {e}")
