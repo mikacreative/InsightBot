@@ -839,12 +839,6 @@ def main() -> None:
     scheduler = create_scheduler(bot_dir)
     tasks_data = get_tasks_data()
 
-    if getattr(scheduler, "config_error", None):
-        st.error(
-            "⚠️ tasks.json 加载失败，已保留修复前的运行状态；修复文件后调度器会自动恢复。\n\n"
-            f"错误详情：`{scheduler.config_error}`"
-        )
-
     def build_task_validation(task_id: str | None, task_def: dict | None) -> dict:
         if not task_id or not task_def:
             return {"status": "not_ready", "is_runnable": False, "issues": [], "summary": {}}
@@ -883,6 +877,12 @@ def main() -> None:
     render_workbench_styles()
     st.title("InsightBot | Insight Workbench")
     st.caption(f"当前编辑配置文件: {active_edit_path}")
+
+    if getattr(scheduler, "config_error", None):
+        st.error(
+            "⚠️ tasks.json 加载失败，已保留修复前的运行状态；修复文件后调度器会自动恢复。\n\n"
+            f"错误详情：`{scheduler.config_error}`"
+        )
 
     if "settings" not in config:
         config["settings"] = {}
@@ -1015,7 +1015,7 @@ def main() -> None:
         st.divider()
         st.header("⏳ 调度器状态")
 
-        tasks_def = load_tasks(bot_dir)  # reload to show current
+        tasks_def = {"tasks": {tid: t.task_def for tid, t in scheduler.tasks.items()}}  # 用调度器内存里的最近良好状态,避免重复读盘
         enabled_count = sum(1 for t in tasks_def.get("tasks", {}).values() if t.get("enabled"))
         total_count = len(tasks_def.get("tasks", {}))
         st.metric("活跃任务", f"{enabled_count}/{total_count}")

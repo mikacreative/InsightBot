@@ -33,6 +33,7 @@ class Task:
         config_loader_fn: Callable[[], dict],
     ):
         self.task_id = task_id
+        self.task_def = task_def  # last-known-good definition for config-failure fallback
         self.name = task_def.get("name", task_id)
         self.enabled = task_def.get("enabled", False)
         self.channels = task_def.get("channels", [])
@@ -113,9 +114,25 @@ class Scheduler:
         self._refresh_runtime_mtimes()
 
     def _make_task_config_loader(self, task_id: str) -> Callable[[], dict]:
-        """Build a per-task config loader so CLI/systemd runs use the full task config."""
+        """Build a per-task config loader so CLI/systemd runs use the full task config.
+
+        Keeps a last-good assembled config: when tasks.json is temporarily
+        broken (e.g. a bad hand edit), retained tasks still run from the last
+        good snapshot instead of dying with JSONDecodeError.
+        """
+        last_good: dict = {}
+
         def load_config() -> dict:
-            config = load_tasks_config(task_id, self.bot_dir)
+            try:
+                config = load_tasks_config(task_id, self.bot_dir)
+            except Exception as exc:
+                if last_good:
+                    self._log.warning(
+                        f"tasks.json unreadable for task '{task_id}' ({exc}); "
+                        "running from last good config snapshot."
+                    )
+                    return last_good["config"]
+                raise
             try:
                 from .domain import TaskVersion
                 from .domain.commands import get_task_spec
@@ -128,6 +145,7 @@ class Scheduler:
                     task_id,
                     exc,
                 )
+            last_good["config"] = config
             return config
 
         return load_config
@@ -227,7 +245,10 @@ class Scheduler:
         """Expose the Domain Kernel tool manifest with current runtime task IDs."""
         from .domain import get_tool_manifest
 
-        tasks_payload = load_tasks(self.bot_dir)
+        try:
+            tasks_payload = load_tasks(self.bot_dir)
+        except Exception:
+            tasks_payload = {"tasks": {tid: t.task_def for tid, t in self.tasks.items()}}
         manifest = get_tool_manifest()
         manifest["runtime"] = {
             "bot_dir": self.bot_dir,
@@ -241,7 +262,12 @@ class Scheduler:
         from .run_history import get_latest_run, get_latest_successful_send
         from .task_health_store import load_task_health
 
-        tasks_payload = load_tasks(self.bot_dir)
+        try:
+            tasks_payload = load_tasks(self.bot_dir)
+        except Exception:
+            # Broken tasks.json: fall back to the retained last-good task map
+            # so the workbench stays readable during the broken window.
+            tasks_payload = {"tasks": {tid: t.task_def for tid, t in self.tasks.items()}}
         tasks = tasks_payload.get("tasks", {}) or {}
         histories: dict[str, dict] = {}
         health: dict[str, dict | None] = {}

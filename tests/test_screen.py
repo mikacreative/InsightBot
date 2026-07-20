@@ -269,6 +269,13 @@ class TestConsoleScreenEditor:
         assert "scheduler.config_error" in source
         assert "tasks.json 加载失败" in source
 
+    def test_sidebar_metrics_use_retained_task_map(self):
+        """侧边栏指标不得再直接重读 tasks.json(坏文件时会崩)。"""
+        from pathlib import Path
+
+        source = Path("scripts/app.py").read_text(encoding="utf-8")
+        assert "scheduler.tasks.items()" in source
+
 
 class TestBuildScreenHtml:
     def test_report_title_date_placeholder_is_substituted(self):

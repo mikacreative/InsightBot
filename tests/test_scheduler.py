@@ -199,6 +199,40 @@ class TestSchedulerConfigErrorTolerance:
 
         assert changed is True  # reload 本身不抛异常
 
+    def test_config_loader_falls_back_to_last_good_snapshot(self):
+        sched = self._bare_scheduler()
+        loader = sched._make_task_config_loader("t1")
+
+        with patch("insightbot.scheduler.load_tasks_config", return_value={"_task": 1}):
+            assert loader() == {"_task": 1}
+        with patch(
+            "insightbot.scheduler.load_tasks_config",
+            side_effect=json.JSONDecodeError("Expecting ',' delimiter", "doc", 143),
+        ):
+            assert loader() == {"_task": 1}  # 文件损坏期仍按最近良好快照运行
+
+    def test_config_loader_reraises_without_any_snapshot(self):
+        sched = self._bare_scheduler()
+        loader = sched._make_task_config_loader("t1")
+
+        with patch(
+            "insightbot.scheduler.load_tasks_config",
+            side_effect=json.JSONDecodeError("bad", "doc", 1),
+        ):
+            with pytest.raises(json.JSONDecodeError):
+                loader()
+
+    def test_tool_manifest_uses_retained_tasks_when_file_broken(self):
+        sched = self._bare_scheduler()
+        task = MagicMock()
+        task.task_def = {"name": "X"}
+        sched.tasks = {"task_x": task}
+
+        with patch("insightbot.scheduler.load_tasks", side_effect=json.JSONDecodeError("bad", "doc", 1)):
+            manifest = sched.get_tool_manifest_command()
+
+        assert manifest["runtime"]["task_ids"] == ["task_x"]
+
 
 class TestSchedulerReload:
     def test_reload_refreshes_tasks(self):
