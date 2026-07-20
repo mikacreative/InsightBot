@@ -1,10 +1,23 @@
 import json
 import logging
+import mimetypes
 import os
 from copy import deepcopy
 from datetime import datetime
 
 import streamlit as st
+
+# The TV screen pages and their images must be served with the correct
+# Content-Type regardless of the host's /etc/mime.types (minimal server
+# images can lack the mappings, and some static handlers fall back to
+# text/plain, which makes browsers show raw HTML source).
+mimetypes.add_type("text/html", ".html")
+mimetypes.add_type("image/jpeg", ".jpg")
+mimetypes.add_type("image/jpeg", ".jpeg")
+mimetypes.add_type("image/png", ".png")
+mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("image/gif", ".gif")
+
 from insightbot.channels import init_channels, test_channel_config, validate_channel_definition
 from insightbot.config import (
     load_channels,
