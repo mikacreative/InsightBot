@@ -33,6 +33,7 @@ class Task:
         config_loader_fn: Callable[[], dict],
     ):
         self.task_id = task_id
+        self.task_def = task_def  # last-known-good definition for config-failure fallback
         self.name = task_def.get("name", task_id)
         self.enabled = task_def.get("enabled", False)
         self.channels = task_def.get("channels", [])
@@ -108,13 +109,30 @@ class Scheduler:
         self.tasks: dict[str, Task] = {}
         self._log = logging.getLogger("Scheduler")
         self._runtime_mtimes: dict[str, float | None] = {}
+        self.config_error: str | None = None
         self._load_tasks()
         self._refresh_runtime_mtimes()
 
     def _make_task_config_loader(self, task_id: str) -> Callable[[], dict]:
-        """Build a per-task config loader so CLI/systemd runs use the full task config."""
+        """Build a per-task config loader so CLI/systemd runs use the full task config.
+
+        Keeps a last-good assembled config: when tasks.json is temporarily
+        broken (e.g. a bad hand edit), retained tasks still run from the last
+        good snapshot instead of dying with JSONDecodeError.
+        """
+        last_good: dict = {}
+
         def load_config() -> dict:
-            config = load_tasks_config(task_id, self.bot_dir)
+            try:
+                config = load_tasks_config(task_id, self.bot_dir)
+            except Exception as exc:
+                if last_good:
+                    self._log.warning(
+                        f"tasks.json unreadable for task '{task_id}' ({exc}); "
+                        "running from last good config snapshot."
+                    )
+                    return last_good["config"]
+                raise
             try:
                 from .domain import TaskVersion
                 from .domain.commands import get_task_spec
@@ -127,13 +145,26 @@ class Scheduler:
                     task_id,
                     exc,
                 )
+            last_good["config"] = config
             return config
 
         return load_config
 
     def _load_tasks(self) -> None:
-        """Load tasks from tasks.json."""
-        tasks_data = load_tasks(self.bot_dir)
+        """Load tasks from tasks.json.
+
+        A broken tasks.json (e.g. a hand edit with a missing comma) must not
+        take down the console or the scheduler service: keep the previous
+        task map, record config_error for the UI, and let the mtime watcher
+        recover automatically once the file is fixed.
+        """
+        try:
+            tasks_data = load_tasks(self.bot_dir)
+        except Exception as exc:
+            self.config_error = f"{type(exc).__name__}: {exc}"
+            self._log.error(f"Failed to load tasks.json; keeping previous state: {exc}")
+            return
+        self.config_error = None
         self.tasks.clear()
         for task_id, task_def in tasks_data.get("tasks", {}).items():
             self.tasks[task_id] = Task(
@@ -169,7 +200,10 @@ class Scheduler:
             return False
         self._log.info("Runtime config changed on disk; reloading scheduler state.")
         self._load_tasks()
-        init_channels(load_channels(self.bot_dir))
+        try:
+            init_channels(load_channels(self.bot_dir))
+        except Exception as exc:
+            self._log.error(f"Failed to reload channels.json; keeping previous channels: {exc}")
         self._runtime_mtimes = current
         return True
 
@@ -211,7 +245,10 @@ class Scheduler:
         """Expose the Domain Kernel tool manifest with current runtime task IDs."""
         from .domain import get_tool_manifest
 
-        tasks_payload = load_tasks(self.bot_dir)
+        try:
+            tasks_payload = load_tasks(self.bot_dir)
+        except Exception:
+            tasks_payload = {"tasks": {tid: t.task_def for tid, t in self.tasks.items()}}
         manifest = get_tool_manifest()
         manifest["runtime"] = {
             "bot_dir": self.bot_dir,
@@ -225,7 +262,12 @@ class Scheduler:
         from .run_history import get_latest_run, get_latest_successful_send
         from .task_health_store import load_task_health
 
-        tasks_payload = load_tasks(self.bot_dir)
+        try:
+            tasks_payload = load_tasks(self.bot_dir)
+        except Exception:
+            # Broken tasks.json: fall back to the retained last-good task map
+            # so the workbench stays readable during the broken window.
+            tasks_payload = {"tasks": {tid: t.task_def for tid, t in self.tasks.items()}}
         tasks = tasks_payload.get("tasks", {}) or {}
         histories: dict[str, dict] = {}
         health: dict[str, dict | None] = {}

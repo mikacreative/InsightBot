@@ -25,14 +25,16 @@ P0 只做一件事:把一个任务(Daily_brief 行业雷达)的简报产出渲�
 
 ## 配置
 
-`tasks.json` 任务级配置(见 `config/examples/tasks.example.json`):
+`tasks.json` 任务级配置(见 `config/examples/tasks.example.json`);**推荐在控制台「任务管理 → 📺 大屏」里开关和调整**,不要手改 JSON(改坏会导致加载失败——已有容错:控制台显示错误横幅、调度器保留旧状态,修复后自动恢复):
 
 ```json
 "screen": {
   "enabled": true,
   "refresh_seconds": 300,
   "rotate_seconds": 15,
-  "theme": "auto"
+  "theme": "auto",
+  "image_rotate_seconds": 10,
+  "title": "可选,每任务刊头标题,覆盖全局 report_title"
 }
 ```
 
@@ -62,6 +64,7 @@ P0 只做一件事:把一个任务(Daily_brief 行业雷达)的简报产出渲�
 `.streamlit/config.toml` 已开启 `server.enableStaticServing`,`scripts/static/**` 挂载在 `/app/static/**`(Streamlit 1.56 的固定端点前缀):
 
 - 直连:`http://<host>:8501/app/static/screen/<task_id>.html`
+- 索引页:`/app/static/screen/index.html` 自动列出所有开屏任务的页面(每次生成任一屏时同步刷新),多任务时电视各开各的 URL
 - gateway 前缀暴露(如 `https://<host>/insightbot/app/static/screen/...`)属部署事项,按现有部署 runbook 执行并需 Mika 批准;敏感内容走内网,不公网暴露。
 
 页面完全自包含(内联 CSS/JS,无外部依赖),电视自带浏览器、电视盒子或旧电脑全屏打开即可;开机自启与 kiosk 模式在播放端设置,不属于本 repo。

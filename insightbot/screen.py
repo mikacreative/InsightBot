@@ -449,6 +449,99 @@ def write_screen_html(task_id: str, html_text: str, bot_dir: str | None = None) 
     return target
 
 
+def build_screen_index_html(entries: list[tuple[str, str]], *, generated_at: datetime) -> str:
+    """Static index linking every screen-enabled task page (multi-task navigation)."""
+    rows = []
+    for task_id, task_name in entries:
+        rows.append(
+            '    <a class="entry" href="'
+            + html.escape(f"{task_id}.html", quote=True)
+            + '"><span class="entry-name">'
+            + html.escape(_clean_display_text(task_name), quote=True)
+            + '</span><span class="entry-id">'
+            + html.escape(task_id, quote=True)
+            + "</span></a>"
+        )
+    body = "\n".join(rows)
+    esc_generated = html.escape(generated_at.strftime("%Y-%m-%d %H:%M"), quote=True)
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Desk · 大屏索引</title>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+html, body {{ height: 100%; }}
+body {{
+  background: #0b4022; color: #f2ecd4; padding: 8vh 8vw;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+}}
+.kicker {{ font-size: 14px; letter-spacing: .26em; text-transform: uppercase; color: rgba(242,236,212,.5); }}
+h1 {{
+  margin: 12px 0 6vh; font-size: 40px; letter-spacing: .04em;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", Georgia, serif;
+}}
+.entry {{
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 18px 4px; border-top: 1px solid rgba(242,236,212,.25);
+  color: #f2ecd4; text-decoration: none; font-size: 22px;
+}}
+.entry:last-child {{ border-bottom: 1px solid rgba(242,236,212,.25); }}
+.entry:hover {{ background: rgba(242,236,212,.06); }}
+.entry-id {{ font-size: 13px; letter-spacing: .12em; color: rgba(242,236,212,.45); }}
+.footer {{ margin-top: 5vh; font-size: 12px; letter-spacing: .14em; color: rgba(242,236,212,.4); }}
+</style>
+</head>
+<body>
+<div class="kicker">Signal Desk · 更新于 {esc_generated}</div>
+<h1>大屏索引</h1>
+{body}
+<div class="footer">每个任务一个页面;电视端固定打开对应 URL 即可。</div>
+</body>
+</html>
+"""
+
+
+def write_screen_index(bot_dir: str | None = None) -> Path | None:
+    """Regenerate index.html from tasks.json (all tasks with screen.enabled).
+
+    Returns None when no task has the screen enabled or tasks.json cannot be
+    read; never raises so page generation is never affected.
+    """
+    try:
+        from .config import load_tasks
+
+        tasks_data = load_tasks(bot_dir)
+    except Exception as exc:
+        logger.info("screen: index refresh skipped, tasks.json unreadable: %s", exc)
+        return None
+    entries: list[tuple[str, str]] = []
+    for task_id, task_def in (tasks_data.get("tasks", {}) or {}).items():
+        if not isinstance(task_def, dict):
+            continue
+        screen_cfg = task_def.get("screen", {}) or {}
+        if screen_cfg.get("enabled"):
+            entries.append((task_id, str(task_def.get("name") or task_id)))
+    if not entries:
+        return None
+    out_dir = Path(screen_output_dir(bot_dir))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / "index.html"
+    fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix="index.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(build_screen_index_html(entries, generated_at=datetime.now()))
+        os.replace(tmp_path, target)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    return target
+
+
 def build_screen_html(
     task_id: str,
     config: dict[str, Any],
@@ -463,7 +556,8 @@ def build_screen_html(
     task_name = str(config.get("_task_name") or task_id)
     now = datetime.now()
     # Same {date} substitution convention as channel_rendering.build_delivery_plan.
-    title_template = str(settings.get("report_title") or "📅 营销情报早报 | {date}")
+    # A task-level screen.title overrides the global report title (multi-task screens).
+    title_template = str(screen_cfg.get("title") or settings.get("report_title") or "📅 营销情报早报 | {date}")
     report_title = title_template.replace("{date}", now.strftime("%m-%d")).strip()
     sections = parse_brief_markdown(markdown)
     return render_screen_html(
@@ -573,7 +667,12 @@ def generate_screen_for_task(
         images=list_screen_images(bot_dir),
         section_images=section_images,
     )
-    return write_screen_html(task_id, page, bot_dir=bot_dir)
+    target = write_screen_html(task_id, page, bot_dir=bot_dir)
+    try:
+        write_screen_index(bot_dir)
+    except Exception as exc:
+        logger.info("screen: index refresh failed: %s", exc)
+    return target
 
 
 def generate_screen_from_latest_run(task_id: str, *, bot_dir: str | None = None) -> Path | None:
