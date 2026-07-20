@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import struct
 from concurrent.futures import ThreadPoolExecutor
@@ -161,6 +162,7 @@ def download_image(url: str, cache_dir: Path) -> str | None:
         path = cache_dir / name
         if not path.exists() or path.stat().st_size != len(data):
             path.write_bytes(data)
+            os.chmod(path, 0o644)  # served by nginx as a different user
     except OSError as exc:
         logger.warning("screen_images: failed to write cache file for %s: %s", url, exc)
         return None
