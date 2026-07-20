@@ -691,7 +691,12 @@ def main() -> None:
         }
 
     def get_tasks_data() -> dict:
-        tasks_data = load_tasks(bot_dir)
+        try:
+            tasks_data = load_tasks(bot_dir)
+        except Exception:
+            # Broken tasks.json: stay alive with an empty task list; the
+            # scheduler.config_error banner above explains the failure.
+            return {"tasks": {}}
         return tasks_data if "tasks" in tasks_data else {"tasks": {}}
 
     def get_selected_task_id(tasks_data: dict) -> str | None:
@@ -833,6 +838,12 @@ def main() -> None:
     init_channels(channels_data)
     scheduler = create_scheduler(bot_dir)
     tasks_data = get_tasks_data()
+
+    if getattr(scheduler, "config_error", None):
+        st.error(
+            "⚠️ tasks.json 加载失败，已保留修复前的运行状态；修复文件后调度器会自动恢复。\n\n"
+            f"错误详情：`{scheduler.config_error}`"
+        )
 
     def build_task_validation(task_id: str | None, task_def: dict | None) -> dict:
         if not task_id or not task_def:
@@ -1332,6 +1343,66 @@ def main() -> None:
             )
 
             render_section_heading(
+                "📺 大屏:这条任务要不要上电视",
+                "开启后每次任务跑完自动生成电视大屏页,无需手改 JSON;页面经 Streamlit 静态服务访问。",
+                anchor="configure-screen",
+            )
+            screen_def = task_def.get("screen", {}) or {}
+            screen_col1, screen_col2, screen_col3 = st.columns([1, 1, 1])
+            with screen_col1:
+                screen_enabled = st.toggle(
+                    "启用大屏页",
+                    value=bool(screen_def.get("enabled", False)),
+                    key=f"task_screen_enabled_{selected_task_id}",
+                )
+                screen_theme_options = ["auto", "dark", "light"]
+                screen_theme_current = screen_def.get("theme", "auto")
+                screen_theme = st.selectbox(
+                    "主题",
+                    options=screen_theme_options,
+                    index=screen_theme_options.index(screen_theme_current)
+                    if screen_theme_current in screen_theme_options
+                    else 0,
+                    key=f"task_screen_theme_{selected_task_id}",
+                    help="auto 按电视本地时间 7:00-19:00 亮色、其余暗色",
+                )
+            with screen_col2:
+                screen_refresh = st.number_input(
+                    "页面刷新(秒)",
+                    min_value=30,
+                    max_value=3600,
+                    value=int(screen_def.get("refresh_seconds", 300) or 300),
+                    key=f"task_screen_refresh_{selected_task_id}",
+                )
+                screen_rotate = st.number_input(
+                    "板块轮播(秒)",
+                    min_value=5,
+                    max_value=300,
+                    value=int(screen_def.get("rotate_seconds", 15) or 15),
+                    key=f"task_screen_rotate_{selected_task_id}",
+                )
+            with screen_col3:
+                screen_image_rotate = st.number_input(
+                    "图片轮播(秒)",
+                    min_value=3,
+                    max_value=300,
+                    value=int(screen_def.get("image_rotate_seconds", 10) or 10),
+                    key=f"task_screen_image_rotate_{selected_task_id}",
+                )
+                screen_title = st.text_input(
+                    "刊头标题(可选)",
+                    value=str(screen_def.get("title", "") or ""),
+                    key=f"task_screen_title_{selected_task_id}",
+                    placeholder="留空则使用全局推送标题",
+                )
+            if screen_enabled:
+                st.caption(
+                    f"页面地址:`/app/static/screen/{selected_task_id}.html`"
+                    f"(网关下为 `/insightbot/app/static/screen/{selected_task_id}.html`);"
+                    "所有开屏任务列表见 `/app/static/screen/index.html`"
+                )
+
+            render_section_heading(
                 "🔗 信源：这条任务从哪里找内容",
                 "信源名称面向人显示；RSS URL 是实际抓取地址；栏目 hints 用来提示内容更可能属于哪个板块。",
                 anchor="configure-sources",
@@ -1739,6 +1810,15 @@ def main() -> None:
                     proposed_task_def["enabled"] = new_enabled
                     proposed_task_def["pipeline"] = new_pipeline
                     proposed_task_def["channels"] = selected_channels
+                    proposed_task_def["screen"] = {
+                        "enabled": bool(screen_enabled),
+                        "theme": screen_theme,
+                        "refresh_seconds": int(screen_refresh),
+                        "rotate_seconds": int(screen_rotate),
+                        "image_rotate_seconds": int(screen_image_rotate),
+                    }
+                    if screen_title.strip():
+                        proposed_task_def["screen"]["title"] = screen_title.strip()
                     proposed_sources = deepcopy(sources_editor)
                     proposed_sources["rss"] = rss_sources
                     proposed_sources["search"] = {

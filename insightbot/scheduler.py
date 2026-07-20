@@ -108,6 +108,7 @@ class Scheduler:
         self.tasks: dict[str, Task] = {}
         self._log = logging.getLogger("Scheduler")
         self._runtime_mtimes: dict[str, float | None] = {}
+        self.config_error: str | None = None
         self._load_tasks()
         self._refresh_runtime_mtimes()
 
@@ -132,8 +133,20 @@ class Scheduler:
         return load_config
 
     def _load_tasks(self) -> None:
-        """Load tasks from tasks.json."""
-        tasks_data = load_tasks(self.bot_dir)
+        """Load tasks from tasks.json.
+
+        A broken tasks.json (e.g. a hand edit with a missing comma) must not
+        take down the console or the scheduler service: keep the previous
+        task map, record config_error for the UI, and let the mtime watcher
+        recover automatically once the file is fixed.
+        """
+        try:
+            tasks_data = load_tasks(self.bot_dir)
+        except Exception as exc:
+            self.config_error = f"{type(exc).__name__}: {exc}"
+            self._log.error(f"Failed to load tasks.json; keeping previous state: {exc}")
+            return
+        self.config_error = None
         self.tasks.clear()
         for task_id, task_def in tasks_data.get("tasks", {}).items():
             self.tasks[task_id] = Task(
@@ -169,7 +182,10 @@ class Scheduler:
             return False
         self._log.info("Runtime config changed on disk; reloading scheduler state.")
         self._load_tasks()
-        init_channels(load_channels(self.bot_dir))
+        try:
+            init_channels(load_channels(self.bot_dir))
+        except Exception as exc:
+            self._log.error(f"Failed to reload channels.json; keeping previous channels: {exc}")
         self._runtime_mtimes = current
         return True
 

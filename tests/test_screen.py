@@ -21,6 +21,7 @@ sys.modules.setdefault("requests", MagicMock())
 from insightbot.screen import (  # noqa: E402
     EMPTY_MESSAGE,
     build_screen_html,
+    build_screen_index_html,
     collect_selected_image_map,
     generate_screen_from_latest_run,
     list_screen_images,
@@ -28,6 +29,7 @@ from insightbot.screen import (  # noqa: E402
     prepare_section_images,
     render_screen_html,
     write_screen_html,
+    write_screen_index,
 )
 
 SAMPLE_MARKDOWN = """## 💡 营销行业
@@ -242,6 +244,32 @@ class TestPrepareSectionImages:
         assert result == [[], []]
 
 
+class TestConsoleScreenEditor:
+    """控制台任务编辑器的大屏配置区(源码级 smoke,与现有 UI 测试同约定)。"""
+
+    def test_task_editor_exposes_screen_controls(self):
+        from pathlib import Path
+
+        source = Path("scripts/app.py").read_text(encoding="utf-8")
+        assert "📺 大屏:这条任务要不要上电视" in source
+        assert "task_screen_enabled_" in source
+        assert "task_screen_theme_" in source
+        assert "task_screen_refresh_" in source
+        assert "task_screen_rotate_" in source
+        assert "task_screen_image_rotate_" in source
+        assert "task_screen_title_" in source
+        assert 'proposed_task_def["screen"]' in source
+        assert '"image_rotate_seconds"' in source
+        assert "/app/static/screen/" in source
+
+    def test_config_error_banner_present(self):
+        from pathlib import Path
+
+        source = Path("scripts/app.py").read_text(encoding="utf-8")
+        assert "scheduler.config_error" in source
+        assert "tasks.json 加载失败" in source
+
+
 class TestBuildScreenHtml:
     def test_report_title_date_placeholder_is_substituted(self):
         config = {
@@ -257,6 +285,52 @@ class TestBuildScreenHtml:
     def test_default_title_used_when_unconfigured(self):
         page = build_screen_html("Daily_brief", {}, SAMPLE_MARKDOWN)
         assert "营销情报早报" in page
+
+    def test_task_screen_title_overrides_global(self):
+        config = {
+            "_task_name": "营销日报",
+            "settings": {"report_title": "全局标题 | {date}"},
+            "_task_screen": {"enabled": True, "title": "客户雷达 | {date}"},
+        }
+        page = build_screen_html("Daily_brief", config, SAMPLE_MARKDOWN)
+        assert "客户雷达" in page
+        assert "全局标题" not in page
+
+
+class TestScreenIndex:
+    def test_index_lists_only_enabled_tasks(self, tmp_path, monkeypatch):
+        tasks = {
+            "tasks": {
+                "Daily_brief": {"name": "营销日报", "screen": {"enabled": True}},
+                "Other_task": {"name": "其他任务", "screen": {"enabled": False}},
+            }
+        }
+        tasks_file = tmp_path / "tasks.json"
+        tasks_file.write_text(json.dumps(tasks, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setenv("TASKS_FILE", str(tasks_file))
+        monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path / "screen"))
+        target = write_screen_index()
+        assert target is not None
+        page = target.read_text(encoding="utf-8")
+        assert 'href="Daily_brief.html"' in page
+        assert "营销日报" in page
+        assert "Other_task" not in page
+        assert list((tmp_path / "screen").glob("*.tmp")) == []
+
+    def test_index_returns_none_without_enabled_tasks(self, tmp_path, monkeypatch):
+        tasks_file = tmp_path / "tasks.json"
+        tasks_file.write_text(json.dumps({"tasks": {"t1": {"name": "x"}}}), encoding="utf-8")
+        monkeypatch.setenv("TASKS_FILE", str(tasks_file))
+        monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path / "screen"))
+        assert write_screen_index() is None
+
+    def test_index_html_escapes_and_strips_emoji(self):
+        page = build_screen_index_html(
+            [("t1", "📊 标题<script>")], generated_at=datetime(2026, 7, 19, 10, 0)
+        )
+        assert "标题&lt;script&gt;" in page
+        assert "📊" not in page
+        assert 'href="t1.html"' in page
 
 
 class TestWriteScreenHtml:
@@ -351,6 +425,18 @@ class TestTaskRunnerScreenHook:
         assert page.exists()
         assert "营销行业" in page.read_text(encoding="utf-8")
         assert result["screen_path"] == str(page)
+        assert result["ok"] is True
+
+    def test_enabled_screen_writes_index(self, tmp_path, monkeypatch):
+        tasks = {"tasks": {"Daily_brief": {"name": "营销日报", "screen": {"enabled": True}}}}
+        tasks_file = tmp_path / "tasks.json"
+        tasks_file.write_text(json.dumps(tasks, ensure_ascii=False), encoding="utf-8")
+        monkeypatch.setenv("TASKS_FILE", str(tasks_file))
+        monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path / "screen"))
+        result = self._run(self._fake_config({"enabled": True}))
+        index = tmp_path / "screen" / "index.html"
+        assert index.exists()
+        assert 'href="Daily_brief.html"' in index.read_text(encoding="utf-8")
         assert result["ok"] is True
 
     def test_enabled_screen_includes_scanned_images(self, tmp_path, monkeypatch):

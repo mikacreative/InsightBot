@@ -5,8 +5,10 @@ test_scheduler.py — insightbot.scheduler 核心逻辑测试
   - Task.should_run_now() 时间匹配和 idempotency guard
   - Scheduler.run_all_enabled() 只运行 enabled 任务
   - Scheduler.reload() 重新加载 tasks.json
+  - tasks.json 损坏时的容错(保留旧状态 + config_error + 自动恢复)
 """
 
+import json
 import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime
@@ -142,6 +144,60 @@ class TestSchedulerRunAllEnabled:
 
                 assert len(results) == 1
                 assert results[0]["task_id"] == "task_a"
+
+
+class TestSchedulerConfigErrorTolerance:
+    """tasks.json 损坏(如手改少逗号)时不得拖垮调度器/控制台。"""
+
+    def _bare_scheduler(self):
+        from insightbot.scheduler import Scheduler
+
+        sched = Scheduler.__new__(Scheduler)
+        sched.bot_dir = "/tmp"
+        sched.tasks = {}
+        sched._log = MagicMock()
+        sched.config_error = None
+        return sched
+
+    def test_broken_tasks_json_keeps_previous_state(self):
+        sched = self._bare_scheduler()
+        sched.tasks = {"existing": MagicMock()}
+
+        with patch(
+            "insightbot.scheduler.load_tasks",
+            side_effect=json.JSONDecodeError("Expecting ',' delimiter", "doc", 143),
+        ):
+            sched._load_tasks()
+
+        assert "existing" in sched.tasks  # 保留修复前状态
+        assert sched.config_error is not None
+        assert "JSONDecodeError" in sched.config_error
+
+    def test_recovery_clears_error(self):
+        sched = self._bare_scheduler()
+        sched.config_error = "JSONDecodeError: previous"
+
+        with patch("insightbot.scheduler.load_tasks", return_value={"tasks": {}}):
+            sched._load_tasks()
+
+        assert sched.config_error is None
+
+    def test_broken_channels_json_does_not_kill_reload(self):
+        from insightbot.scheduler import Scheduler
+
+        sched = Scheduler.__new__(Scheduler)
+        sched.bot_dir = "/tmp"
+        sched.tasks = {}
+        sched._log = MagicMock()
+        sched.config_error = None
+        sched._runtime_mtimes = {"tasks": 1.0, "channels": 1.0}
+
+        with patch.object(Scheduler, "_get_runtime_mtimes", return_value={"tasks": 1.0, "channels": 2.0}), \
+             patch.object(Scheduler, "_load_tasks"), \
+             patch("insightbot.scheduler.load_channels", side_effect=json.JSONDecodeError("bad", "doc", 1)):
+            changed = sched.reload_if_config_changed()
+
+        assert changed is True  # reload 本身不抛异常
 
 
 class TestSchedulerReload:
