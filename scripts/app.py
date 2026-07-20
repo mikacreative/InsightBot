@@ -1,10 +1,23 @@
 import json
 import logging
+import mimetypes
 import os
 from copy import deepcopy
 from datetime import datetime
 
 import streamlit as st
+
+# Defense in depth for static Content-Type: Streamlit can serve
+# /app/static/** without ever running this script (no session), so the
+# authoritative fix is the deploy step ensuring the host's /etc/mime.types;
+# registering here too covers mime maps initialized after a session starts.
+mimetypes.add_type("text/html", ".html")
+mimetypes.add_type("image/jpeg", ".jpg")
+mimetypes.add_type("image/jpeg", ".jpeg")
+mimetypes.add_type("image/png", ".png")
+mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("image/gif", ".gif")
+
 from insightbot.channels import init_channels, test_channel_config, validate_channel_definition
 from insightbot.config import (
     load_channels,

@@ -508,3 +508,16 @@ class TestTaskRunnerScreenHook:
         assert result["ok"] is True
         assert result["screen_path"] is None
         assert result["channel_results"][0]["ok"] is True
+
+
+class TestAppStaticContentTypes:
+    """生产精简镜像缺 mime 映射时,静态处理器会把 .html 回退成 text/plain,
+    浏览器于是显示源码而非渲染。app.py 必须在进程内显式注册。"""
+
+    def test_app_registers_screen_content_types(self):
+        from pathlib import Path
+
+        source = Path("scripts/app.py").read_text(encoding="utf-8")
+        assert 'mimetypes.add_type("text/html", ".html")' in source
+        assert 'mimetypes.add_type("image/jpeg", ".jpg")' in source
+        assert 'mimetypes.add_type("image/png", ".png")' in source
