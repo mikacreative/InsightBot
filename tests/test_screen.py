@@ -10,6 +10,8 @@ test_screen.py — insightbot.screen 电视大屏 P0 测试
 """
 
 import json
+import os
+import stat
 import sys
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -348,6 +350,13 @@ class TestWriteScreenHtml:
         assert target == out_dir / "Daily_brief.html"
         assert target.read_text(encoding="utf-8") == "<html>ok</html>"
         assert list(out_dir.glob("*.tmp")) == []
+
+    def test_written_page_is_world_readable_for_nginx(self, tmp_path, monkeypatch):
+        """mkstemp 默认 0600,nginx(www-data)会读不了;必须为 0644。"""
+        monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path))
+        target = write_screen_html("Daily_brief", "<html>ok</html>")
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+        assert mode == 0o644
 
     def test_rejects_unsafe_task_id(self, tmp_path, monkeypatch):
         monkeypatch.setenv("SCREEN_OUTPUT_DIR", str(tmp_path))

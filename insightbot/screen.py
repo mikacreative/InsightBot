@@ -430,7 +430,11 @@ def list_screen_images(bot_dir: str | None = None) -> list[str]:
 
 
 def write_screen_html(task_id: str, html_text: str, bot_dir: str | None = None) -> Path:
-    """Atomically write the page to <screen_output_dir>/<task_id>.html."""
+    """Atomically write the page to <screen_output_dir>/<task_id>.html.
+
+    The file is chmod 0644 (not mkstemp's 0600) because the page is served
+    by nginx running as a different user than the scheduler.
+    """
     safe_task_id = require_safe_id(task_id, label="task_id")
     out_dir = Path(screen_output_dir(bot_dir))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -439,6 +443,7 @@ def write_screen_html(task_id: str, html_text: str, bot_dir: str | None = None) 
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(html_text)
+        os.chmod(tmp_path, 0o644)
         os.replace(tmp_path, target)
     except BaseException:
         try:
@@ -532,6 +537,7 @@ def write_screen_index(bot_dir: str | None = None) -> Path | None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(build_screen_index_html(entries, generated_at=datetime.now()))
+        os.chmod(tmp_path, 0o644)  # served by nginx as a different user
         os.replace(tmp_path, target)
     except BaseException:
         try:
