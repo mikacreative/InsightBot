@@ -7,10 +7,10 @@ from datetime import datetime
 
 import streamlit as st
 
-# The TV screen pages and their images must be served with the correct
-# Content-Type regardless of the host's /etc/mime.types (minimal server
-# images can lack the mappings, and some static handlers fall back to
-# text/plain, which makes browsers show raw HTML source).
+# Defense in depth for static Content-Type: Streamlit can serve
+# /app/static/** without ever running this script (no session), so the
+# authoritative fix is the deploy step ensuring the host's /etc/mime.types;
+# registering here too covers mime maps initialized after a session starts.
 mimetypes.add_type("text/html", ".html")
 mimetypes.add_type("image/jpeg", ".jpg")
 mimetypes.add_type("image/jpeg", ".jpeg")

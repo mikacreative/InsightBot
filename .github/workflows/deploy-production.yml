@@ -128,6 +128,14 @@ jobs:
 
           chown ubuntu:ubuntu "$deploy_path"/tasks.json "$deploy_path"/channels.json "$deploy_path"/config.content.json "$deploy_path"/config.secrets.json 2>/dev/null || true
 
+          # Static file handlers guess Content-Type from the host mime map
+          # (a static request can be served without ever running the app
+          # script). Minimal images may lack these entries and would serve
+          # screen pages as text/plain; make the map deterministic.
+          if ! grep -q '^text/html' /etc/mime.types 2>/dev/null; then
+            printf 'text/html\thtml htm\nimage/jpeg\tjpeg jpg jpe\nimage/png\tpng\nimage/webp\twebp\nimage/gif\tgif\n' >> /etc/mime.types
+          fi
+
           # Runtime-writable dirs (TV screen pages, run data) must belong to
           # the service user; the root-run git checkout would otherwise leave
           # them root-owned and the scheduler/web services could not write.
