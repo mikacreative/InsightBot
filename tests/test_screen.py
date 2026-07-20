@@ -521,3 +521,10 @@ class TestAppStaticContentTypes:
         assert 'mimetypes.add_type("text/html", ".html")' in source
         assert 'mimetypes.add_type("image/jpeg", ".jpg")' in source
         assert 'mimetypes.add_type("image/png", ".png")' in source
+
+    def test_streamlit_version_floor_for_html_static_serving(self):
+        """1.55 及更早的静态处理器按扩展名白名单服务,.html 一律 text/plain。"""
+        from pathlib import Path
+
+        requirements = Path("requirements.txt").read_text(encoding="utf-8")
+        assert "streamlit>=1.56.0" in requirements
