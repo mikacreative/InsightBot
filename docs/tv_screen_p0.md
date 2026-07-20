@@ -65,6 +65,7 @@ P0 只做一件事:把一个任务(Daily_brief 行业雷达)的简报产出渲�
 
 - 直连:`http://<host>:8501/app/static/screen/<task_id>.html`
 - 索引页:`/app/static/screen/index.html` 自动列出所有开屏任务的页面(每次生成任一屏时同步刷新),多任务时电视各开各的 URL
+- **依赖 Streamlit >= 1.56**:1.55 及更早版本的静态处理器按扩展名白名单服务,`.html` 一律返回 `text/plain`(浏览器显示源码);1.56 起改为 mimetypes 判断。requirements.txt 已锁定
 - gateway 前缀暴露(如 `https://<host>/insightbot/app/static/screen/...`)属部署事项,按现有部署 runbook 执行并需 Mika 批准;敏感内容走内网,不公网暴露。
 
 页面完全自包含(内联 CSS/JS,无外部依赖),电视自带浏览器、电视盒子或旧电脑全屏打开即可;开机自启与 kiosk 模式在播放端设置,不属于本 repo。

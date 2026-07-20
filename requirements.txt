@@ -1,5 +1,8 @@
 ## ── 运行时依赖 ────────────────────────────────────────────────────────────────
-streamlit
+# >=1.56: static app files switched from a hardcoded extension allowlist
+# (which served .html as text/plain) to mimetypes-based Content-Type,
+# required by the TV screen pages under /app/static/screen/.
+streamlit>=1.56.0
 python-crontab
 feedparser
 requests
