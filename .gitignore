@@ -60,3 +60,8 @@ insightbot.egg-info/
 marketing_bot.egg-info/
 editorial-intelligence/*.egg-info/
 pytest-of-mikawang/
+
+# Isolated Signal Desk test runtime
+data/signal-desk/
+.venv-signal-desk/
+!.env.signal-desk.example
