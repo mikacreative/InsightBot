@@ -4,7 +4,8 @@ import json
 import os
 import secrets
 import uuid
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from .core import Desk
 
@@ -34,6 +35,7 @@ def serve(root, host='127.0.0.1', port=18876):
         raise ValueError('Test service must bind to loopback; use an SSH tunnel')
     desk = Desk(root)
     csrf = secrets.token_urlsafe(32)
+    workflow_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -77,6 +79,10 @@ def serve(root, host='127.0.0.1', port=18876):
                 self.send({'error':'Invalid run ID or request'},400)
 
         def do_POST(self):
+            with workflow_lock:
+                self.handle_post()
+
+        def handle_post(self):
             if self.headers.get('X-Signal-Desk-CSRF') != csrf:
                 self.send({'error':'CSRF validation failed'},403); return
             length = int(self.headers.get('Content-Length', '0'))
@@ -98,4 +104,4 @@ def serve(root, host='127.0.0.1', port=18876):
                 self.send({'error':f'Workflow failed ({type(exc).__name__}); check configuration/input. No automatic retry.', 'run_id':run_id},400)
 
     print(f'Signal Desk test UI: http://{host}:{port}', flush=True)
-    HTTPServer((host, port), Handler).serve_forever()
+    ThreadingHTTPServer((host, port), Handler).serve_forever()

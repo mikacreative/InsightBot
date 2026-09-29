@@ -10,6 +10,11 @@ case "${1:-status}" in
       echo 'Recorded process is already running; inspect status before restart.'; exit 1
     fi
     if [ -f "$ROOT/config.env" ]; then set -a; . "$ROOT/config.env"; set +a; fi
+    # The first template used this placeholder. Never create a new state tree there.
+    if [ "${SIGNAL_DESK_STATE_DIR:-}" = /absolute/private/path/signal-desk-state ]; then
+      unset SIGNAL_DESK_STATE_DIR
+      echo 'Template state path detected; using the existing isolated test state directory.'
+    fi
     export SIGNAL_DESK_STATE_DIR="${SIGNAL_DESK_STATE_DIR:-$ROOT/state}"
     export SIGNAL_DESK_INPUT_FILE="${SIGNAL_DESK_INPUT_FILE:-$ROOT/state/sunlife-replay.json}"
     export LANGGRAPH_STRICT_MSGPACK=true
