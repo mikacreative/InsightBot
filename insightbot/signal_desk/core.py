@@ -74,7 +74,7 @@ Challenge the brand hypothesis when evidence warrants it. No need to force conte
 Each card: title, disposition (action/research/observe/drop), observation, interpretation, brand_relevance,
 limitations, next_step, evidence_ids (nonempty list), counter_evidence_ids (list, may be empty).
 All textual fields Chinese, concise. Include a justified editorial disposition; no invented quotes or statistics.
-Maximum 8 cards; empty is valid. observation must separate source claims from established facts.'''
+Maximum 3 cards for this alpha; empty is valid. Each textual field at most 120 Chinese characters. observation must separate source claims from established facts.'''
 
 
 def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
@@ -85,9 +85,12 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
         raise ValueError("Live mode requires SIGNAL_DESK_AI_BASE_URL, SIGNAL_DESK_AI_API_KEY and SIGNAL_DESK_AI_MODEL")
     if urlsplit(base).scheme != 'https' and urlsplit(base).hostname not in ('localhost', '127.0.0.1'):
         raise ValueError("AI base URL must use HTTPS (localhost excepted)")
+    max_tokens = int(os.environ.get("SIGNAL_DESK_AI_MAX_TOKENS", "8192"))
+    if not 1024 <= max_tokens <= 16384:
+        raise ValueError("AI max tokens must be between 1024 and 16384")
     payload = {"model": model, "messages": [{"role": "system", "content": EDITOR_PROMPT},
                {"role": "user", "content": json.dumps({"brief": brief, "evidence": evidence}, ensure_ascii=False)}],
-               "temperature": 0.2, "max_tokens": 4000}
+               "temperature": 0.2, "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
     cache = run_dir / 'editor-result.json'
     marker = run_dir / 'editor-request.started'
     if cache.exists():
@@ -97,13 +100,25 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
         marker.open('x').close()
     except FileExistsError:
         raise RuntimeError("AI request outcome uncertain; inspect provider usage before starting a new run")
-    with httpx.Client(timeout=90, follow_redirects=False) as client:
+    with httpx.Client(timeout=180, follow_redirects=False) as client:
         response = client.post(base + '/chat/completions', headers={"Authorization": "Bearer " + key}, json=payload)
         if response.status_code >= 400:
             raise RuntimeError(f"AI provider HTTP {response.status_code}; response body omitted to protect credentials")
-        content = response.json()['choices'][0]['message']['content']
+        completion = response.json()
+        choice = completion['choices'][0]
+        content = choice['message'].get('content')
+        metadata = {"model": model, "finish_reason": choice.get('finish_reason'),
+                    "usage": completion.get('usage', {}), "max_tokens": max_tokens}
+        (run_dir / 'editor-response-meta.json').write_text(json.dumps(metadata), encoding='utf-8')
+        if choice.get('finish_reason') == 'length':
+            raise RuntimeError("AI output exceeded token limit; response metadata saved; no automatic retry")
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("AI returned no text content; response metadata saved")
     content = re.sub(r'^```(?:json)?\s*|\s*```$', '', content.strip())
-    result = json.loads(content)
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError:
+        raise RuntimeError("AI returned invalid JSON; response metadata saved; no automatic retry") from None
     cache.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
     return result['cards']
 

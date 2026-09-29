@@ -130,3 +130,25 @@ def test_collection_scope_survives_checkpoint(tmp_path):
     result = desk.start('scope', {'brand': 'B', 'question': 'Q'}, [], collection={'page': 1, 'returned_items': 0, 'note_time': None})
     assert result['coverage']['collection_metadata']['page'] == 1
     assert result['coverage']['collection_metadata']['returned_items'] == 0
+
+
+def test_truncated_ai_response_records_reason_without_retry(tmp_path, monkeypatch):
+    from insightbot.signal_desk import core
+    for key, value in {'SIGNAL_DESK_AI_BASE_URL':'https://example.org/v1','SIGNAL_DESK_AI_API_KEY':'fixture-secret','SIGNAL_DESK_AI_MODEL':'fixture'}.items():
+        monkeypatch.setenv(key,value)
+    calls=[]
+    class Client:
+        def __init__(self,**kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self,*args): pass
+        def post(self,*args,**kwargs):
+            calls.append(1)
+            class Response:
+                status_code=200
+                def json(self): return {'choices':[{'finish_reason':'length','message':{'content':'{"cards":['}}],'usage':{'completion_tokens':8192}}
+            return Response()
+    monkeypatch.setattr(core.httpx,'Client',Client)
+    with pytest.raises(RuntimeError,match='token limit'): core.live_editor(BRIEF, EVIDENCE,tmp_path)
+    assert json.loads((tmp_path/'editor-response-meta.json').read_text())['finish_reason']=='length'
+    with pytest.raises(RuntimeError,match='uncertain'): core.live_editor(BRIEF,EVIDENCE,tmp_path)
+    assert len(calls)==1
