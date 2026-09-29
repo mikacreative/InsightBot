@@ -26,6 +26,7 @@ async function sample(){try{let p=await request('/api/sample');$('input').value=
 async function start(){try{let p=JSON.parse($('input').value);p.mode=$('mode').value;let r=await request('/api/run',p);$('runid').value=r.run_id}catch(e){$('error').textContent=e.message}}
 async function load(){try{await request('/api/status?id='+encodeURIComponent($('runid').value))}catch(e){}}
 async function review(decision){try{await request('/api/review',{run_id:$('runid').value,decision,reviewer:$('reviewer').value,note:$('note').value})}catch(e){}}
+const initialRun=new URLSearchParams(location.search).get('run');if(initialRun){$('runid').value=initialRun;load()}
 fetch('/api/config').then(r=>r.json()).then(j=>$('config').textContent='AI：'+(j.ai_configured?'已配置':'未配置')+' · JustOneAPI：'+(j.justoneapi_configured?'已配置':'未配置')+' · 交付：仅本地导出');
 </script>'''
 

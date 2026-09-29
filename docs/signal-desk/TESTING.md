@@ -106,3 +106,15 @@ set +a
 - Browser plugin 未提供，使用已有 Playwright＋Chrome。首次连接赶上服务重启发生 reset，健康检查恢复后完整重跑通过。
 - 本会话经已授权 JustOneAPI MCP 做了一次实际搜索并取得20条笔记，用真实响应验证归一契约；Mac mini 的直接 token 调用与 Live AI 尚未验收。当前配置页面显示两者均未配置。
 - 未验证：真实 AI provider 的 JSON 输出、Mac mini 直连供应商权限与计费、业务连续试点质量、语义自动审核。自动补证、反证检索、客户鉴权与自动发送不在本版实现范围内。
+
+
+## 2026-09-29 env 联测与访问修复
+
+- 用户填写的 DMXAPI / `glm-5.3-flashx` 与 JustOneAPI 凭证已在 Mac mini 实测；密钥未复制到代码、日志或本文件。
+- JustOneAPI 一次查询返回20条；选前5条做一次 AI 联测，第一次返回不完整 JSON。调整为 JSON 输出、最多3张简短卡片、默认8192 token，并记录 finish_reason/usage，使用同一批数据再测成功，没有重复采集。
+- 成功 run：`env-ai-recheck-20260929-185516`，3张卡片，停在 `awaiting_review`。模型返回 `finish_reason=stop`；prompt2156、completion4136（其中reasoning3453），total6292。token用量不等于已核实的货币费用。
+- `/ ?run=RUN_ID`（去掉路径中的空格）可直接加载待审稿。原始失败 run 保留用于审计，未被成功结果覆盖。
+- 页面无法访问的问题修复：原 HTTPServer 单线程会被空闲浏览器连接占住，改为 ThreadingHTTPServer，工作流写操作仍串行；新增打开空闲socket后健康页仍响应的回归用例。
+- env 中旧模板的 `/absolute/private/path/signal-desk-state` 被启动脚本识别，回落至原有私有state目录；未修改用户的config.env。新模板此项留空即可使用默认值。
+- 当前累计53项本地测试，17项Mac mini新模块测试通过；浏览器已确认页面显示AI和JustOneAPI已配置。测试服务重启后载入新env。
+- 局域网开放尚未启用：本版无登录或员工权限。团队试用下一步应配合认证、常驻运行与业务表单，不将密钥配置交给普通员工。
