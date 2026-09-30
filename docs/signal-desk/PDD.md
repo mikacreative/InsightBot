@@ -139,3 +139,12 @@ Mac mini 测试目录约定为 `~/Applications/SignalDesk-test`，使用 Python 
 - Sun Life v7：本地 `Work/Sun Life/05 RedNote/01_plan/manuscript_SunLife_RedNotePitch_20260929_v7_internal.md`；团队编辑入口见[企业微信智能文档](https://doc.weixin.qq.com/smartpage/a1_ANMAKgYUAFkCNTyRBf9N0RrGdNcm0?p=1jigjo)。本文不替代提案原文，也未修改团队在线稿。
 - 内部试跑证据：qiangua-insights 本地 `data/2026-09-29/sunlife_signal_desk_trial/editorial_trial_02.md` 及同目录响应文件；客户原始资料不随代码发布。
 - LangGraph 官方设计依据：[Overview](https://docs.langchain.com/oss/python/langgraph/overview)、[Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)、[Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)。
+
+
+## 2026-09-30 团队测试迭代
+
+Mika 已确认推进员工业务配置、人工审稿和受控内网访问。本轮在既有独立分支实现品牌研究表单、配置保存、单页采集计划确认、后台任务与研究历史、卡片修改和版本校验、批准/否决、账号登录与管理员创建账号。表单中的目标受众仍是假设，不是采集对象已验证的身份。关键词、主题与排除项由员工检查，不宣称已自动完成研究规划。
+
+Live 计划每轮上限1次搜索、20条样本、1次AI编辑；执行前明确确认，重复执行同一计划返回已有任务。进程中断后标记待排查，不自动重试潜在付费调用。Replay 采用原始样刊的品牌与时间范围，不按新设置重新采集。后台完成与人工审稿并发时保留已批准/否决终态。
+
+内网采用单个共享工作区：admin管理账号，editor可研究、修改与审核；不是客户级权限隔离。数据接口密钥继续在服务器配置。服务采用用户登录后启动的LaunchAgent，私有地址HTTPS18878与本机18876双入口，未公开互联网。操作与验收见[团队测试说明](TEAM-TEST.md)。定期调度、自动反证检索、正文扩展、货币预算结算和客户独立空间仍未实现。

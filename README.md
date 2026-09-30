@@ -3,6 +3,7 @@
 ### Signal Desk 测试工作流（2026-09-29）
 
 品牌定向研究与人工审稿的独立 LangGraph 模块，入口与数据均独立于现有日报。
+团队表单与登录入口见 [团队测试说明](docs/signal-desk/TEAM-TEST.md)。
 参见 [本轮 PDD](docs/signal-desk/PDD.md) 与 [测试部署及环境配置](docs/signal-desk/TESTING.md)。
 演示／历史回放不代表实时采集或 AI 验收；实时运行需要单独配置供应商凭证。
 
