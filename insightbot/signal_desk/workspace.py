@@ -150,6 +150,12 @@ class Workspace:
             job.update(status=result['status'],updated_at=now())
         except Exception:
             job.update(status='failed',updated_at=now(),error='研究未完成，请检查配置、供应商权限或输入。付费请求可能已发生；不会自动重试。')
+            metadata = self.root/'runs'/key/'editor-response-meta.json'
+            if metadata.exists():
+                try:
+                    if json.loads(metadata.read_text()).get('finish_reason') == 'length':
+                        job.update(error_code='ai_output_limit',error='AI 推理或输出达到上限，已保留采集证据。请联系管理员调整模型并复用证据；不要重复采集。')
+                except (ValueError,OSError): pass
         finally:
             desk.connection.close()
         with self.lock:

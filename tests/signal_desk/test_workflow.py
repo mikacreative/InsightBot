@@ -152,3 +152,24 @@ def test_truncated_ai_response_records_reason_without_retry(tmp_path, monkeypatc
     assert json.loads((tmp_path/'editor-response-meta.json').read_text())['finish_reason']=='length'
     with pytest.raises(RuntimeError,match='uncertain'): core.live_editor(BRIEF,EVIDENCE,tmp_path)
     assert len(calls)==1
+
+
+def test_glm_editor_bounds_reasoning_and_omits_duplicate_snapshots(tmp_path, monkeypatch):
+    from insightbot.signal_desk import core
+    for key,value in {'SIGNAL_DESK_AI_BASE_URL':'https://example.org/v1','SIGNAL_DESK_AI_API_KEY':'fixture','SIGNAL_DESK_AI_MODEL':'glm-5.3-flashx'}.items(): monkeypatch.setenv(key,value)
+    monkeypatch.delenv('SIGNAL_DESK_AI_REASONING_EFFORT',raising=False)
+    class Client:
+        def __init__(self,**kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self,*args): pass
+        def post(self,*args,**kwargs):
+            payload=kwargs['json']
+            assert payload['reasoning_effort']=='low'
+            sent=json.loads(payload['messages'][1]['content'])['evidence'][0]
+            assert sent['excerpt']=='unique body' and 'snapshots' not in sent
+            class Response:
+                status_code=200
+                def json(self): return {'choices':[{'finish_reason':'stop','message':{'content':'{"cards":[]}'}}]}
+            return Response()
+    monkeypatch.setattr(core.httpx,'Client',Client)
+    assert core.live_editor(BRIEF,[{'id':'E1','excerpt':'unique body','snapshots':[{'excerpt':'unique body'}]}],tmp_path)==[]

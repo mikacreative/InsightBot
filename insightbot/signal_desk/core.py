@@ -88,9 +88,16 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
     max_tokens = int(os.environ.get("SIGNAL_DESK_AI_MAX_TOKENS", "8192"))
     if not 1024 <= max_tokens <= 16384:
         raise ValueError("AI max tokens must be between 1024 and 16384")
+    # Keep full evidence/snapshots in persistence, avoid sending duplicate bodies to the model.
+    editor_evidence = [{k: e.get(k) for k in ('id','title','excerpt','platform','published_at','source_grade','limitation','conflicting_snapshots')} for e in evidence]
+    effort = os.environ.get("SIGNAL_DESK_AI_REASONING_EFFORT", "low" if model.lower().startswith('glm-5.3') else "")
+    if effort and effort not in ('low','medium','high','max'):
+        raise ValueError("Invalid AI reasoning effort")
     payload = {"model": model, "messages": [{"role": "system", "content": EDITOR_PROMPT},
-               {"role": "user", "content": json.dumps({"brief": brief, "evidence": evidence}, ensure_ascii=False)}],
+               {"role": "user", "content": json.dumps({"brief": brief, "evidence": editor_evidence}, ensure_ascii=False)}],
                "temperature": 0.2, "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
+    if effort:
+        payload['reasoning_effort'] = effort
     cache = run_dir / 'editor-result.json'
     marker = run_dir / 'editor-request.started'
     if cache.exists():
@@ -108,7 +115,7 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
         choice = completion['choices'][0]
         content = choice['message'].get('content')
         metadata = {"model": model, "finish_reason": choice.get('finish_reason'),
-                    "usage": completion.get('usage', {}), "max_tokens": max_tokens}
+                    "usage": completion.get('usage', {}), "max_tokens": max_tokens, "reasoning_effort": effort}
         (run_dir / 'editor-response-meta.json').write_text(json.dumps(metadata), encoding='utf-8')
         if choice.get('finish_reason') == 'length':
             raise RuntimeError("AI output exceeded token limit; response metadata saved; no automatic retry")
