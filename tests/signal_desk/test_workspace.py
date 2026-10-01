@@ -126,3 +126,23 @@ def test_worker_final_save_preserves_concurrent_review(tmp_path,monkeypatch,deci
     assert ws.process_job(job['id'])['status']==expected
     assert ws.job(job['id'])['status']==expected
     assert ws.run(job['id'])['status']==expected
+
+
+def test_revise_summary_is_validated_and_audited(tmp_path, monkeypatch):
+    import insightbot.signal_desk.core as core
+    evidence=[{'source_id':'a','platform':'test','url':'https://example.org/a','title':'Fixture','excerpt':'Fixture body text'}]
+    eid=core.normalize(evidence,50)[0]['id']
+    card={'title':'T','disposition':'research','observation':'O','interpretation':'I','brand_relevance':'R','limitations':'L','next_step':'N',
+          'evidence_ids':[eid],'counter_evidence_ids':[],'signal_type':'topic','evidence_strength':'weak','plan_sections':[],'quotes':[],'recommended_action':'A'}
+    monkeypatch.setattr(core,'live_editor',lambda *a: {'headline':'Original','avoid':[],'cards':[card]})
+    ws=Workspace(tmp_path,start_worker=False)
+    ws._desk.start('live',{'brand':'A','question':'Q'},evidence,'live')
+    current=ws.run('live')
+    with pytest.raises(ValueError): ws.revise('live',current['cards'],current['revision_checksum'],'Editor',{'headline':'','avoid':[]})
+    revised=ws.revise('live',current['cards'],current['revision_checksum'],'Editor',{'headline':'Edited','avoid':['Skip X']})
+    assert revised['summary']=={'headline':'Edited','avoid':['Skip X']}
+    assert revised['revision_checksum']!=current['revision_checksum']
+    audit=json.loads(next((ws.base/'revisions').glob('*.json')).read_text())
+    assert audit['before_summary']['headline']=='Original' and audit['after_summary']['headline']=='Edited'
+    kept=ws.revise('live',revised['cards'],revised['revision_checksum'],'Editor')
+    assert kept['summary']['headline']=='Edited'

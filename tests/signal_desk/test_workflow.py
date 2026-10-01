@@ -172,7 +172,7 @@ def test_glm_editor_bounds_reasoning_and_omits_duplicate_snapshots(tmp_path, mon
                 def json(self): return {'choices':[{'finish_reason':'stop','message':{'content':'{"cards":[]}'}}]}
             return Response()
     monkeypatch.setattr(core.httpx,'Client',Client)
-    assert core.live_editor(BRIEF,[{'id':'E1','excerpt':'unique body','snapshots':[{'excerpt':'unique body'}]}],tmp_path)==[]
+    assert core.live_editor(BRIEF,[{'id':'E1','excerpt':'unique body','snapshots':[{'excerpt':'unique body'}]}],tmp_path)['cards']==[]
 
 
 def _signal_card(evidence_id):
@@ -198,7 +198,7 @@ def test_live_v2_requires_signal_fields(tmp_path, monkeypatch):
     import insightbot.signal_desk.core as core
     eid = normalize(EVIDENCE, 50)[0]['id']
     card = _signal_card(eid)
-    monkeypatch.setattr(core, 'live_editor', lambda *a: [card])
+    monkeypatch.setattr(core, 'live_editor', lambda *a: {'headline':'港险被当作高息定存卖', 'avoid':['不用“收益稳”话术'], 'cards':[card]})
     result = Desk(tmp_path).start('live2', BRIEF, EVIDENCE, 'live')
     assert result['coverage']['prompt_version'] == core.PROMPT_VERSION
     assert core.requires_signal(result)
@@ -206,7 +206,7 @@ def test_live_v2_requires_signal_fields(tmp_path, monkeypatch):
     text = Path(approved['artifact']).read_text()
     assert '选题机会' in text and '证据强度 中' in text and '> not a research finding' in text
     legacy = {k: v for k, v in card.items() if k != 'signal_type'}
-    monkeypatch.setattr(core, 'live_editor', lambda *a: [legacy])
+    monkeypatch.setattr(core, 'live_editor', lambda *a: {'headline':'h', 'avoid':[], 'cards':[legacy]})
     with pytest.raises(ValueError): Desk(tmp_path).start('live-legacy', BRIEF, EVIDENCE, 'live')
     assert not core.requires_signal({'mode':'live', 'coverage':{'prompt_version':'signal-desk-editor-v1'}})
 
@@ -279,3 +279,31 @@ def test_editor_receives_stats_and_compact_collection(tmp_path, monkeypatch):
     assert body['evidence_stats']['query:换汇:general'] == 2
     assert body['collection']['note_search_coverage_only']['换汇'] == {'total_count':9}
     assert body['evidence'][0]['query'] == '换汇'
+
+
+def test_live_v2_requires_summary(tmp_path, monkeypatch):
+    import insightbot.signal_desk.core as core
+    card = _signal_card(normalize(EVIDENCE, 50)[0]['id'])
+    monkeypatch.setattr(core, 'live_editor', lambda *a: {'cards':[card]})
+    with pytest.raises(ValueError, match='headline'): Desk(tmp_path).start('nohead', BRIEF, EVIDENCE, 'live')
+    assert Desk(tmp_path).start('empty', BRIEF, [], 'live')['status'] == 'awaiting_review'
+
+
+def test_marketing_view_is_one_page(tmp_path, monkeypatch):
+    import insightbot.signal_desk.core as core
+    evidence = normalize(_graded(2, '港险', 'commercial_suspected') + _graded(1, '实现率', 'general'), 50)
+    commercial = [e['id'] for e in evidence if 'commercial' in e['source_grade']]
+    keep = {**_signal_card(commercial[0]), 'evidence_strength':'medium', 'signal_type':'messaging_risk',
+            'figure':{'label':'代理人模板评论', 'evidence_ids':commercial, 'denominator':'all'}}
+    dropped = {**_signal_card(commercial[0]), 'title':'不该出现的卡', 'disposition':'drop', 'evidence_strength':'weak'}
+    raw = _graded(2, '港险', 'commercial_suspected') + _graded(1, '实现率', 'general')
+    monkeypatch.setattr(core, 'live_editor', lambda *a: {'headline':'港险在小红书被当作高息定存卖', 'avoid':['不用“收益稳”话术'], 'cards':[keep, dropped]})
+    desk = Desk(tmp_path)
+    desk.start('mkt', {**BRIEF, 'time_window':'2026-09'}, raw, 'live')
+    text = core.render_marketing(desk.status('mkt'))
+    assert '**一句话结论**：港险在小红书被当作高息定存卖' in text and '话术风险 · 证据强度 中' in text
+    assert '代理人模板评论：2/3' in text and '> “not a research finding”' in text and '- 不用“收益稳”话术' in text
+    assert '不该出现的卡' not in text and 'observation' not in text and '一般 1 / 商业 2' in text and '未经人工批准' in text
+    approved = desk.resume('mkt', 'approve', 'Tester')
+    marketing = (Path(approved['artifact']).parent / 'marketing.md').read_text()
+    assert '审稿 Tester' in marketing

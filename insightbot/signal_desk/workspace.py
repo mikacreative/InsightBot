@@ -10,12 +10,16 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from .core import Desk, figure_text, requires_signal, validate_cards
+from .core import Desk, figure_text, requires_signal, validate_cards, validate_summary
 from .providers import justone_search, search_to_input
 
 
 def now(): return datetime.now(timezone.utc).isoformat()
 def digest(value): return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+def revision_checksum(state):
+    # Runs without a summary keep the original cards-only checksum.
+    summary = state.get('summary')
+    return digest({'cards':state.get('cards',[]),'summary':summary}) if summary else digest(state.get('cards',[]))
 def identifier(value):
     if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', value): raise ValueError('Invalid identifier')
     return value
@@ -190,28 +194,30 @@ class Workspace:
         with self.lock:
             state = self._desk.status(identifier(key))
             state['has_artifact'] = bool(state.pop('artifact',None))
-            state['revision_checksum'] = digest(state.get('cards',[]))
+            state['revision_checksum'] = revision_checksum(state)
             state['figure_texts'] = [figure_text(c['figure'],state['evidence']) if c.get('figure') else None for c in state.get('cards',[])]
             state['run_id'] = key
             return state
 
-    def revise(self, key, cards, checksum, reviewer):
+    def revise(self, key, cards, checksum, reviewer, summary=None):
         if not isinstance(reviewer,str) or not reviewer.strip(): raise ValueError('Reviewer required')
         with self.lock:
             state = self._desk.status(identifier(key))
             if state.get('status') != 'awaiting_review': raise ValueError('Run is not awaiting review')
-            if checksum != digest(state.get('cards',[])): raise ValueError('Cards changed; refresh before editing')
+            if checksum != revision_checksum(state): raise ValueError('Cards changed; refresh before editing')
             validate_cards(cards,state['evidence'],require_signal=requires_signal(state))
+            summary = state.get('summary',{}) if summary is None else summary
+            if summary or requires_signal(state): validate_summary(summary)
             revision = {'id':uuid.uuid4().hex,'run_id':key,'reviewer':reviewer,'created_at':now(),
-                        'before_checksum':checksum,'after_checksum':digest(cards),'before_cards':state['cards'],'after_cards':cards}
+                        'before_checksum':checksum,'after_checksum':revision_checksum({'cards':cards,'summary':summary}),'before_cards':state['cards'],'after_cards':cards,'before_summary':state.get('summary',{}),'after_summary':summary}
             self._save('revisions',revision)
-            self._desk.graph.update_state({'configurable':{'thread_id':key}}, {'cards':copy.deepcopy(cards)}, as_node='quality')
+            self._desk.graph.update_state({'configurable':{'thread_id':key}}, {'cards':copy.deepcopy(cards),'summary':copy.deepcopy(summary)}, as_node='quality')
             return self.run(key)
 
     def review(self,key,decision,reviewer,note='',checksum=None):
         with self.lock:
             state = self._desk.status(identifier(key))
-            if checksum is None or checksum != digest(state.get('cards',[])): raise ValueError('Review requires current card checksum')
+            if checksum is None or checksum != revision_checksum(state): raise ValueError('Review requires current card checksum')
             result = self._desk.resume(key,decision,reviewer,note)
             path = self.base/'jobs'/(key+'.json')
             if path.exists():

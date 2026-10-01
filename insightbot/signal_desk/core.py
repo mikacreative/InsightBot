@@ -21,6 +21,7 @@ class DeskState(TypedDict, total=False):
     evidence: list[dict]
     mode: str
     cards: list[dict]
+    summary: dict
     replay_cards: list[dict]
     coverage: dict
     collection: dict
@@ -78,7 +79,10 @@ Readers are our own social media & marketing team. They decide what to post next
 to avoid and which words to use in paid media. Work backwards from those decisions and from brief.plan_impact
 (the plan sections the brief says may change), not from whether the hypothesis "wins".
 Use only supplied evidence. Do not infer audience wealth, prevalence, trend, causality or conversion from isolated samples.
-Challenge the brand hypothesis when evidence warrants it. No need to force content ideas. Return JSON object with cards array.
+Challenge the brand hypothesis when evidence warrants it. No need to force content ideas.
+Return JSON object {"headline", "avoid", "cards"}:
+- headline: one sentence the team reads first, at most 60 Chinese characters; say so plainly when evidence is thin.
+- avoid: list (0-3) of things the team should not do or claim this cycle, grounded in the cards.
 Each card:
 - title: one-sentence takeaway the team can act on.
 - signal_type: topic (选题机会) / messaging_risk (话术风险) / market_play (竞品或行业打法) / verbatim (原话素材) / watch (继续观察).
@@ -134,7 +138,7 @@ def _compact_collection(collection):
     return compact
 
 
-def live_editor(brief: dict, evidence: list[dict], run_dir: Path, collection: dict | None = None) -> list[dict]:
+def live_editor(brief: dict, evidence: list[dict], run_dir: Path, collection: dict | None = None) -> dict:
     base = os.environ.get("SIGNAL_DESK_AI_BASE_URL", "").rstrip('/')
     key = os.environ.get("SIGNAL_DESK_AI_API_KEY", "")
     model = os.environ.get("SIGNAL_DESK_AI_MODEL", "")
@@ -159,7 +163,7 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path, collection: di
     cache = run_dir / 'editor-result.json'
     marker = run_dir / 'editor-request.started'
     if cache.exists():
-        return json.loads(cache.read_text())["cards"]
+        return json.loads(cache.read_text())
     # A failed/uncertain paid request is not automatically retried on resume.
     try:
         marker.open('x').close()
@@ -185,7 +189,7 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path, collection: di
     except json.JSONDecodeError:
         raise RuntimeError("AI returned invalid JSON; response metadata saved; no automatic retry") from None
     cache.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
-    return result['cards']
+    return result
 
 
 def _compact(text):
@@ -252,6 +256,17 @@ def validate_signal(card, by_id, groups):
         raise ValueError('Comment-only or keyword-led evidence is at most medium strength')
 
 
+def validate_summary(summary):
+    if not isinstance(summary, dict):
+        raise ValueError('Invalid summary')
+    headline, avoid = summary.get('headline'), summary.get('avoid')
+    if not isinstance(headline, str) or not headline.strip() or len(headline) > 200:
+        raise ValueError('Invalid summary headline')
+    if not isinstance(avoid, list) or len(avoid) > 3 or any(not isinstance(a, str) or not a.strip() or len(a) > 500 for a in avoid):
+        raise ValueError('Invalid summary avoid list')
+    return summary
+
+
 def requires_signal(state):
     # Live runs started before v2 (e.g. pending v1 reviews) keep their original card contract.
     return state.get('mode') == 'live' and state.get('coverage', {}).get('prompt_version') != 'signal-desk-editor-v1'
@@ -301,6 +316,37 @@ def render(state):
         out += ['']
     if not state['cards']:
         out += ['本轮没有足够证据支持可呈现信号。']
+    return '\n'.join(out)
+
+
+def render_marketing(state):
+    """One-page view for our social/marketing team; full evidence and limits stay in the review view."""
+    summary = state.get('summary') or {}
+    cards = [c for c in state['cards'] if c.get('disposition') != 'drop']
+    out = [f"# {state['brief']['brand']} · 本期信号", '']
+    if summary.get('headline'):
+        out += [f"**一句话结论**：{summary['headline']}", '']
+    for index, c in enumerate(cards, 1):
+        out += [f"## {index}. {c['title']}", '']
+        if 'signal_type' in c:
+            sections = '、'.join(c['plan_sections']) or '不改动计划'
+            out += [f"{SIGNAL_TYPES[c['signal_type']]} · 证据强度 {EVIDENCE_STRENGTHS[c['evidence_strength']]} · {sections}", '']
+            if c.get('figure'):
+                out += [f"**数字**：{figure_text(c['figure'], state['evidence'])}", '']
+            out += [f"> “{q['text']}”" for q in c['quotes']] + ([''] if c['quotes'] else [])
+            out += [f"**建议动作**：{c['recommended_action']}", '']
+        else:
+            out += [c['observation'], '', f"**下一步**：{c['next_step']}", '']
+    if not cards:
+        out += ['本期没有足够证据形成信号，不必凑稿。', '']
+    if summary.get('avoid'):
+        out += ['## 本期不建议做什么', ''] + [f"- {a}" for a in summary['avoid']] + ['']
+    stats = state.get('coverage', {}).get('evidence_stats') or {}
+    window = state['brief'].get('time_window', '未注明')
+    review = state.get('review') or {}
+    reviewer = f"；审稿 {review['reviewer']}" if review.get('reviewer') else '；未经人工批准'
+    out += ['---', f"方法：{state['mode']}，{stats.get('all', len(state['evidence']))} 条证据（一般 {stats.get('general', 0)} / 商业 {stats.get('commercial', 0)}），"
+            f"时间窗 {window}{reviewer}。样本不代表人群占比；完整证据与局限见内部审稿视图。"]
     return '\n'.join(out)
 
 
@@ -356,13 +402,22 @@ class Desk:
                     card[key] = [mapping.get(i, i) for i in card.get(key, [])]
                 cards.append(card)
         elif state['mode'] == 'live':
-            cards = live_editor(state['brief'], state['evidence'], run_dir, state.get('collection')) if state['evidence'] else []
+            if not state['evidence']:
+                return {'cards': [], 'summary': {'headline': '本轮没有可用证据，不形成信号。', 'avoid': []}, 'status': 'edited'}
+            result = live_editor(state['brief'], state['evidence'], run_dir, state.get('collection'))
+            if not isinstance(result, dict):
+                raise ValueError('AI result must be a JSON object')
+            summary = {'headline': result.get('headline'), 'avoid': result.get('avoid', [])}
+            return {'cards': result.get('cards'), 'summary': summary, 'status': 'edited'}
         else:
             raise ValueError('Mode must be demo, replay or live')
-        return {'cards': cards, 'status': 'edited'}
+        summary = {'headline': '演示：流程示例，不是研究结论。', 'avoid': []} if state['mode'] == 'demo' else {}
+        return {'cards': cards, 'summary': summary, 'status': 'edited'}
 
     def quality(self, state):
         validate_cards(state['cards'], state['evidence'], require_signal=requires_signal(state))
+        if requires_signal(state) or state.get('summary'):
+            validate_summary(state.get('summary'))
         return {'status': 'awaiting_review'}
 
     def review(self, state):
@@ -376,6 +431,7 @@ class Desk:
             return {'artifact': ''}
         path = self.run_dir(config['configurable']['thread_id']) / 'brief.md'
         path.write_text(render(state), encoding='utf-8')
+        (path.parent / 'marketing.md').write_text(render_marketing(state), encoding='utf-8')
         return {'artifact': str(path), 'status': 'delivered_local'}
 
     def run_dir(self, run_id):

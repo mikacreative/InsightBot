@@ -87,8 +87,9 @@ def serve(root, host='127.0.0.1', port=18876):
                     state=workspace.run(query.get('id',[''])[0])
                     if state.get('status')!='delivered_local': self.send({'error':'尚无已批准稿件'},404)
                     else:
-                        from .core import render
-                        self.send(render(state),content_type='text/markdown')
+                        from .core import render, render_marketing
+                        view=query.get('view',['review'])[0]
+                        self.send((render_marketing if view=='marketing' else render)(state),content_type='text/markdown')
                 else: self.send({'error':'没有此页面或无权限'},404)
             except Exception:
                 self.send({'error':'无法读取该记录，请刷新后重试'},400)
@@ -128,7 +129,7 @@ def serve(root, host='127.0.0.1', port=18876):
                     if self.path=='/api/plan': self.send(workspace.create_plan(payload['profile_id'],payload.get('mode','live'))); return
                     if self.path=='/api/confirm': self.send(workspace.confirm_plan(payload['id'],payload['checksum'],user['username'])); return
                     if self.path=='/api/execute': self.send(workspace.execute_plan(payload['id'])); return
-                    if self.path=='/api/revise': self.send(workspace.revise(payload['id'],payload['cards'],payload['checksum'],user['username'])); return
+                    if self.path=='/api/revise': self.send(workspace.revise(payload['id'],payload['cards'],payload['checksum'],user['username'],payload.get('summary'))); return
                     if self.path=='/api/review': self.send(workspace.review(payload['id'],payload['decision'],user['username'],payload.get('note',''),payload['checksum'])); return
                     self.send({'error':'没有此操作'},404)
             except (ValueError,KeyError): self.send({'error':'输入或版本无效，请检查必填项并重新载入记录'},400)
