@@ -146,3 +146,26 @@ def test_revise_summary_is_validated_and_audited(tmp_path, monkeypatch):
     assert audit['before_summary']['headline']=='Original' and audit['after_summary']['headline']=='Edited'
     kept=ws.revise('live',revised['cards'],revised['revision_checksum'],'Editor')
     assert kept['summary']['headline']=='Edited'
+
+
+def test_number_flags_scoped_to_live_signal_runs(tmp_path, monkeypatch):
+    import insightbot.signal_desk.core as core
+    sample=tmp_path/'sample.json'
+    sample.write_text(json.dumps({'brief':{'brand':'A','question':'Q'},'evidence':[],'replay_cards':[{
+        'title':'T','disposition':'research','observation':'O','interpretation':'I','brand_relevance':'R','limitations':'L','next_step':'N',
+        'evidence_ids':['a'],'counter_evidence_ids':[]}]}))
+    monkeypatch.setenv('SIGNAL_DESK_INPUT_FILE',str(sample))
+    ws=Workspace(tmp_path/'state',start_worker=False)
+    p=plan(ws,'replay');j=ws.execute_plan(p['id'])
+    ws.process_job(j['id'])
+    assert ws.run(j['id'])['number_flags']==[]
+
+    evidence=[{'source_id':'a','platform':'test','url':'https://example.org/a','title':'Fixture','excerpt':'Fixture body text'}]
+    eid=core.normalize(evidence,50)[0]['id']
+    card={'title':'T','disposition':'research','observation':'一般样本中9条命中','interpretation':'I','brand_relevance':'R','limitations':'L','next_step':'N',
+          'evidence_ids':[eid],'counter_evidence_ids':[],'signal_type':'topic','evidence_strength':'weak','plan_sections':[],'quotes':[],'recommended_action':'A'}
+    monkeypatch.setattr(core,'live_editor',lambda *a: {'headline':'h','avoid':[],'cards':[card]})
+    ws._desk.start('live',{'brand':'A','question':'Q'},evidence,'live')
+    flags=ws.run('live')['number_flags']
+    assert flags[0]['field']=='observation'
+    assert json.loads((ws._desk.run_dir('live')/'number-flags.json').read_text())[0]['text']=='一般样本中9条命中'

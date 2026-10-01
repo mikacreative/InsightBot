@@ -196,8 +196,11 @@ class Workspace:
             state['has_artifact'] = bool(state.pop('artifact',None))
             state['revision_checksum'] = revision_checksum(state)
             state['figure_texts'] = [figure_text(c['figure'],state['evidence']) if c.get('figure') else None for c in state.get('cards',[])]
-            state['number_flags'] = number_flags(state.get('cards',[]),state.get('summary'))
-            if state['number_flags']: (self.base/'runs'/key/'number-flags.json').write_text(json.dumps(state['number_flags'],ensure_ascii=False,indent=2))
+            # Replay/demo cards carry leftover digits from the fixture; scan only live signal-contract runs.
+            state['number_flags'] = number_flags(state.get('cards',[]),state.get('summary')) if requires_signal(state) else []
+            if state['number_flags']:
+                run_dir = self._desk.run_dir(key)
+                (run_dir/'number-flags.json').write_text(json.dumps(state['number_flags'],ensure_ascii=False,indent=2))
             state['run_id'] = key
             return state
 
