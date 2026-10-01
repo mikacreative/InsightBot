@@ -1,0 +1,13 @@
+{
+  "rss": [
+    {"id": "digitaling", "name": "数英网", "url": "https://www.digitaling.com/rss", "tags": ["营销"]},
+    {"id": "tmtpost", "name": "钛媒体", "url": "https://www.tmtpost.com/rss.xml", "tags": ["商业"]},
+    {"id": "geekpark", "name": "极客公园", "url": "https://www.geekpark.net/rss", "tags": ["科技"]}
+  ],
+  "search": {
+    "enabled": true,
+    "provider": "duckduckgo",
+    "max_results": 5,
+    "queries": []
+  }
+}

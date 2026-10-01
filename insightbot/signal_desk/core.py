@@ -15,6 +15,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from langgraph.checkpoint.sqlite import SqliteSaver
 
+from insightbot.signal_desk.context import collect_context, load_context_config
+
 
 class DeskState(TypedDict, total=False):
     brief: dict
@@ -25,6 +27,7 @@ class DeskState(TypedDict, total=False):
     replay_cards: list[dict]
     coverage: dict
     collection: dict
+    external_context: list[dict]
     review: dict
     number_flags: list[dict]
     status: str
@@ -104,6 +107,10 @@ evidence_stats is computed by code from the evidence (keys: all, general, commer
 query:<keyword>:<kind>); collection describes how evidence was retrieved. Every textual field is prose only: no Arabic digits at
 all, including sample sizes, percentages, section numbers, card numbers and dates. Write section references as Chinese
 numerals (第四节) and any count or share as figure. A keyword that retrieved many samples says nothing about how common a concern is.
+external_context is unverified background (headlines and web snippets) gathered from RSS and web search. It is not
+evidence: never quote it, never cite it as support, never count it, and never let it replace or override supplied
+evidence. Use it only to interpret signals, to know what is happening outside the sample, and to flag when a signal
+matches or contradicts something already public; say so in interpretation or limitations rather than presenting it as a finding.
 All textual fields Chinese, concise. Include a justified editorial disposition; no invented quotes or statistics.
 Maximum 3 cards for this alpha; empty is valid. Each textual field at most 120 Chinese characters. observation must separate source claims from established facts.'''
 
@@ -141,7 +148,13 @@ def _compact_collection(collection):
     return compact
 
 
-def live_editor(brief: dict, evidence: list[dict], run_dir: Path, collection: dict | None = None) -> dict:
+def _compact_context(external_context):
+    items = external_context or []
+    kept = [{k: item.get(k) for k in ('title', 'link', 'source', 'kind', 'published_at', 'snippet')} for item in items]
+    return kept[:24] if len(json.dumps(kept, ensure_ascii=False)) <= 6000 else kept[:12]
+
+
+def live_editor(brief: dict, evidence: list[dict], run_dir: Path, collection: dict | None = None, external_context: list[dict] | None = None) -> dict:
     base = os.environ.get("SIGNAL_DESK_AI_BASE_URL", "").rstrip('/')
     key = os.environ.get("SIGNAL_DESK_AI_API_KEY", "")
     model = os.environ.get("SIGNAL_DESK_AI_MODEL", "")
@@ -159,7 +172,8 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path, collection: di
         raise ValueError("Invalid AI reasoning effort")
     payload = {"model": model, "messages": [{"role": "system", "content": EDITOR_PROMPT},
                {"role": "user", "content": json.dumps({"brief": brief, "evidence_stats": evidence_stats(evidence),
-                "collection": _compact_collection(collection), "evidence": editor_evidence}, ensure_ascii=False)}],
+                "collection": _compact_collection(collection), "evidence": editor_evidence,
+                "external_context": _compact_context(external_context)}, ensure_ascii=False)}],
                "temperature": 0.2, "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
     if effort:
         payload['reasoning_effort'] = effort
@@ -446,12 +460,13 @@ class Desk:
         if not str(brief.get('brand', '')).strip() or not str(brief.get('question', '')).strip():
             raise ValueError('Brand and research question required')
         evidence = normalize(state.get('evidence', []), 50)
-        return {'evidence': evidence, 'coverage': {'input_count': len(state.get('evidence', [])), 'unique_count': len(evidence),
+        context_items, context_meta = collect_context(load_context_config(), brief)
+        return {'evidence': evidence, 'external_context': context_items, 'coverage': {'input_count': len(state.get('evidence', [])), 'unique_count': len(evidence),
                 'requested_window': brief.get('time_window', 'unspecified'), 'collection': 'user-imported evidence; no automatic platform retrieval',
                 'collection_metadata': state.get('collection', {}), 'date_filter_verified': False, 'prompt_version': PROMPT_VERSION,
                 'model': os.environ.get('SIGNAL_DESK_AI_MODEL', '') if state['mode'] == 'live' else 'none',
                 'input_sha256': hashlib.sha256(json.dumps(state['evidence'], sort_keys=True, ensure_ascii=False).encode()).hexdigest(), 'max_evidence': 50, 'max_ai_calls': 1,
-                'evidence_stats': evidence_stats(evidence)}, 'status': 'collected'}
+                'evidence_stats': evidence_stats(evidence), 'external_context': context_meta}, 'status': 'collected'}
 
     def edit(self, state, config):
         run_dir = self.run_dir(config['configurable']['thread_id'])
@@ -478,7 +493,7 @@ class Desk:
         elif state['mode'] == 'live':
             if not state['evidence']:
                 return {'cards': [], 'summary': {'headline': '本轮没有可用证据，不形成信号。', 'avoid': []}, 'status': 'edited'}
-            result = live_editor(state['brief'], state['evidence'], run_dir, state.get('collection'))
+            result = live_editor(state['brief'], state['evidence'], run_dir, state.get('collection'), state.get('external_context'))
             if not isinstance(result, dict):
                 raise ValueError('AI result must be a JSON object')
             summary = {'headline': result.get('headline'), 'avoid': result.get('avoid', [])}
