@@ -83,10 +83,11 @@ Each card:
 - title: one-sentence takeaway the team can act on.
 - signal_type: topic (选题机会) / messaging_risk (话术风险) / market_play (竞品或行业打法) / verbatim (原话素材) / watch (继续观察).
 - plan_sections: list (0-3) of plan sections this signal would change, named as in brief.plan_impact, e.g. "v7 第04节".
-- quotes: list (0-2) of {"evidence_id", "text"}; text must be copied verbatim from that evidence excerpt, never paraphrased.
+- quotes: list (0-2) of {"evidence_id", "text"}; text must be an exact substring of that evidence excerpt (code checks it), never paraphrased.
 - recommended_action: one concrete thing the team should do or stop doing.
-- evidence_strength: strong / medium / weak. Comment-only evidence, or a pattern that may come from the search keyword
-  itself, is at most medium.
+- evidence_strength: strong / medium / weak. Evidence whose source_grade is a comment thread, or a conclusion that repeats
+  the query keyword which retrieved most of its supporting evidence (evidence.query), is at most medium; frequency of a
+  searched keyword is never evidence of prevalence.
 - disposition (action/research/observe/drop), observation, interpretation, brand_relevance, limitations, next_step:
   reviewer fields kept for internal audit.
 - evidence_ids (nonempty list), counter_evidence_ids (list, may be empty, never overlapping evidence_ids).
@@ -106,7 +107,7 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
     if not 1024 <= max_tokens <= 16384:
         raise ValueError("AI max tokens must be between 1024 and 16384")
     # Keep full evidence/snapshots in persistence, avoid sending duplicate bodies to the model.
-    editor_evidence = [{k: e.get(k) for k in ('id','title','excerpt','platform','published_at','source_grade','limitation','conflicting_snapshots')} for e in evidence]
+    editor_evidence = [{k: e.get(k) for k in ('id','title','excerpt','platform','published_at','query','source_grade','limitation','conflicting_snapshots')} for e in evidence]
     effort = os.environ.get("SIGNAL_DESK_AI_REASONING_EFFORT", "low" if model.lower().startswith('glm-5.3') else "")
     if effort and effort not in ('low','medium','high','max'):
         raise ValueError("Invalid AI reasoning effort")
@@ -147,7 +148,22 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
     return result['cards']
 
 
-def validate_signal(card, valid):
+def _compact(text):
+    return re.sub(r'\s+', '', str(text))
+
+
+def _keyword_led(card, supporting):
+    # A conclusion that repeats the query which retrieved most of its support may just echo the search itself.
+    queries = [str(e.get('query', '')).strip() for e in supporting]
+    text = _compact(card['title'] + card['observation'])
+    for query in set(filter(None, queries)):
+        terms = [t for t in query.split() if len(t) >= 2]
+        if queries.count(query) * 2 > len(supporting) and terms and any(t in text for t in terms):
+            return True
+    return False
+
+
+def validate_signal(card, by_id):
     if card.get('signal_type') not in SIGNAL_TYPES:
         raise ValueError('Invalid signal type')
     if card.get('evidence_strength') not in EVIDENCE_STRENGTHS:
@@ -158,14 +174,25 @@ def validate_signal(card, valid):
     sections = card.get('plan_sections')
     if not isinstance(sections, list) or len(sections) > 3 or any(not isinstance(s, str) or not s.strip() or len(s) > 80 for s in sections):
         raise ValueError('Invalid plan sections')
+    if set(card['evidence_ids']) & set(card.get('counter_evidence_ids', [])):
+        raise ValueError('Evidence cannot both support and counter the same card')
     quotes = card.get('quotes')
     if not isinstance(quotes, list) or len(quotes) > 2:
         raise ValueError('Invalid quotes')
     for quote in quotes:
-        if not isinstance(quote, dict) or quote.get('evidence_id') not in valid:
+        if not isinstance(quote, dict) or quote.get('evidence_id') not in by_id:
             raise ValueError('Quote must reference known evidence')
-        if not isinstance(quote.get('text'), str) or not quote['text'].strip() or len(quote['text']) > 500:
+        text = quote.get('text')
+        if not isinstance(text, str) or len(text.strip()) < 4 or len(text) > 500:
             raise ValueError('Invalid quote text')
+        source = by_id[quote['evidence_id']]
+        bodies = [source['excerpt']] + [x.get('excerpt') or '' for x in source.get('snapshots', [])]
+        if not any(_compact(text.strip().strip('“”"「」\'')) in _compact(body) for body in bodies):
+            raise ValueError('Quote is not verbatim from its evidence')
+    supporting = [by_id[i] for i in card['evidence_ids']]
+    comment_only = all('comment' in str(e.get('source_grade', '')).lower() for e in supporting)
+    if card['evidence_strength'] == 'strong' and (comment_only or _keyword_led(card, supporting)):
+        raise ValueError('Comment-only or keyword-led evidence is at most medium strength')
 
 
 def requires_signal(state):
@@ -176,11 +203,9 @@ def requires_signal(state):
 def validate_cards(cards, evidence, require_signal=False):
     if not isinstance(cards, list) or len(cards) > 8:
         raise ValueError("Invalid editorial card count")
-    valid = {e['id'] for e in evidence}
+    by_id = {e['id']: e for e in evidence}
+    valid = set(by_id)
     for card in cards:
-        # Live v2 cards must carry signal fields; legacy demo/replay cards are checked only when they opt in.
-        if require_signal or 'signal_type' in card:
-            validate_signal(card, valid)
         for field in ('title', 'observation', 'interpretation', 'brand_relevance', 'limitations', 'next_step'):
             if not isinstance(card.get(field), str) or not card[field].strip() or len(card[field]) > 3000:
                 raise ValueError(f"Invalid editorial field: {field}")
@@ -190,6 +215,9 @@ def validate_cards(cards, evidence, require_signal=False):
         counter = card.get('counter_evidence_ids', [])
         if not isinstance(ids, list) or not ids or not isinstance(counter, list) or any(i not in valid for i in ids + counter):
             raise ValueError('Unknown or missing evidence reference')
+        # Live v2 cards must carry signal fields; legacy demo/replay cards are checked only when they opt in.
+        if require_signal or 'signal_type' in card:
+            validate_signal(card, by_id)
     return cards
 
 

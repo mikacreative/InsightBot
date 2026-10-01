@@ -209,3 +209,27 @@ def test_live_v2_requires_signal_fields(tmp_path, monkeypatch):
     monkeypatch.setattr(core, 'live_editor', lambda *a: [legacy])
     with pytest.raises(ValueError): Desk(tmp_path).start('live-legacy', BRIEF, EVIDENCE, 'live')
     assert not core.requires_signal({'mode':'live', 'coverage':{'prompt_version':'signal-desk-editor-v1'}})
+
+
+def test_signal_evidence_integrity_rules():
+    evidence = normalize(EVIDENCE, 50)
+    eid = evidence[0]['id']
+    base = _signal_card(eid)
+    with pytest.raises(ValueError, match='both support'):
+        validate_cards([{**base, 'counter_evidence_ids':[eid]}], evidence)
+    with pytest.raises(ValueError, match='verbatim'):
+        validate_cards([{**base, 'quotes':[{'evidence_id':eid, 'text':'a paraphrased finding'}]}], evidence)
+    validate_cards([{**base, 'quotes':[{'evidence_id':eid, 'text':'“not a  research\nfinding”'}]}], evidence)
+    validate_cards([{**base, 'evidence_strength':'strong'}], evidence)
+
+
+def test_strength_capped_for_comments_and_keyword_echo():
+    comment = normalize([{**EVIDENCE[0], 'source_grade':'qiangua comment thread | general'}], 50)
+    card = {**_signal_card(comment[0]['id']), 'evidence_strength':'strong'}
+    with pytest.raises(ValueError, match='at most medium'): validate_cards([card], comment)
+    validate_cards([{**card, 'evidence_strength':'medium'}], comment)
+    searched = normalize([{**EVIDENCE[0], 'query':'实现率'}, {**EVIDENCE[0], 'source_id':'2', 'url':'https://example.org/note/2', 'query':'实现率'},
+                          {**EVIDENCE[0], 'source_id':'3', 'url':'https://example.org/note/3', 'query':'退保'}], 50)
+    echo = {**_signal_card(searched[0]['id']), 'evidence_ids':[e['id'] for e in searched], 'evidence_strength':'strong', 'title':'追问重心是分红实现率'}
+    with pytest.raises(ValueError, match='at most medium'): validate_cards([echo], searched)
+    validate_cards([{**echo, 'title':'追问集中在能否兑现'}], searched)
