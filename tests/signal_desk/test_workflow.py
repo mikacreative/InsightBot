@@ -148,9 +148,9 @@ def test_truncated_ai_response_records_reason_without_retry(tmp_path, monkeypatc
                 def json(self): return {'choices':[{'finish_reason':'length','message':{'content':'{"cards":['}}],'usage':{'completion_tokens':8192}}
             return Response()
     monkeypatch.setattr(core.httpx,'Client',Client)
-    with pytest.raises(RuntimeError,match='token limit'): core.live_editor(BRIEF, EVIDENCE,tmp_path)
+    with pytest.raises(RuntimeError,match='token limit'): core.live_editor(BRIEF, normalize(EVIDENCE,50),tmp_path)
     assert json.loads((tmp_path/'editor-response-meta.json').read_text())['finish_reason']=='length'
-    with pytest.raises(RuntimeError,match='uncertain'): core.live_editor(BRIEF,EVIDENCE,tmp_path)
+    with pytest.raises(RuntimeError,match='uncertain'): core.live_editor(BRIEF,normalize(EVIDENCE,50),tmp_path)
     assert len(calls)==1
 
 
@@ -233,3 +233,49 @@ def test_strength_capped_for_comments_and_keyword_echo():
     echo = {**_signal_card(searched[0]['id']), 'evidence_ids':[e['id'] for e in searched], 'evidence_strength':'strong', 'title':'追问重心是分红实现率'}
     with pytest.raises(ValueError, match='at most medium'): validate_cards([echo], searched)
     validate_cards([{**echo, 'title':'追问集中在能否兑现'}], searched)
+
+
+def _graded(n, query, grade):
+    return [{**EVIDENCE[0], 'source_id':f'{query}{grade}{i}', 'url':f'https://example.org/{query}/{grade}/{i}', 'query':query,
+             'source_grade':f'qiangua comment thread | {grade}'} for i in range(n)]
+
+
+def test_code_owned_stats_and_figure():
+    from insightbot.signal_desk.core import evidence_stats, figure_text
+    evidence = normalize(_graded(3, '实现率', 'general') + _graded(2, '港险', 'commercial_suspected') + _graded(1, '港险', 'general'), 50)
+    stats = evidence_stats(evidence)
+    assert stats['all'] == 6 and stats['general'] == 4 and stats['commercial'] == 2
+    assert stats['query:港险'] == 3 and stats['query:实现率:general'] == 3
+    general = [e['id'] for e in evidence if e['source_grade'].endswith('general')]
+    commercial = [e['id'] for e in evidence if 'commercial' in e['source_grade']]
+    card = {**_signal_card(general[0]), 'quotes':[], 'figure':{'label':'模板评论', 'evidence_ids':commercial, 'denominator':'all'}}
+    validate_cards([card], evidence)
+    assert figure_text(card['figure'], evidence) == '模板评论：2/6'
+    for figure in ({**card['figure'], 'denominator':'general'}, {**card['figure'], 'denominator':'invented'},
+                   {**card['figure'], 'evidence_ids':commercial * 2}, {**card['figure'], 'evidence_ids':[]}):
+        with pytest.raises(ValueError, match='[Ff]igure'): validate_cards([{**card, 'figure':figure}], evidence)
+
+
+def test_editor_receives_stats_and_compact_collection(tmp_path, monkeypatch):
+    from insightbot.signal_desk import core
+    for key, value in {'SIGNAL_DESK_AI_BASE_URL':'https://example.org/v1','SIGNAL_DESK_AI_API_KEY':'fixture','SIGNAL_DESK_AI_MODEL':'fixture'}.items():
+        monkeypatch.setenv(key, value)
+    sent = {}
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def post(self, url, headers, json):
+            sent.update(json)
+            class Response:
+                status_code = 200
+                def json(self): return {'choices':[{'finish_reason':'stop','message':{'content':'{"cards":[]}'}}]}
+            return Response()
+    monkeypatch.setattr(core.httpx, 'Client', Client)
+    evidence = normalize(_graded(2, '换汇', 'general'), 50)
+    collection = {'provider':'fixture', 'note_search_coverage_only':{'换汇':{'total_count':9, 'sample_titles':['x']}}}
+    core.live_editor(BRIEF, evidence, tmp_path, collection)
+    body = json.loads(sent['messages'][1]['content'])
+    assert body['evidence_stats']['query:换汇:general'] == 2
+    assert body['collection']['note_search_coverage_only']['换汇'] == {'total_count':9}
+    assert body['evidence'][0]['query'] == '换汇'

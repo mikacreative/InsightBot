@@ -10,7 +10,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from .core import Desk, requires_signal, validate_cards
+from .core import Desk, figure_text, requires_signal, validate_cards
 from .providers import justone_search, search_to_input
 
 
@@ -191,6 +191,7 @@ class Workspace:
             state = self._desk.status(identifier(key))
             state['has_artifact'] = bool(state.pop('artifact',None))
             state['revision_checksum'] = digest(state.get('cards',[]))
+            state['figure_texts'] = [figure_text(c['figure'],state['evidence']) if c.get('figure') else None for c in state.get('cards',[])]
             state['run_id'] = key
             return state
 

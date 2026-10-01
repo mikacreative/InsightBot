@@ -90,12 +90,51 @@ Each card:
   searched keyword is never evidence of prevalence.
 - disposition (action/research/observe/drop), observation, interpretation, brand_relevance, limitations, next_step:
   reviewer fields kept for internal audit.
+- figure: null, or {"label", "evidence_ids", "denominator"} for the one number the team should remember. denominator is
+  a key of evidence_stats (e.g. "general", "query:<keyword>:general"); evidence_ids are the members of that population
+  that show the pattern. Code counts both sides; never write counts yourself.
 - evidence_ids (nonempty list), counter_evidence_ids (list, may be empty, never overlapping evidence_ids).
+evidence_stats is computed by code from the evidence (keys: all, general, commercial, unclassified, query:<keyword>,
+query:<keyword>:<kind>); collection describes how evidence was retrieved. Do not put counts, shares or rankings in
+textual fields; use figure. A keyword that retrieved many samples says nothing about how common a concern is.
 All textual fields Chinese, concise. Include a justified editorial disposition; no invented quotes or statistics.
 Maximum 3 cards for this alpha; empty is valid. Each textual field at most 120 Chinese characters. observation must separate source claims from established facts.'''
 
 
-def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
+def _sample_kind(item):
+    grade = str(item.get('source_grade', '')).rsplit('|', 1)[-1].strip().lower()
+    return 'commercial' if 'commercial' in grade else 'general' if grade == 'general' else 'unclassified'
+
+
+def populations(evidence):
+    """Named evidence-ID sets; the model cites these keys instead of counting samples itself."""
+    groups = {'all': set()}
+    for e in evidence:
+        kind, query = _sample_kind(e), str(e.get('query', '')).strip()
+        keys = ['all', kind] + ([f'query:{query}', f'query:{query}:{kind}'] if query else [])
+        for key in keys:
+            groups.setdefault(key, set()).add(e['id'])
+    return groups
+
+
+def evidence_stats(evidence):
+    return {key: len(ids) for key, ids in sorted(populations(evidence).items())}
+
+
+def _compact_collection(collection):
+    def strip(value):
+        if isinstance(value, dict):
+            return {k: strip(v) for k, v in value.items() if k not in ('raw', 'sample_titles')}
+        if isinstance(value, list):
+            return [strip(v) for v in value]
+        return value
+    compact = strip(collection or {})
+    if len(json.dumps(compact, ensure_ascii=False)) > 8000:
+        return {'omitted': 'collection metadata exceeded 8000 characters'}
+    return compact
+
+
+def live_editor(brief: dict, evidence: list[dict], run_dir: Path, collection: dict | None = None) -> list[dict]:
     base = os.environ.get("SIGNAL_DESK_AI_BASE_URL", "").rstrip('/')
     key = os.environ.get("SIGNAL_DESK_AI_API_KEY", "")
     model = os.environ.get("SIGNAL_DESK_AI_MODEL", "")
@@ -112,7 +151,8 @@ def live_editor(brief: dict, evidence: list[dict], run_dir: Path) -> list[dict]:
     if effort and effort not in ('low','medium','high','max'):
         raise ValueError("Invalid AI reasoning effort")
     payload = {"model": model, "messages": [{"role": "system", "content": EDITOR_PROMPT},
-               {"role": "user", "content": json.dumps({"brief": brief, "evidence": editor_evidence}, ensure_ascii=False)}],
+               {"role": "user", "content": json.dumps({"brief": brief, "evidence_stats": evidence_stats(evidence),
+                "collection": _compact_collection(collection), "evidence": editor_evidence}, ensure_ascii=False)}],
                "temperature": 0.2, "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
     if effort:
         payload['reasoning_effort'] = effort
@@ -163,7 +203,23 @@ def _keyword_led(card, supporting):
     return False
 
 
-def validate_signal(card, by_id):
+def validate_figure(figure, groups):
+    if figure is None:
+        return
+    if not isinstance(figure, dict) or not isinstance(figure.get('label'), str) or not figure['label'].strip() or len(figure['label']) > 200:
+        raise ValueError('Invalid figure')
+    ids, population = figure.get('evidence_ids'), groups.get(figure.get('denominator'))
+    if population is None:
+        raise ValueError('Figure denominator must be an evidence_stats key')
+    if not isinstance(ids, list) or not ids or len(set(ids)) != len(ids) or not set(ids) <= population:
+        raise ValueError('Figure evidence must be distinct members of its denominator')
+
+
+def figure_text(figure, evidence):
+    return f"{figure['label']}：{len(figure['evidence_ids'])}/{len(populations(evidence)[figure['denominator']])}"
+
+
+def validate_signal(card, by_id, groups):
     if card.get('signal_type') not in SIGNAL_TYPES:
         raise ValueError('Invalid signal type')
     if card.get('evidence_strength') not in EVIDENCE_STRENGTHS:
@@ -189,6 +245,7 @@ def validate_signal(card, by_id):
         bodies = [source['excerpt']] + [x.get('excerpt') or '' for x in source.get('snapshots', [])]
         if not any(_compact(text.strip().strip('“”"「」\'')) in _compact(body) for body in bodies):
             raise ValueError('Quote is not verbatim from its evidence')
+    validate_figure(card.get('figure'), groups)
     supporting = [by_id[i] for i in card['evidence_ids']]
     comment_only = all('comment' in str(e.get('source_grade', '')).lower() for e in supporting)
     if card['evidence_strength'] == 'strong' and (comment_only or _keyword_led(card, supporting)):
@@ -205,6 +262,7 @@ def validate_cards(cards, evidence, require_signal=False):
         raise ValueError("Invalid editorial card count")
     by_id = {e['id']: e for e in evidence}
     valid = set(by_id)
+    groups = populations(evidence)
     for card in cards:
         for field in ('title', 'observation', 'interpretation', 'brand_relevance', 'limitations', 'next_step'):
             if not isinstance(card.get(field), str) or not card[field].strip() or len(card[field]) > 3000:
@@ -217,7 +275,7 @@ def validate_cards(cards, evidence, require_signal=False):
             raise ValueError('Unknown or missing evidence reference')
         # Live v2 cards must carry signal fields; legacy demo/replay cards are checked only when they opt in.
         if require_signal or 'signal_type' in card:
-            validate_signal(card, by_id)
+            validate_signal(card, by_id, groups)
     return cards
 
 
@@ -232,6 +290,8 @@ def render(state):
             sections = '、'.join(c['plan_sections']) or '无'
             out += [f"**信号**：{SIGNAL_TYPES[c['signal_type']]} · 证据强度 {EVIDENCE_STRENGTHS[c['evidence_strength']]} · 影响 {sections}", '',
                     f"**建议动作**：{c['recommended_action']}", '']
+            if c.get('figure'):
+                out += [f"**数字**：{figure_text(c['figure'], state['evidence'])}", '']
             out += [f"> {q['text']}（{q['evidence_id']}）" for q in c['quotes']] + ([''] if c['quotes'] else [])
         for key, label in [('observation','观察'),('interpretation','解释'),('brand_relevance','品牌相关性'),('limitations','证据边界'),('next_step','下一步')]:
             out += [f"**{label}**：{c[key]}", '']
@@ -270,7 +330,8 @@ class Desk:
                 'requested_window': brief.get('time_window', 'unspecified'), 'collection': 'user-imported evidence; no automatic platform retrieval',
                 'collection_metadata': state.get('collection', {}), 'date_filter_verified': False, 'prompt_version': PROMPT_VERSION,
                 'model': os.environ.get('SIGNAL_DESK_AI_MODEL', '') if state['mode'] == 'live' else 'none',
-                'input_sha256': hashlib.sha256(json.dumps(state['evidence'], sort_keys=True, ensure_ascii=False).encode()).hexdigest(), 'max_evidence': 50, 'max_ai_calls': 1}, 'status': 'collected'}
+                'input_sha256': hashlib.sha256(json.dumps(state['evidence'], sort_keys=True, ensure_ascii=False).encode()).hexdigest(), 'max_evidence': 50, 'max_ai_calls': 1,
+                'evidence_stats': evidence_stats(evidence)}, 'status': 'collected'}
 
     def edit(self, state, config):
         run_dir = self.run_dir(config['configurable']['thread_id'])
@@ -295,7 +356,7 @@ class Desk:
                     card[key] = [mapping.get(i, i) for i in card.get(key, [])]
                 cards.append(card)
         elif state['mode'] == 'live':
-            cards = live_editor(state['brief'], state['evidence'], run_dir) if state['evidence'] else []
+            cards = live_editor(state['brief'], state['evidence'], run_dir, state.get('collection')) if state['evidence'] else []
         else:
             raise ValueError('Mode must be demo, replay or live')
         return {'cards': cards, 'status': 'edited'}
