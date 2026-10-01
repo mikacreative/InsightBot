@@ -173,3 +173,39 @@ def test_glm_editor_bounds_reasoning_and_omits_duplicate_snapshots(tmp_path, mon
             return Response()
     monkeypatch.setattr(core.httpx,'Client',Client)
     assert core.live_editor(BRIEF,[{'id':'E1','excerpt':'unique body','snapshots':[{'excerpt':'unique body'}]}],tmp_path)==[]
+
+
+def _signal_card(evidence_id):
+    return {'title':'选题', 'disposition':'research', 'observation':'O', 'interpretation':'I', 'brand_relevance':'R',
+            'limitations':'L', 'next_step':'N', 'evidence_ids':[evidence_id], 'counter_evidence_ids':[],
+            'signal_type':'topic', 'evidence_strength':'medium', 'plan_sections':['v7 第04节'],
+            'quotes':[{'evidence_id':evidence_id, 'text':'not a research finding'}], 'recommended_action':'下期选题试用原话'}
+
+
+def test_signal_fields_validated():
+    evidence = normalize(EVIDENCE, 50)
+    eid = evidence[0]['id']
+    validate_cards([_signal_card(eid)], evidence, require_signal=True)
+    for key, value in [('signal_type','trend'), ('evidence_strength','high'), ('plan_sections','v7'),
+                       ('quotes',[{'evidence_id':'fabricated','text':'x'}]), ('recommended_action',' ')]:
+        with pytest.raises(ValueError): validate_cards([{**_signal_card(eid), key:value}], evidence)
+    legacy = {k: v for k, v in _signal_card(eid).items() if k not in ('signal_type','evidence_strength','plan_sections','quotes','recommended_action')}
+    validate_cards([legacy], evidence)
+    with pytest.raises(ValueError): validate_cards([legacy], evidence, require_signal=True)
+
+
+def test_live_v2_requires_signal_fields(tmp_path, monkeypatch):
+    import insightbot.signal_desk.core as core
+    eid = normalize(EVIDENCE, 50)[0]['id']
+    card = _signal_card(eid)
+    monkeypatch.setattr(core, 'live_editor', lambda *a: [card])
+    result = Desk(tmp_path).start('live2', BRIEF, EVIDENCE, 'live')
+    assert result['coverage']['prompt_version'] == core.PROMPT_VERSION
+    assert core.requires_signal(result)
+    approved = Desk(tmp_path).resume('live2', 'approve', 'Tester')
+    text = Path(approved['artifact']).read_text()
+    assert '选题机会' in text and '证据强度 中' in text and '> not a research finding' in text
+    legacy = {k: v for k, v in card.items() if k != 'signal_type'}
+    monkeypatch.setattr(core, 'live_editor', lambda *a: [legacy])
+    with pytest.raises(ValueError): Desk(tmp_path).start('live-legacy', BRIEF, EVIDENCE, 'live')
+    assert not core.requires_signal({'mode':'live', 'coverage':{'prompt_version':'signal-desk-editor-v1'}})

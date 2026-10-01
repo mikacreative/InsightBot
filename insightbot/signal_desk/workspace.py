@@ -10,7 +10,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from .core import Desk, validate_cards
+from .core import Desk, requires_signal, validate_cards
 from .providers import justone_search, search_to_input
 
 
@@ -200,7 +200,7 @@ class Workspace:
             state = self._desk.status(identifier(key))
             if state.get('status') != 'awaiting_review': raise ValueError('Run is not awaiting review')
             if checksum != digest(state.get('cards',[])): raise ValueError('Cards changed; refresh before editing')
-            validate_cards(cards,state['evidence'])
+            validate_cards(cards,state['evidence'],require_signal=requires_signal(state))
             revision = {'id':uuid.uuid4().hex,'run_id':key,'reviewer':reviewer,'created_at':now(),
                         'before_checksum':checksum,'after_checksum':digest(cards),'before_cards':state['cards'],'after_cards':cards}
             self._save('revisions',revision)
