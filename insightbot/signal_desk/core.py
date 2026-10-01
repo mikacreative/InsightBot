@@ -95,8 +95,9 @@ Each card:
 - disposition (action/research/observe/drop), observation, interpretation, brand_relevance, limitations, next_step:
   reviewer fields kept for internal audit.
 - figure: null, or {"label", "evidence_ids", "denominator"} for the one number the team should remember. denominator is
-  a key of evidence_stats (e.g. "general", "query:<keyword>:general"); evidence_ids are the members of that population
-  that show the pattern. Code counts both sides; never write counts yourself.
+  copied exactly from the keys present in evidence_stats (e.g. "general", "query:<keyword>:general"); evidence_ids are the
+  nonempty members of that population that show the pattern. Code counts both sides; never write counts yourself. Use
+  null when no listed key fits, or for keywords that were not collected; an invalid figure is discarded.
 - evidence_ids (nonempty list), counter_evidence_ids (list, may be empty, never overlapping evidence_ids).
 evidence_stats is computed by code from the evidence (keys: all, general, commercial, unclassified, query:<keyword>,
 query:<keyword>:<kind>); collection describes how evidence was retrieved. Do not put counts, shares or rankings in
@@ -217,6 +218,24 @@ def validate_figure(figure, groups):
         raise ValueError('Figure denominator must be an evidence_stats key')
     if not isinstance(ids, list) or not ids or len(set(ids)) != len(ids) or not set(ids) <= population:
         raise ValueError('Figure evidence must be distinct members of its denominator')
+
+
+def drop_invalid_figures(cards, evidence, run_dir):
+    """A figure is a code-counted extra, not the signal itself: discard an invalid one instead of failing the run."""
+    if not isinstance(cards, list):
+        return cards
+    groups, dropped, kept = populations(evidence), [], []
+    for index, card in enumerate(cards):
+        if isinstance(card, dict) and card.get('figure') is not None:
+            try:
+                validate_figure(card['figure'], groups)
+            except ValueError as error:
+                dropped.append({'card': index, 'figure': card['figure'], 'reason': str(error)})
+                card = {**card, 'figure': None}
+        kept.append(card)
+    if dropped:
+        (Path(run_dir) / 'figure-drops.json').write_text(json.dumps(dropped, ensure_ascii=False, indent=2))
+    return kept
 
 
 def figure_text(figure, evidence):
@@ -408,7 +427,7 @@ class Desk:
             if not isinstance(result, dict):
                 raise ValueError('AI result must be a JSON object')
             summary = {'headline': result.get('headline'), 'avoid': result.get('avoid', [])}
-            return {'cards': result.get('cards'), 'summary': summary, 'status': 'edited'}
+            return {'cards': drop_invalid_figures(result.get('cards'), state['evidence'], run_dir), 'summary': summary, 'status': 'edited'}
         else:
             raise ValueError('Mode must be demo, replay or live')
         summary = {'headline': '演示：流程示例，不是研究结论。', 'avoid': []} if state['mode'] == 'demo' else {}

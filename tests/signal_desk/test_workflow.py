@@ -211,6 +211,20 @@ def test_live_v2_requires_signal_fields(tmp_path, monkeypatch):
     assert not core.requires_signal({'mode':'live', 'coverage':{'prompt_version':'signal-desk-editor-v1'}})
 
 
+def test_live_invalid_ai_figure_is_dropped_not_fatal(tmp_path, monkeypatch):
+    import insightbot.signal_desk.core as core
+    eid = normalize(EVIDENCE, 50)[0]['id']
+    bad = {**_signal_card(eid), 'figure':{'label':'未采集词', 'evidence_ids':[], 'denominator':'query:invented:general'}}
+    good = {**_signal_card(eid), 'figure':{'label':'全部', 'evidence_ids':[eid], 'denominator':'all'}}
+    monkeypatch.setattr(core, 'live_editor', lambda *a: {'headline':'h', 'avoid':[], 'cards':[bad, good]})
+    result = Desk(tmp_path).start('live-fig', BRIEF, EVIDENCE, 'live')
+    assert result['status'] == 'awaiting_review'
+    assert result['cards'][0]['figure'] is None and result['cards'][1]['figure']['denominator'] == 'all'
+    drops = json.loads(next(tmp_path.rglob('figure-drops.json')).read_text())
+    assert drops[0]['card'] == 0 and 'denominator' in drops[0]['reason']
+    with pytest.raises(ValueError): validate_cards([bad], normalize(EVIDENCE, 50), require_signal=True)
+
+
 def test_signal_evidence_integrity_rules():
     evidence = normalize(EVIDENCE, 50)
     eid = evidence[0]['id']
