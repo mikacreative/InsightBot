@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import pytest
-from insightbot.signal_desk.core import Desk, normalize, validate_cards
+from insightbot.signal_desk.core import Desk, normalize, number_flags, render, validate_cards
 
 EVIDENCE = [{'title':'test sample', 'url':'https://example.org/note/1', 'excerpt':'This is a fixture, not a research finding.', 'platform':'test', 'source_id':'1', 'provider':'fixture'}]
 BRIEF = {'brand':'Test Brand', 'question':'Test evidence flow'}
@@ -211,6 +211,41 @@ def test_live_v2_requires_signal_fields(tmp_path, monkeypatch):
     assert not core.requires_signal({'mode':'live', 'coverage':{'prompt_version':'signal-desk-editor-v1'}})
 
 
+def test_degenerate_and_keyword_figures_are_rejected():
+    evidence = normalize(_graded(2, '换汇', 'comment|general') + _graded(2, '实现率', 'comment|general'), 50)
+    a, b, c, d = [e['id'] for e in evidence]
+    base = _signal_card(a)
+    whole = {**base, 'figure':{'label':'换汇相关评论', 'evidence_ids':[a, b], 'denominator':'query:换汇:general'}}
+    with pytest.raises(ValueError, match='re-counts its own search'):
+        validate_cards([whole], evidence, require_signal=True)
+    rate = {**base, 'figure':{'label':'命中实现率的评论', 'evidence_ids':[c, d], 'denominator':'general'}}
+    with pytest.raises(ValueError, match='measures the search'):
+        validate_cards([rate], evidence, require_signal=True)
+    real = {**base, 'figure':{'label':'一般样本中的换汇提问', 'evidence_ids':[a], 'denominator':'general'}}
+    assert validate_cards([real], evidence, require_signal=True)[0]['figure']['label'] == '一般样本中的换汇提问'
+
+
+def test_number_flags_are_recorded_not_fatal():
+    from insightbot.signal_desk.core import number_flags
+    card = {**_signal_card('E1'), 'observation':'一般样本中9条命中', 'recommended_action':'第04节替换示意'}
+    flags = number_flags([card], {'headline':'相关0条', 'avoid':['不足5条', '不要渲染焦虑']})
+    assert [f['field'] for f in flags] == ['observation', 'recommended_action', 'summary.headline', 'summary.avoid']
+
+
+def test_quality_records_number_flags(tmp_path, monkeypatch):
+    import insightbot.signal_desk.core as core
+    eid = normalize(EVIDENCE, 50)[0]['id']
+    card = {**_signal_card(eid), 'observation':'一般样本中9条命中'}
+    monkeypatch.setattr(core, 'live_editor', lambda *a: {'headline':'h', 'avoid':[], 'cards':[card]})
+    result = Desk(tmp_path).start('flagged', BRIEF, EVIDENCE, 'live')
+    assert result['status'] == 'awaiting_review'
+    assert result['number_flags'][0]['field'] == 'observation'
+    assert '数字自查' in render(result)
+    flags = number_flags(result['cards'], result.get('summary'))
+    (tmp_path / 'runs/flagged/number-flags.json').write_text(json.dumps(flags))
+    assert json.loads((tmp_path / 'runs/flagged/number-flags.json').read_text())[0]['field'] == 'observation'
+
+
 def test_live_invalid_ai_figure_is_dropped_not_fatal(tmp_path, monkeypatch):
     import insightbot.signal_desk.core as core
     eid = normalize(EVIDENCE, 50)[0]['id']
@@ -250,7 +285,7 @@ def test_strength_capped_for_comments_and_keyword_echo():
 
 
 def _graded(n, query, grade):
-    return [{**EVIDENCE[0], 'source_id':f'{query}{grade}{i}', 'url':f'https://example.org/{query}/{grade}/{i}', 'query':query,
+    return [{**EVIDENCE[0], 'title':f'{query} sample {i}', 'source_id':f'{query}{grade}{i}', 'url':f'https://example.org/{query}/{grade}/{i}', 'query':query,
              'source_grade':f'qiangua comment thread | {grade}'} for i in range(n)]
 
 

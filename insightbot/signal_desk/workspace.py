@@ -10,7 +10,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from .core import Desk, figure_text, requires_signal, validate_cards, validate_summary
+from .core import Desk, figure_text, number_flags, requires_signal, validate_cards, validate_summary
 from .providers import justone_search, search_to_input
 
 
@@ -196,6 +196,8 @@ class Workspace:
             state['has_artifact'] = bool(state.pop('artifact',None))
             state['revision_checksum'] = revision_checksum(state)
             state['figure_texts'] = [figure_text(c['figure'],state['evidence']) if c.get('figure') else None for c in state.get('cards',[])]
+            state['number_flags'] = number_flags(state.get('cards',[]),state.get('summary'))
+            if state['number_flags']: (self.base/'runs'/key/'number-flags.json').write_text(json.dumps(state['number_flags'],ensure_ascii=False,indent=2))
             state['run_id'] = key
             return state
 

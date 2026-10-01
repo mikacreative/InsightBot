@@ -26,6 +26,7 @@ class DeskState(TypedDict, total=False):
     coverage: dict
     collection: dict
     review: dict
+    number_flags: list[dict]
     status: str
     artifact: str
 
@@ -100,8 +101,9 @@ Each card:
   null when no listed key fits, or for keywords that were not collected; an invalid figure is discarded.
 - evidence_ids (nonempty list), counter_evidence_ids (list, may be empty, never overlapping evidence_ids).
 evidence_stats is computed by code from the evidence (keys: all, general, commercial, unclassified, query:<keyword>,
-query:<keyword>:<kind>); collection describes how evidence was retrieved. Do not put counts, shares or rankings in
-textual fields; use figure. A keyword that retrieved many samples says nothing about how common a concern is.
+query:<keyword>:<kind>); collection describes how evidence was retrieved. Every textual field is prose only: no Arabic digits at
+all, including sample sizes, percentages, section numbers, card numbers and dates. Write section references as Chinese
+numerals (第四节) and any count or share as figure. A keyword that retrieved many samples says nothing about how common a concern is.
 All textual fields Chinese, concise. Include a justified editorial disposition; no invented quotes or statistics.
 Maximum 3 cards for this alpha; empty is valid. Each textual field at most 120 Chinese characters. observation must separate source claims from established facts.'''
 
@@ -208,7 +210,30 @@ def _keyword_led(card, supporting):
     return False
 
 
-def validate_figure(figure, groups):
+def _keyword_matches(evidence, query):
+    terms = [t for t in query.split() if len(t) >= 2] or [query]
+    text = f"{evidence.get('title', '')}{evidence.get('excerpt', '')}"
+    return all(t in text for t in terms) if len(terms) > 1 else terms[0] in text
+
+
+def _restated_search(figure, groups, evidence):
+    """A number the reader cannot use: it re-counts the search itself rather than a finding."""
+    ids, population = set(figure['evidence_ids']), groups[figure['denominator']]
+    if figure['denominator'].startswith('query:') and ids == population:
+        return 'Figure re-counts its own search population; choose a denominator the evidence does not exhaust'
+    by_id = {e['id']: e for e in evidence}
+    queries = {str(by_id[i].get('query', '')).strip() for i in figure['evidence_ids'] if i in by_id} - {''}
+    label = figure['label']
+    if len(queries) == 1 and evidence:
+        query = queries.pop()
+        # Only when the label itself claims to count that keyword: a subset marked for another reason is not this shape.
+        matching = {i for i in population if i in by_id and _keyword_matches(by_id[i], query)}
+        if matching and ids == matching and query in label:
+            return 'Figure counts keyword matches inside a retrieval query; that rate measures the search, not the phenomenon'
+    return None
+
+
+def validate_figure(figure, groups, evidence=()):
     if figure is None:
         return
     if not isinstance(figure, dict) or not isinstance(figure.get('label'), str) or not figure['label'].strip() or len(figure['label']) > 200:
@@ -218,6 +243,9 @@ def validate_figure(figure, groups):
         raise ValueError('Figure denominator must be an evidence_stats key')
     if not isinstance(ids, list) or not ids or len(set(ids)) != len(ids) or not set(ids) <= population:
         raise ValueError('Figure evidence must be distinct members of its denominator')
+    restated = _restated_search(figure, groups, evidence)
+    if restated:
+        raise ValueError(restated)
 
 
 def drop_invalid_figures(cards, evidence, run_dir):
@@ -228,7 +256,7 @@ def drop_invalid_figures(cards, evidence, run_dir):
     for index, card in enumerate(cards):
         if isinstance(card, dict) and card.get('figure') is not None:
             try:
-                validate_figure(card['figure'], groups)
+                validate_figure(card['figure'], groups, evidence)
             except ValueError as error:
                 dropped.append({'card': index, 'figure': card['figure'], 'reason': str(error)})
                 card = {**card, 'figure': None}
@@ -242,7 +270,7 @@ def figure_text(figure, evidence):
     return f"{figure['label']}：{len(figure['evidence_ids'])}/{len(populations(evidence)[figure['denominator']])}"
 
 
-def validate_signal(card, by_id, groups):
+def validate_signal(card, by_id, groups, evidence=()):
     if card.get('signal_type') not in SIGNAL_TYPES:
         raise ValueError('Invalid signal type')
     if card.get('evidence_strength') not in EVIDENCE_STRENGTHS:
@@ -268,7 +296,7 @@ def validate_signal(card, by_id, groups):
         bodies = [source['excerpt']] + [x.get('excerpt') or '' for x in source.get('snapshots', [])]
         if not any(_compact(text.strip().strip('“”"「」\'')) in _compact(body) for body in bodies):
             raise ValueError('Quote is not verbatim from its evidence')
-    validate_figure(card.get('figure'), groups)
+    validate_figure(card.get('figure'), groups, evidence)
     supporting = [by_id[i] for i in card['evidence_ids']]
     comment_only = all('comment' in str(e.get('source_grade', '')).lower() for e in supporting)
     if card['evidence_strength'] == 'strong' and (comment_only or _keyword_led(card, supporting)):
@@ -284,6 +312,29 @@ def validate_summary(summary):
     if not isinstance(avoid, list) or len(avoid) > 3 or any(not isinstance(a, str) or not a.strip() or len(a) > 500 for a in avoid):
         raise ValueError('Invalid summary avoid list')
     return summary
+
+
+_TEXT_FIELDS = ('title', 'observation', 'interpretation', 'brand_relevance', 'limitations', 'next_step', 'recommended_action')
+
+
+def number_flags(cards, summary):
+    """Code-owned scan: numbers belong in figure; a flagged string is a prompt violation, not a blocked run."""
+    flags = []
+    for index, card in enumerate(cards):
+        if not isinstance(card, dict):
+            continue
+        for field in _TEXT_FIELDS:
+            value = card.get(field)
+            if isinstance(value, str) and re.search(r'\d', value):
+                flags.append({'card': index, 'field': field, 'text': value[:200]})
+    summary = summary if isinstance(summary, dict) else {}
+    headline, avoid = summary.get('headline'), summary.get('avoid')
+    if isinstance(headline, str) and re.search(r'\d', headline):
+        flags.append({'card': None, 'field': 'summary.headline', 'text': headline[:200]})
+    for item in avoid if isinstance(avoid, list) else []:
+        if isinstance(item, str) and re.search(r'\d', item):
+            flags.append({'card': None, 'field': 'summary.avoid', 'text': item[:200]})
+    return flags
 
 
 def requires_signal(state):
@@ -309,7 +360,7 @@ def validate_cards(cards, evidence, require_signal=False):
             raise ValueError('Unknown or missing evidence reference')
         # Live v2 cards must carry signal fields; legacy demo/replay cards are checked only when they opt in.
         if require_signal or 'signal_type' in card:
-            validate_signal(card, by_id, groups)
+            validate_signal(card, by_id, groups, evidence)
     return cards
 
 
@@ -317,6 +368,10 @@ def render(state):
     out = [f"# Signal Desk · {state['brief']['brand']}", '', f"模式：{state['mode']} · 状态：人工批准的本地测试稿", '',
            '范围：' + json.dumps(state['coverage'], ensure_ascii=False), '',
            '> 测试输出；未向任何外部渠道发送。DEMO 为预设流程示例；REPLAY 为人工编辑的历史试跑，均不是实时 AI 研究。', '']
+    flags = state.get('number_flags') if state.get('number_flags') is not None else number_flags(state['cards'], state.get('summary'))
+    if flags:
+        where = '、'.join(dict.fromkeys(('结论' if f['card'] is None else f"第{f['card'] + 1}卡") + '.' + f['field'] for f in flags))
+        out += [f"**数字自查**：正文出现数字的字段（{where}）。数字只应出现在「数字」行；请人工确认或修改后重新提交。", '']
     sources = {e['id']: e for e in state['evidence']}
     for c in state['cards']:
         out += [f"## {c['title']} · {c['disposition']}", '']
@@ -437,7 +492,7 @@ class Desk:
         validate_cards(state['cards'], state['evidence'], require_signal=requires_signal(state))
         if requires_signal(state) or state.get('summary'):
             validate_summary(state.get('summary'))
-        return {'status': 'awaiting_review'}
+        return {'status': 'awaiting_review', 'number_flags': number_flags(state.get('cards', []), state.get('summary')) if requires_signal(state) else []}
 
     def review(self, state):
         decision = interrupt({'status': 'awaiting_review', 'cards': state['cards'], 'coverage': state['coverage']})
