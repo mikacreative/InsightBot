@@ -11,6 +11,7 @@ from urllib.parse import urlparse, parse_qs
 
 from .auth import Auth, RateLimitError
 from .workspace import Workspace
+from .workspace_v2 import WorkspaceV2
 
 
 def serve(root, host='127.0.0.1', port=18876):
@@ -18,7 +19,8 @@ def serve(root, host='127.0.0.1', port=18876):
         raise ValueError('Primary listener must remain loopback')
     root = Path(root).resolve()
     auth = Auth(root)
-    workspace = Workspace(root)
+    workspace = Workspace(root, start_worker=False)
+    workspace_v2 = WorkspaceV2(root)
     mutation_lock = threading.RLock()
     lan = os.environ.get('SIGNAL_DESK_LAN_HOST', '')
     tls_port = int(os.environ.get('SIGNAL_DESK_TLS_PORT', '18878'))
@@ -28,7 +30,8 @@ def serve(root, host='127.0.0.1', port=18876):
         if not address.is_private or address.is_unspecified or address.is_loopback:
             raise ValueError('LAN listener requires a specific private interface IP')
         allowed_hosts.add(lan)
-    ui = Path(__file__).with_name('ui.html').read_text()
+    ui = Path(__file__).with_name('ui_v2.html').read_text()
+    legacy_ui = Path(__file__).with_name('ui.html').read_text().replace('<body>', '<body><div style="padding:12px;background:#fff4cc;color:#243b40">旧版历史记录 · 仅管理员只读。请返回 <a href="/">0.2 品牌工作区</a> 开始新研究。</div>', 1)
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -68,11 +71,20 @@ def serve(root, host='127.0.0.1', port=18876):
         def do_GET(self):
             if not self.valid_host(): self.send({'error':'无效访问地址'},403); return
             path=urlparse(self.path); query=parse_qs(path.query)
-            if path.path=='/health': self.send({'status':'ok','service':'signal-desk','authentication':True,'delivery':'local-only'}); return
+            if path.path=='/health': self.send({'status':'ok','service':'signal-desk','version':'0.2','authentication':True,'delivery':'local-only'}); return
             if path.path=='/': self.send(ui,content_type='text/html'); return
             user=auth.session(self.token())
             if not user: self.send({'error':'请先登录'},401); return
             try:
+                if path.path.startswith('/api/v2/'):
+                    result = workspace_v2.get(path.path, {k:v[0] for k,v in query.items()}, user)
+                    self.send(result)
+                    return
+                if path.path=='/legacy':
+                    if user['role']!='admin': self.send({'error':'仅管理员可查看旧版记录'},403); return
+                    self.send(legacy_ui,content_type='text/html'); return
+                if path.path not in ('/api/me','/api/users','/api/config') and user['role']!='admin':
+                    self.send({'error':'旧版共享记录仅供管理员查看'},403); return
                 if path.path=='/api/me':
                     self.send({k:user[k] for k in ('username','role','csrf')})
                 elif path.path=='/api/profiles': self.send(workspace.profiles())
@@ -91,6 +103,10 @@ def serve(root, host='127.0.0.1', port=18876):
                         view=query.get('view',['review'])[0]
                         self.send((render_marketing if view=='marketing' else render)(state),content_type='text/markdown')
                 else: self.send({'error':'没有此页面或无权限'},404)
+            except PermissionError:
+                self.send({'error':'无权访问该品牌或记录'},403)
+            except (ValueError, KeyError):
+                self.send({'error':'记录或参数无效，请刷新后重试'},400)
             except Exception:
                 self.send({'error':'无法读取该记录，请刷新后重试'},400)
 
@@ -116,6 +132,10 @@ def serve(root, host='127.0.0.1', port=18876):
             if not hmac.compare_digest(self.headers.get('X-Signal-Desk-CSRF',''),user['csrf']):
                 self.send({'error':'登录状态已更新，请刷新页面'},403); return
             try:
+                if self.path.startswith('/api/v2/'):
+                    self.send(workspace_v2.post(self.path,payload,user)); return
+                if self.path not in ('/api/logout','/api/password','/api/users'):
+                    self.send({'error':'旧版记录只读，请从0.2品牌工作区开始研究'},403); return
                 with mutation_lock:
                     if self.path=='/api/logout':
                         auth.logout(self.token()); self.send({'ok':True},cookie=self.cookie(clear=True)); return
@@ -132,6 +152,7 @@ def serve(root, host='127.0.0.1', port=18876):
                     if self.path=='/api/revise': self.send(workspace.revise(payload['id'],payload['cards'],payload['checksum'],user['username'],payload.get('summary'))); return
                     if self.path=='/api/review': self.send(workspace.review(payload['id'],payload['decision'],user['username'],payload.get('note',''),payload['checksum'])); return
                     self.send({'error':'没有此操作'},404)
+            except PermissionError: self.send({'error':'无权执行该品牌操作'},403)
             except (ValueError,KeyError): self.send({'error':'输入或版本无效，请检查必填项并重新载入记录'},400)
             except Exception: self.send({'error':'操作未完成。请查看任务状态；不要反复启动付费研究。'},400)
 

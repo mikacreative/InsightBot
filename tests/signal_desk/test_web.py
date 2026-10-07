@@ -57,7 +57,10 @@ def test_login_roles_origin_and_csrf(tmp_path):
                 user=editor.post('/api/login',json={'username':'editor','password':'fixture-long-password'}).json()
                 assert editor.get('/api/users').status_code!=200
                 assert editor.post('/api/users',json={'username':'evil','password':'fixture-long-password','role':'admin'},headers={'X-Signal-Desk-CSRF':user['csrf']}).status_code==403
-                assert editor.get('/api/jobs').status_code==200
+                assert editor.get('/api/jobs').status_code==403
+                assert editor.get('/legacy').status_code==403
+                assert editor.get('/api/v2/brands').status_code==200
+                assert editor.post('/api/profile',json={},headers={'X-Signal-Desk-CSRF':user['csrf']}).status_code==403
                 assert editor.post('/api/logout',json={},headers={'X-Signal-Desk-CSRF':user['csrf']}).status_code==200
                 assert editor.get('/api/jobs').status_code==401
     finally:

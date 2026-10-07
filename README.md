@@ -1,9 +1,9 @@
 ## InsightBot (营销情报站)
 
-### Signal Desk 测试工作流（2026-09-29）
+### Signal Desk 0.2 本机工作流（2026-10-07）
 
 品牌定向研究与人工审稿的独立 LangGraph 模块，入口与数据均独立于现有日报。
-团队表单与登录入口见 [团队测试说明](docs/signal-desk/TEAM-TEST.md)。
+本机品牌工作区与精选交付入口见 [0.2 使用说明](docs/signal-desk/LOCAL-V02.md)。旧版远端记录见 [团队测试说明](docs/signal-desk/TEAM-TEST.md)。
 参见 [本轮 PDD](docs/signal-desk/PDD.md) 与 [测试部署及环境配置](docs/signal-desk/TESTING.md)。
 演示／历史回放不代表实时采集或 AI 验收；实时运行需要单独配置供应商凭证。
 
