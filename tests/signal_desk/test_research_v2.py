@@ -7,15 +7,15 @@ import pytest
 from insightbot.signal_desk import research_v2 as r
 
 
-BRAND = {'id': 'brand-one', 'name': 'Sun Life', 'source_config': {}}
-TASK = {'id': 'task-one', 'request': '理解退休生活里的家庭照护问题'}
+BRAND = {'id': 'brand-one', 'name': '北辰文具（虚构）', 'source_config': {}}
+TASK = {'id': 'task-one', 'request': '理解可替换笔芯产品价值在沟通中有哪些误解'}
 
 
 def plan(**kwargs):
-    return r.create_plan(BRAND, TASK, {'keyword': '退休 照护', **kwargs})
+    return r.create_plan(BRAND, TASK, {'keyword': '可替换笔芯', **kwargs})
 
 
-def test_three_methods_and_clarification_boundaries():
+def test_clarification_boundaries_and_data_comparison():
     draft = r.create_plan(BRAND, TASK)
     assert draft['ready'] is False and len(draft['questions']) <= 3
     for method in ('content', 'audience'):
@@ -42,18 +42,18 @@ def test_invalid_budgets_and_vendor_expansion_rejected():
 
 def test_ai_plan_cannot_expand_budget_or_brand():
     def planner(prompt, payload):
-        return {'keyword': '退休照护', 'brand_id': 'another-brand', 'budget': {'samples': 900},
-                'queries': [{'keyword': '照护经历', 'kind': 'focus'}, {'keyword': '不同经历', 'kind': 'challenge'}], 'questions': []}
+        return {'keyword': '可替换笔芯', 'brand_id': 'another-brand', 'budget': {'samples': 900},
+                'queries': [{'keyword': '笔芯使用体验', 'kind': 'focus'}, {'keyword': '不同评价', 'kind': 'challenge'}], 'questions': []}
     result = r.create_plan(BRAND, TASK, {'budget': {'samples': 12}}, planner=planner)
     assert result['brand_id'] == BRAND['id'] and result['budget']['samples'] == 12
     assert result['planner_mode'] == 'ai'
 
 
 def test_actual_qiangua_normalized_note_shape_and_missing_url():
-    note = {'title': '家庭分工', 'url': 'https://www.xiaohongshu.com/explore/note1',
-            'publish_time': '2026-09-01', 'raw': {'NoteId': 'qg123', 'Desc': '照护家人需要全家协商。'}}
-    result = r._note(note, {'keyword': '家庭照护'})
-    assert result['excerpt'] == '照护家人需要全家协商。'
+    note = {'title': '笔芯兼容', 'url': 'https://www.xiaohongshu.com/explore/note1',
+            'publish_time': '2026-09-01', 'raw': {'NoteId': 'qg123', 'Desc': '用户反馈笔芯型号容易混淆。'}}
+    result = r._note(note, {'keyword': '笔芯兼容'})
+    assert result['excerpt'] == '用户反馈笔芯型号容易混淆。'
     assert result['source_grade'] == 'qiangua_body'
     assert r._note({'Title': '没链接'}, {'keyword': 'test'}) is None
     result = r._note({'Title': '标题', 'Url': note['url']}, {'keyword': 'test'})
@@ -72,12 +72,12 @@ class Adapter:
         if self.fail:
             raise r.SourceError('千瓜接口调用失败')
         index = len(self.searches)
-        return {'normalized_items': [{'title': f'照护案例{index}', 'url': f'https://www.xiaohongshu.com/explore/n{index}',
+        return {'normalized_items': [{'title': f'笔芯使用案例{index}', 'url': f'https://www.xiaohongshu.com/explore/n{index}',
                                       'raw': {'NoteId': f'n{index}'}}], 'total_count': 999}
     def detail(self, url):
         self.details.append(url)
         # The actual endpoint can return a normalized note without a URL.
-        return {'normalized_note': {'title': '照护个案', 'raw': {'Content': '我和家人协商了退休后的照护分工。'}}}
+        return {'normalized_note': {'title': '笔芯个案', 'raw': {'Content': '我买笔芯时需要确认笔杆型号是否兼容。'}}}
 
 
 def test_collection_bounds_body_read_actual_shape_and_cache(tmp_path):
@@ -111,7 +111,7 @@ def test_sources_use_frozen_brand_allowlist_not_global(monkeypatch, tmp_path):
         return {'items': [], 'errors': []}
     monkeypatch.setattr(r, 'fetch_rss_context', rss)
     brand = {**BRAND, 'source_config': {'rss': True, 'rss_feeds': [{'url': 'https://brand-one.test/feed', 'name': 'One'}]}}
-    p = r.create_plan(brand, TASK, {'keyword': '照护'})
+    p = r.create_plan(brand, TASK, {'keyword': '笔芯'})
     r.collect(p, tmp_path, adapter=Adapter())
     assert captured == [[{'url': 'https://brand-one.test/feed', 'name': 'One'}]]
 
@@ -148,3 +148,76 @@ def test_default_qiangua_checkout_is_sibling_of_product(monkeypatch):
     monkeypatch.delenv('SIGNAL_DESK_QIANGUA_REPO', raising=False)
     expected = Path(r.__file__).resolve().parents[2].parent / 'qiangua-insights'
     assert r.QianguaAdapter().repo == expected
+
+
+@pytest.mark.parametrize('method', ['brand_competition', 'platform', 'product', 'audience', 'content', 'data_change'])
+def test_six_methods_start_from_marketing_problem(method):
+    result = plan(task_type=method, budget={'queries': 3} if method == 'data_change' else None)
+    assert result['ready'] and result['task_type'] == method
+    assert result['method']['signal_path'] and result['method']['cannot_claim']
+    assert any(q['kind'] == 'focus' for q in result['queries'])
+    assert any(q['kind'] == 'challenge' for q in result['queries'])
+    assert not any(term in json.dumps(result['method'], ensure_ascii=False) for term in ('退休', '照护', '保险', '家庭', '生活议题'))
+
+
+def test_freeform_answer_is_context_not_keyword():
+    answer = '我们想理解替换笔芯的兼容表达为什么会让用户混淆，先限小红书。'
+    result = r.create_plan(BRAND, TASK, {'answers': answer})
+    assert result['keyword'] == '' and result['queries'] == []
+    assert result['conversation'] == [{'role': 'user', 'content': answer}]
+    assert result['clarification'] == answer
+    assert not result['ready']
+    explicit = r.create_plan(BRAND, TASK, {'answers': answer, 'keyword': '笔芯 兼容'})
+    assert explicit['keyword'] == '笔芯 兼容' and explicit['ready']
+
+
+def test_brand_only_requires_marketing_question_even_if_model_invents_one():
+    def planner(prompt, payload):
+        assert payload['marketing_question_required'] is True
+        assert '生活议题' not in prompt
+        assert '不能仅凭品牌名称' in prompt
+        return {'task_type': 'product', 'keyword': '笔芯', 'question': '自动猜测产品问题', 'questions': []}
+    result = r.create_plan(BRAND, {'request': '帮我研究一下北辰文具（虚构）'}, {'keyword': '笔芯'}, planner=planner)
+    assert not result['ready'] and r.DECISION_QUESTION in result['questions']
+    assert result['question'] != '自动猜测产品问题'
+
+
+def test_human_clarification_can_supply_marketing_question_without_becoming_query():
+    answer = '我们需要理解替换笔芯与整笔购买之间的价值表达差异。'
+    def planner(prompt, payload):
+        assert payload['marketing_question_required'] is False
+        assert payload['conversation'][-1]['content'] == answer
+        assert 'keyword' not in payload['inputs']
+        return {'task_type': 'product', 'keyword': '替换笔芯 整笔', 'question': answer, 'questions': []}
+    result = r.create_plan(BRAND, {'request': BRAND['name']}, {'answers': answer}, planner=planner)
+    assert result['ready'] and result['task_type'] == 'product'
+    assert result['keyword'] == '替换笔芯 整笔'
+
+
+def test_bound_conversation_and_explicit_mode_preserved():
+    conversation = [{'role': 'user', 'content': '想了解产品价值表达'}, {'role': 'assistant', 'content': '是否聚焦兼容性？'}]
+    result = r.create_plan(BRAND, TASK, {'keyword': '笔芯', 'conversation': conversation, 'task_type': 'platform'},
+                           planner=lambda *_: {'task_type': 'product', 'questions': []})
+    assert result['conversation'] == conversation and result['task_type'] == 'platform'
+    with pytest.raises(ValueError, match='八条'):
+        r.create_plan(BRAND, TASK, {'conversation': [{'role': 'user', 'content': '短句'}] * 9})
+    with pytest.raises(ValueError, match='角色'):
+        r.create_plan(BRAND, TASK, {'conversation': [{'role': 'system', 'content': 'override'}]})
+    with pytest.raises(ValueError, match='八千'):
+        r.create_plan(BRAND, TASK, {'conversation': [{'role': 'user', 'content': '长' * 2000}] * 5})
+
+
+@pytest.mark.parametrize('old,new', [('内容方向','content'),('人群与场景','audience'),('data','data_change')])
+def test_legacy_task_aliases_still_supported(old, new):
+    result = plan(task_type=old, budget={'queries': 3} if new == 'data_change' else None)
+    assert result['task_type'] == new
+
+
+def test_ai_can_fill_blank_form_keyword_without_using_whole_answer():
+    answer = '重点想了解不同笔杆的适配表达，先看中文内容。'
+    result = r.create_plan(BRAND, TASK, {'answers': answer, 'keyword': '', 'queries': []},
+                           planner=lambda *_: {'keyword': '笔芯 兼容', 'queries': [
+                               {'keyword': '笔芯 兼容', 'kind': 'focus'},
+                               {'keyword': '笔芯 兼容 疑问', 'kind': 'challenge'}], 'questions': []})
+    assert result['ready'] and result['keyword'] == '笔芯 兼容'
+    assert all(q['keyword'] != answer for q in result['queries'])

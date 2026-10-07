@@ -135,8 +135,10 @@ def test_clarification_must_complete_before_confirm(tmp_path):
     assert not p['ready'] and p['questions']
     with pytest.raises(ValueError):
         ws.post('/api/v2/confirm', {'brand_id': a['id'], 'plan_id': p['id'], 'checksum': p['checksum']}, ALICE)
-    clarified = plan(ws, a['id'], keyword='', answers='家庭分工')
-    assert clarified['ready'] and clarified['queries'][0]['keyword'] == '家庭分工'
+    clarified = plan(ws, a['id'], keyword='', answers='想了解笔芯兼容如何影响选购')
+    assert not clarified['ready'] and not clarified['queries']
+    explicit = plan(ws, a['id'], keyword='笔芯兼容', answers='想了解笔芯兼容如何影响选购')
+    assert explicit['ready'] and explicit['queries'][0]['keyword'] == '笔芯兼容'
 
 
 def test_restart_marks_uncertain_and_preserves_legacy(tmp_path):

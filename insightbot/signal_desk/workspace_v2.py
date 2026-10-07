@@ -174,7 +174,7 @@ class WorkspaceV2:
                 # Homepage intentionally omits research, private briefs and member lists.
                 result.append({k: brand.get(k, '') for k in ('id', 'name', 'updated_at')}
                               | {'roles': roles, 'role': 'admin' if 'admin' in roles else roles[0]})
-        return {'brands': sorted(result, key=lambda b: b['name']), 'version': '0.2'}
+        return {'brands': sorted(result, key=lambda b: b['name']), 'version': '0.2.1'}
 
     @staticmethod
     def _members(value):
@@ -277,7 +277,7 @@ class WorkspaceV2:
             inputs = {k: copy.deepcopy(payload[k]) for k in
                       ('answers', 'task_type', 'queries', 'budget', 'sources', 'source_config',
                        'keyword', 'start_date', 'end_date', 'time_window', 'audience', 'exclusions',
-                       'hypothesis') if k in payload}
+                       'hypothesis', 'conversation') if k in payload}
             if 'sources' not in inputs and 'source_config' not in inputs:
                 inputs['sources'] = copy.deepcopy(brand.get('source_config', {}))
             inputs['use_ai'] = payload.get('use_ai', False)
@@ -599,7 +599,7 @@ class WorkspaceV2:
                         'ai_configured': all(os.environ.get(k) for k in
                          ('SIGNAL_DESK_AI_BASE_URL', 'SIGNAL_DESK_AI_API_KEY', 'SIGNAL_DESK_AI_MODEL')),
                         'source_config': brand.get('source_config', {}),
-                        'delivery_profile': brand['delivery_profile'], 'version': '0.2'}
+                        'delivery_profile': brand['delivery_profile'], 'version': '0.2.1'}
         raise ValueError('没有此接口')
 
     def post(self, path, payload, user):

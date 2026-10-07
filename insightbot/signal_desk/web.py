@@ -71,7 +71,7 @@ def serve(root, host='127.0.0.1', port=18876):
         def do_GET(self):
             if not self.valid_host(): self.send({'error':'无效访问地址'},403); return
             path=urlparse(self.path); query=parse_qs(path.query)
-            if path.path=='/health': self.send({'status':'ok','service':'signal-desk','version':'0.2','authentication':True,'delivery':'local-only'}); return
+            if path.path=='/health': self.send({'status':'ok','service':'signal-desk','version':'0.2.1','authentication':True,'delivery':'local-only'}); return
             if path.path=='/': self.send(ui,content_type='text/html'); return
             user=auth.session(self.token())
             if not user: self.send({'error':'请先登录'},401); return
