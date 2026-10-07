@@ -5,6 +5,10 @@ import sys
 import time
 import urllib.request
 
+import pytest
+
+pytest.importorskip("langgraph.checkpoint.sqlite", reason="Install requirements-signal-desk.txt for the isolated Signal Desk runtime")
+
 
 def test_idle_browser_connection_does_not_block_health(tmp_path):
     with socket.socket() as reserve:
@@ -65,3 +69,12 @@ def test_login_roles_origin_and_csrf(tmp_path):
                 assert editor.get('/api/jobs').status_code==401
     finally:
         process.terminate();process.wait(timeout=5)
+
+
+def test_user_error_messages_are_actionable_and_do_not_reflect_private_details():
+    from insightbot.signal_desk.web import user_error
+    assert '研究深度' in user_error(ValueError('研究预算 samples 超出允许上限'))
+    assert '任务列表' in user_error(ValueError('记录不存在'))
+    for error in (ValueError('private-api-key'), KeyError('private-api-key'),
+                  ValueError('规划模型返回私有内容 private-api-key')):
+        assert 'private-api-key' not in user_error(error)

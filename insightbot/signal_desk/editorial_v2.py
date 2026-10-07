@@ -16,9 +16,10 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .research_v2 import DELIVERY_DEFAULTS, private_json
+from .research_v2 import (DELIVERY_DEFAULTS, execution_budget, model_calls_used,
+                         private_json, validate_enrichment_requests)
 
-METHOD_VERSION = 'selected-signals-editor-0.2'
+METHOD_VERSION = 'selected-signals-editor-0.2.2'
 TEXT_FIELDS = ('title', 'observation', 'brand_reference', 'boundary', 'question')
 DISPOSITIONS = ('select', 'research', 'observe', 'drop')
 EDITOR_PROMPT = '''你是独立的品牌信号主编。任务是精选少量值得读的判断，不是自动策略方案生成器。
@@ -37,9 +38,15 @@ selected判断必须通过：来源可核查、主张有依据、任务相关、
 CANDIDATE|候选ID如C01|select/research/observe/drop|候选判断|支持ID逗号分隔或-|反例ID或-|取舍理由
 CARD|候选ID|signal/insight/trend|标题|观察与理解|品牌参考|边界|可讨论问题或-|支持ID|反例ID或-
 CHECK|候选ID|来源可核查yes/no|主张有依据yes/no|任务相关yes/no|参考具体yes/no|非处方yes/no|新理解yes/no
+GAP|待研究候选ID|现有千瓜标题证据ID列表|具体正文缺口|正文能如何改变入选、措辞或边界
 LOOKBACK|历史交付ID|回看短句|新证据ID列表
 SCOPE|实际观察范围和缺口
 每个 CARD 必须对应 select 的 CANDIDATE 和六项全部yes的CHECK。其余候选无需CARD。
+GAP可省略，仅在enrichment_policy.allowed=true时提出。每个待研究候选最多一个GAP，整期最多六个。
+只能补读该候选已关联的title_only千瓜笔记正文，不提出新检索、URL、供应商或新的研究范围。
+缺口和预期影响各不超过240字符；说明为什么正文会改变候选取舍，不为增加材料而补读。
+按缺口对入选或判断边界的重要程度排列GAP，先写最值得在有限额度内补读的来源。
+没有补证额度或补证仍不足时保持research/observe/drop，可以零稿，不能假装缺口已解决。
 LOOKBACK可省略、最多一条，仅用于新证据实质支持、收窄或推翻旧判断，必须有新证据。
 SCOPE必须有。不要在scope虚构条数；按输入 collection/queries 描述真实窗口与缺口。
 观点标题<=26字符；观察与理解<=120；品牌参考<=60；边界<=45；可讨论问题<=40最多一个。
@@ -53,7 +60,7 @@ def model_text(prompt, payload, run_dir, stage, *, json_mode=False):
     """One attributable OpenAI-compatible request; cached outcomes, no blind retry."""
     directory = Path(run_dir)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if stage not in ('planner', 'editor', 'repair'):
+    if stage not in ('planner', 'editor', 'repair', 'reedit', 'reedit-repair'):
         raise ValueError('Unknown model stage')
     digest = hashlib.sha256((prompt + json.dumps(payload, ensure_ascii=False, sort_keys=True)).encode()).hexdigest()
     cache, marker = directory / f'{stage}-v2.json', directory / f'{stage}-v2.started'
@@ -116,7 +123,8 @@ def _ids(value):
 def parse_protocol(text: str) -> dict:
     if not isinstance(text, str) or len(text) > 40000:
         raise ValueError('编辑协议不是有界文本')
-    result = {'cards': [], 'candidates': [], 'lookback': None, 'scope': '', 'method_version': METHOD_VERSION}
+    result = {'cards': [], 'candidates': [], 'enrichment_requests': [],
+              'lookback': None, 'scope': '', 'method_version': METHOD_VERSION}
     checks = {}
     for line in text.splitlines():
         if not line.strip():
@@ -136,6 +144,9 @@ def parse_protocol(text: str) -> dict:
             if parts[1] in checks:
                 raise ValueError('重复的候选质量检查')
             checks[parts[1]] = dict(zip(('sources', 'grounded', 'relevant', 'specific', 'non_prescriptive', 'new'), parts[2:]))
+        elif kind == 'GAP' and len(parts) == 5:
+            result['enrichment_requests'].append({'candidate_id': parts[1], 'evidence_ids': _ids(parts[2]),
+                                                   'gap': parts[3], 'expected_change': parts[4]})
         elif kind == 'LOOKBACK' and len(parts) == 4 and result['lookback'] is None:
             result['lookback'] = {'previous_id': parts[1], 'text': parts[2], 'evidence_ids': _ids(parts[3])}
         elif kind == 'SCOPE' and len(parts) == 2 and not result['scope']:
@@ -288,6 +299,10 @@ def validate_edition(edition: dict, evidence: list[dict], delivery_profile=None,
             errors.append(prefix + '正文数字未在支持原文出现')
     if {c['id'] for c in candidates if isinstance(c, dict) and c.get('disposition') == 'select'} != seen_candidates:
         errors.append('精选候选与交付卡片不一致')
+    try:
+        validate_enrichment_requests(edition.get('enrichment_requests', []), evidence, candidates)
+    except ValueError as error:
+        errors.append(str(error))
     lookback = edition.get('lookback')
     if lookback is not None:
         if not isinstance(lookback, dict) or profile['max_lookback'] < 1:
@@ -341,18 +356,31 @@ def _editor_input(plan, collected, previous):
         old.append({'id': row.get('id'), 'cards': delivery.get('cards', []), 'feedback': row.get('feedback', [])})
     return {'research_plan': plan, 'evidence': evidence,
             'collection': collected.get('collection', collected.get('coverage', {})),
-            'external_context_unverified': collected.get('external_context', []), 'previous_editions': old[:4]}
+            'external_context_unverified': collected.get('external_context', []), 'previous_editions': old[:4],
+            'enrichment_outcome': collected.get('enrichment')}
 
 
-def edit(plan, collected, previous_editions=None, *, run_dir, editor=None):
+def edit(plan, collected, previous_editions=None, *, run_dir, editor=None,
+         stage='editor', prior_model_usage=None, previous_draft=None):
     directory = Path(run_dir)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     previous = previous_editions or []
     payload = _editor_input(plan, collected, previous)
     profile = plan.get('delivery_profile') or DELIVERY_DEFAULTS
-    model_limit = plan.get('budget', {}).get('model_calls', 2)
-    if not isinstance(model_limit, int) or model_limit < 1 or model_limit > 3:
-        raise ValueError('模型调用上限无效')
+    if stage not in ('editor', 'reedit'):
+        raise ValueError('编辑阶段无效')
+    budget = execution_budget(plan)
+    history = list(prior_model_usage or [])
+    remaining = budget['model_calls'] - model_calls_used(history)
+    if remaining < 1:
+        raise ValueError('本轮执行的模型调用额度已用完')
+    enrichment_allowed = stage == 'editor' and bool(budget['enrichment_rounds'] and budget['body_reads'])
+    policy = {'allowed': enrichment_allowed, 'round_limit': budget['enrichment_rounds'],
+              'body_reads_total': budget['body_reads'], 'model_calls_remaining': remaining,
+              'scope': '仅补读已有千瓜标题笔记，不增查询、来源或样本'}
+    payload.update(enrichment_policy=policy)
+    if previous_draft is not None:
+        payload['previous_draft'] = previous_draft
     # No evidence means no paid interpretation. A failed fetch is a distinct failure, not zero findings.
     if collected.get('collection', {}).get('status') == 'failed':
         raise ValueError('采集失败，不能包装为没有新信号')
@@ -366,19 +394,23 @@ def edit(plan, collected, previous_editions=None, *, run_dir, editor=None):
             raise ValueError('; '.join(errors))
         private_json(directory / 'delivery-v2.json', result)
         return result
-    history = []
     prompt = EDITOR_PROMPT
-    for attempt in range(min(2, model_limit)):
-        stage = 'editor' if attempt == 0 else 'repair'
+    if stage == 'reedit':
+        prompt += '\n有限补证已经结束。结合补证结果重新比较所有候选，不机械升级入选；保留未解决缺口与故障，不再输出GAP。'
+    base_prompt = prompt
+    for attempt in range(min(2, remaining)):
+        request_stage = stage if attempt == 0 else 'repair' if stage == 'editor' else 'reedit-repair'
         if editor:
             raw = editor(prompt, payload)
-            metadata = {'stage': stage, 'provider': 'injected', 'calls': 1}
+            metadata = {'stage': request_stage, 'provider': 'injected', 'calls': 1}
         else:
-            raw, metadata = model_text(prompt, payload, directory, stage)
+            raw, metadata = model_text(prompt, payload, directory, request_stage)
         history.append(metadata)
         try:
             result = parse_protocol(raw)
             errors = validate_edition(result, collected['evidence'], profile, previous)
+            if result['enrichment_requests'] and not enrichment_allowed:
+                errors.append('本轮未开放或已完成补证；须收窄判断或保留待研究，不再提出GAP')
         except ValueError as error:
             errors = [str(error)]
         if not errors:
@@ -386,11 +418,10 @@ def edit(plan, collected, previous_editions=None, *, run_dir, editor=None):
                           source_status=collected.get('collection', {}).get('status', 'unknown'))
             private_json(directory / 'delivery-v2.json', result)
             return result
-        private_json(directory / f'{stage}-validation-v2.json', {'errors': errors})
-        if attempt + 1 < min(2, model_limit):
-            payload = {**_editor_input(plan, collected, previous), 'previous_editor_output': raw,
-                       'validation_errors': errors}
-            prompt = EDITOR_PROMPT + '\n这是已授权范围内的一次编辑修复。修正所列问题，不增采数据、不截断句子，不为凑数保留不合格判断。'
+        private_json(directory / f'{request_stage}-validation-v2.json', {'errors': errors})
+        if attempt + 1 < min(2, remaining):
+            payload = {**payload, 'previous_editor_output': raw, 'validation_errors': errors}
+            prompt = base_prompt + '\n这是已授权范围内的一次编辑修复。修正所列问题，不增采数据、不截断句子，不为凑数保留不合格判断。'
     raise ValueError('编辑稿未通过质量校验；未截断或补写：' + '; '.join(errors[:6]))
 
 

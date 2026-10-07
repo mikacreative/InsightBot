@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("langgraph.checkpoint.sqlite", reason="Install requirements-signal-desk.txt for the isolated Signal Desk runtime")
+
 from insightbot.signal_desk.workspace_v2 import WorkspaceV2, DEFAULT_DELIVERY
 from insightbot.signal_desk import research_v2
 
@@ -83,7 +85,7 @@ def test_brands_default_deny_and_no_homepage_private_content(tmp_path):
     assert [x['id'] for x in ws.get('/api/v2/brands', {}, ALICE)['brands']] == [a['id']]
     assert 'audience' not in ws.get('/api/v2/brands', {}, ALICE)['brands'][0]
     assert 'members' not in ws.get('/api/v2/brand', {'brand_id': a['id']}, ALICE)
-    for route in ('brand', 'jobs', 'editions', 'feedback', 'config', 'issues', 'tasks', 'artifact', 'job', 'plan'):
+    for route in ('brand', 'jobs', 'editions', 'feedback', 'config', 'issues', 'tasks', 'artifact', 'job', 'plan', 'conversations', 'conversation'):
         with pytest.raises(PermissionError):
             ws.get('/api/v2/' + route, {'brand_id': b['id'], 'id': 'guessed'}, ALICE)
     with pytest.raises(PermissionError):
@@ -321,3 +323,128 @@ def test_real_editor_empty_collection_is_zero_not_failure(tmp_path, monkeypatch)
     state = ws.job(a['id'], j['id'], ALICE)
     assert state['delivery']['cards'] == [] and state['delivery']['model_usage'] == []
     assert '未取得可引用材料' in state['delivery']['scope']
+
+
+def test_dialogue_reuses_task_preserves_prior_plan_and_resumes_after_restart(tmp_path):
+    ws = WorkspaceV2(tmp_path, start_worker=False)
+    a = brand(ws, 'Fictional stationery brand')
+    first = plan(ws, a['id'], request='用户如何理解笔芯兼容？', keyword='笔芯 兼容')
+    turns = [{'role': 'user', 'content': first['task']['request']},
+             {'role': 'assistant', 'content': '希望关注哪些使用场景？'},
+             {'role': 'user', 'content': '办公替换场景，只看本月。'}]
+    second = plan(ws, a['id'], request=first['task']['request'], task_id=first['task_id'],
+                  answers=turns[-1]['content'], conversation=turns, keyword='办公 笔芯 兼容')
+    assert first['task_id'] == second['task_id']
+    assert first['id'] != second['id']
+    assert ws.get('/api/v2/plan', {'brand_id': a['id'], 'id': first['id']}, ALICE)['keyword'] == '笔芯 兼容'
+    summary = ws.get('/api/v2/conversations', {'brand_id': a['id']}, ALICE)['conversations']
+    assert len(summary) == 1 and summary[0]['plan_id'] == second['id']
+    assert 'conversation' not in summary[0] and 'brand_snapshot' not in summary[0]
+    resumed = WorkspaceV2(tmp_path, start_worker=False).get('/api/v2/conversation',
+                   {'brand_id': a['id'], 'id': first['task_id']}, ALICE)
+    assert resumed['plan']['conversation'] == turns
+    assert resumed['plan']['id'] == second['id'] and not resumed['job_id']
+    assert not ws.queue.qsize()
+
+
+def test_dialogue_cannot_continue_cross_brand_or_change_original_request(tmp_path):
+    ws = WorkspaceV2(tmp_path, start_worker=False)
+    a, b = brand(ws), brand(ws, 'B')
+    original = plan(ws, a['id'])
+    with pytest.raises(ValueError):
+        plan(ws, b['id'], task_id=original['task_id'])
+    with pytest.raises(ValueError):
+        plan(ws, a['id'], task_id=original['task_id'], request='另一项完全不同的需求')
+    with pytest.raises(ValueError):
+        ws.get('/api/v2/conversation', {'brand_id': b['id'], 'id': original['task_id']}, ALICE)
+    assert len(ws._list(a['id'], 'planning')) == 1
+    assert not ws._list(b['id'], 'planning')
+
+
+def test_failed_dialogue_retains_words_without_retry_or_exposing_provider_error(tmp_path, monkeypatch):
+    ws = WorkspaceV2(tmp_path, start_worker=False)
+    a = brand(ws)
+    first = plan(ws, a['id'])
+    calls = []
+    def fail(*args, **kwargs):
+        calls.append(1)
+        raise RuntimeError('private-provider-secret-do-not-reflect')
+    monkeypatch.setattr(research_v2, 'create_plan', fail)
+    request = {'brand_id': a['id'], 'task_id': first['task_id'], 'request': first['task']['request'],
+               'request_id': 'dialogue-failed', 'use_ai': True,
+               'conversation': [{'role': 'user', 'content': '先看看办公替换的使用体验。'}]}
+    with pytest.raises(RuntimeError):
+        ws.post('/api/v2/plan', request, ALICE)
+    with pytest.raises(ValueError):
+        ws.post('/api/v2/plan', request, ALICE)
+    resumed = ws.get('/api/v2/conversation', {'brand_id': a['id'], 'id': first['task_id']}, ALICE)
+    assert resumed['pending']['status'] == 'failed'
+    assert resumed['pending']['conversation'] == request['conversation']
+    assert 'private-provider-secret' not in json.dumps(resumed)
+    assert len(calls) == 1 and not ws.queue.qsize()
+
+
+def test_over_budget_draft_stays_visible_and_can_be_revised_without_running(tmp_path, monkeypatch):
+    from insightbot.signal_desk import editorial_v2
+    ws = WorkspaceV2(tmp_path, start_worker=False)
+    a = brand(ws, 'Fictional stationery brand')
+    proposal = {'task_type': 'product', 'keyword': '笔芯 兼容', 'question': '笔芯兼容如何影响选购理解？',
+                'queries': [{'keyword': '笔芯 兼容', 'kind': 'focus'},
+                            {'keyword': '替换 笔芯', 'kind': 'focus'},
+                            {'keyword': '笔芯 不兼容', 'kind': 'challenge'}], 'questions': []}
+    calls = []
+    def model(*args, **kwargs):
+        calls.append(1)
+        return json.dumps(proposal), {'calls': 1, 'stage': 'planner'}
+    monkeypatch.setattr(editorial_v2, 'model_text', model)
+    draft = plan(ws, a['id'], request='笔芯兼容如何影响选购理解？', use_ai=True, keyword='')
+    assert not draft['ready'] and draft['needs_revision'] and len(draft['queries']) == 3
+    with pytest.raises(ValueError):
+        ws.confirm({'brand_id': a['id'], 'plan_id': draft['id'], 'checksum': draft['checksum']}, ALICE)
+    revised = plan(ws, a['id'], task_id=draft['task_id'], request=draft['task']['request'],
+                   keyword=draft['keyword'], queries=draft['queries'], budget={'queries': 3})
+    assert revised['ready'] and revised['task_id'] == draft['task_id']
+    assert len(calls) == 1 and not ws.queue.qsize()
+    assert ws.conversations(a['id'], ALICE, draft['task_id'])['plan']['id'] == revised['id']
+
+
+def test_new_plan_does_not_show_previous_run_as_its_result(tmp_path):
+    ws = WorkspaceV2(tmp_path, start_worker=False)
+    a = brand(ws)
+    job = enqueue(ws, a['id'])
+    first = ws._read(a['id'], 'plans', job['plan_id'])
+    revised = plan(ws, a['id'], task_id=first['task_id'])
+    resumed = ws.conversations(a['id'], ALICE, first['task_id'])
+    assert resumed['plan']['id'] == revised['id'] and resumed['job_id'] is None
+    assert resumed['status'] == 'plan_ready'
+
+
+def test_restarted_dialogue_marks_uncertain_planning_without_retry(tmp_path):
+    ws = WorkspaceV2(tmp_path, start_worker=False)
+    a = brand(ws)
+    p = plan(ws, a['id'])
+    operation = ws._list(a['id'], 'planning')[0]
+    operation.update(status='running')
+    ws._save(a['id'], 'planning', operation)
+    restarted = WorkspaceV2(tmp_path, start_worker=False)
+    resumed = restarted.conversations(a['id'], ALICE, p['task_id'])
+    assert resumed['pending']['status'] == 'interrupted'
+    assert not restarted.queue.qsize()
+
+
+def test_full_dialogue_history_outlives_model_context_window(tmp_path):
+    ws = WorkspaceV2(tmp_path, start_worker=False)
+    a = brand(ws, 'Fictional stationery brand')
+    first = plan(ws, a['id'], request='用户如何理解笔芯兼容？', keyword='笔芯 兼容',
+                 conversation=[{'role':'user','content':'用户如何理解笔芯兼容？'}])
+    transcript = ws.conversations(a['id'], ALICE, first['task_id'])['conversation']
+    latest = first
+    for number in range(6):
+        transcript.append({'role':'user','content':f'这次补充第{number}个办公使用场景。'})
+        latest = plan(ws, a['id'], request=first['task']['request'], task_id=first['task_id'],
+                      keyword='笔芯 兼容', conversation=transcript[-8:])
+        transcript = ws.conversations(a['id'], ALICE, first['task_id'])['conversation']
+    assert len(latest['conversation']) == 8
+    assert len(transcript) == 14
+    assert transcript[0]['content'] == first['task']['request']
+    assert [t['content'] for t in transcript if t['role']=='user'][1:] == [f'这次补充第{i}个办公使用场景。' for i in range(6)]

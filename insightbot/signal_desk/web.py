@@ -153,8 +153,9 @@ def serve(root, host='127.0.0.1', port=18876):
                     if self.path=='/api/review': self.send(workspace.review(payload['id'],payload['decision'],user['username'],payload.get('note',''),payload['checksum'])); return
                     self.send({'error':'没有此操作'},404)
             except PermissionError: self.send({'error':'无权执行该品牌操作'},403)
-            except (ValueError,KeyError): self.send({'error':'输入或版本无效，请检查必填项并重新载入记录'},400)
-            except Exception: self.send({'error':'操作未完成。请查看任务状态；不要反复启动付费研究。'},400)
+            except ValueError as error: self.send({'error':user_error(error)},400)
+            except KeyError: self.send({'error':'缺少必要内容，请重新打开这条记录。'},400)
+            except Exception: self.send({'error':'连接暂时未完成，你的内容已保留。请先查看对话记录。'},400)
 
     local=ThreadingHTTPServer((host,port),Handler)
     if lan:
@@ -166,3 +167,42 @@ def serve(root, host='127.0.0.1', port=18876):
         threading.Thread(target=remote.serve_forever,daemon=True).start()
     print('Signal Desk authenticated team service started',flush=True)
     local.serve_forever()
+def user_error(error):
+    """Explain known input problems without reflecting provider/user secrets."""
+    detail = str(error)
+    messages = {
+        '正在处理上一条消息': '正在处理上一条消息，收到回复后再继续。',
+        '该规划已提交或曾中断': '这条消息已处理或曾中断，记录已保留。请先查看对话，不要重复发送。',
+        '同一规划请求编号': '这条消息的内容已变化，请作为新消息发送。',
+        '继续对话时': '请在原对话中补充想法；另一个问题可以新建对话。',
+        '查询数量': '方案提出的搜索范围超出本轮设置，请减少搜索组数或调整上限。',
+        '研究预算': '研究深度超出允许范围，请在方案设置中调整。',
+        '样本预算': '样本上限不足以覆盖搜索范围，请在方案设置中调整。',
+        '日期必须': '请检查开始和结束日期。',
+        '研究时间窗': '请检查时间范围，结束日期应晚于开始日期，且最多一年。',
+        '方案还需要调整': '方案还需要调整，请先补充回答或修改设置。',
+        '计划已变化': '方案已更新，请查看最新方案后再开始。',
+        '稿件已变化': '稿件已更新，请重新打开后再修改。',
+        'AI尚未配置': '对话助手暂未连接，请联系管理员检查设置。',
+        '规划模型': '助手未能整理出有效方案。你的内容已保留，请检查设置后再继续。',
+        '请补充必填': '请先写下想了解的问题。',
+        '记录不存在': '找不到这条记录，请从任务列表重新打开。',
+        '记录编号': '这条记录的地址无效，请从任务列表重新打开。',
+        '研究方案已变化': '研究方案已更新，请检查当前方案后重新启用自动执行。',
+        '研究方案已有新版本': '研究方案已有新版本，请刷新并确认最新方案。',
+        '正在修改研究方案': '正在修改研究方案，请等回复后确认最新方案。',
+        '上次研究方案修改未完成': '上次研究方案修改未完成，请核对并重新生成方案后确认。',
+        '上一轮仍在执行': '上一轮研究仍在执行，请从执行记录查看进度。',
+        '研究方案还需要调整': '请先完成研究方案，再启用自动执行。',
+        '自动执行候选已变化': '时间设置已更新，请重新查看并确认。',
+        '执行时间已经过去': '执行时间已经过去，请选择未来的日期和时间。',
+        '执行时间请使用': '请填写有效时间，例如09:00。',
+        '一次执行请设置': '请为这次执行选择具体日期。',
+        '每周执行请设置': '请为每周执行选择星期。',
+        '请选择一次': '请选择一次、每天或每周执行。',
+        '请选择受支持的研究时间范围': '请选择要观察的日期范围。',
+        '自动执行必须绑定': '请在当前任务中选择研究方案。',
+        '任务名称': '请填写不超过150字的任务名称。',
+    }
+    return next((message for prefix, message in messages.items() if detail.startswith(prefix)),
+                '这次操作未完成，请检查输入或重新打开记录。')

@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("langgraph.checkpoint.sqlite", reason="Install requirements-signal-desk.txt for the isolated Signal Desk runtime")
+
 from insightbot.signal_desk import editorial_v2 as e
 from insightbot.signal_desk.research_v2 import create_plan
 

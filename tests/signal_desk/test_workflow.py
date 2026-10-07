@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 import pytest
+
+pytest.importorskip("langgraph.checkpoint.sqlite", reason="Install requirements-signal-desk.txt for the isolated Signal Desk runtime")
 from insightbot.signal_desk.core import Desk, normalize, number_flags, render, validate_cards
 
 EVIDENCE = [{'title':'test sample', 'url':'https://example.org/note/1', 'excerpt':'This is a fixture, not a research finding.', 'platform':'test', 'source_id':'1', 'provider':'fixture'}]

@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("langgraph.checkpoint.sqlite", reason="Install requirements-signal-desk.txt for the isolated Signal Desk runtime")
+
 from insightbot.signal_desk import research_v2 as r
 
 
@@ -82,7 +84,7 @@ class Adapter:
 
 def test_collection_bounds_body_read_actual_shape_and_cache(tmp_path):
     adapter = Adapter()
-    p = plan(budget={'body_reads': 1})
+    p = plan(budget={'body_reads': 1, 'enrichment_rounds': 0})
     first = r.collect(p, tmp_path, adapter=adapter)
     assert len(adapter.searches) == 2 and len(adapter.details) == 1
     assert len(first['evidence']) == 2
@@ -140,8 +142,10 @@ def test_replanning_comparison_does_not_duplicate_derived_queries():
 
 
 def test_insufficient_sample_budget_cannot_silently_omit_challenge_query():
-    with pytest.raises(ValueError, match='样本预算'):
-        plan(budget={'samples': 1})
+    result = plan(budget={'samples': 1})
+    assert result['ready'] is False and result['needs_revision'] is True
+    assert any('样本预算' in error for error in result['planning_errors'])
+    assert any(q['kind'] == 'challenge' for q in result['queries'])
 
 
 def test_default_qiangua_checkout_is_sibling_of_product(monkeypatch):
@@ -221,3 +225,219 @@ def test_ai_can_fill_blank_form_keyword_without_using_whole_answer():
                                {'keyword': '笔芯 兼容 疑问', 'kind': 'challenge'}], 'questions': []})
     assert result['ready'] and result['keyword'] == '笔芯 兼容'
     assert all(q['keyword'] != answer for q in result['queries'])
+
+
+def proposal(**changes):
+    return {'task_type': 'product', 'question': TASK['request'], 'keyword': '笔芯 兼容',
+            'queries': [{'keyword': '笔芯 兼容', 'kind': 'focus', 'purpose': '理解适配表达'},
+                        {'keyword': '笔芯 兼容 疑问', 'kind': 'challenge', 'purpose': '寻找不同理解'}],
+            'questions': [], **changes}
+
+
+def previous_context(result):
+    return {key: result[key] for key in r._PREVIOUS_PLAN_FIELDS if key in result}
+
+
+def test_planner_prompt_uses_exact_confirmable_query_allowance():
+    captured = []
+    def planner(prompt, payload):
+        captured.append((prompt, payload))
+        return proposal()
+    result = r.create_plan(BRAND, TASK, planner=planner)
+    assert result['ready']
+    assert '查询硬上限为 2 组' in captured[0][0]
+    assert '最多四个查询' not in captured[0][0]
+    assert captured[0][1]['budget']['queries'] == 2
+    r.create_plan(BRAND, TASK, {'budget': {'queries': 3}}, planner=planner)
+    assert '查询硬上限为 3 组' in captured[1][0]
+
+
+def test_over_budget_ai_proposal_returns_complete_editable_draft_without_retry(tmp_path):
+    calls = []
+    queries = proposal()['queries'] + [{'keyword': '笔芯 替代选择', 'kind': 'focus', 'purpose': '检查替代比较'}]
+    def planner(prompt, payload):
+        calls.append(payload)
+        return proposal(queries=queries)
+    result = r.create_plan(BRAND, TASK, planner=planner)
+    assert len(calls) == 1 and result['planner_usage']['calls'] == 1
+    assert result['ready'] is False and result['needs_revision'] is True
+    assert result['budget']['queries'] == 2 and len(result['queries']) == 3
+    assert [query['keyword'] for query in result['queries']] == [query['keyword'] for query in queries]
+    assert any('3组' in error and '2组' in error for error in result['planning_errors'])
+    with pytest.raises(ValueError, match='尚未完整确认'):
+        r.collect(result, tmp_path, adapter=Adapter())
+    revised = r.create_plan(BRAND, TASK, {'previous_plan': previous_context(result), 'budget': {'queries': 3}})
+    assert revised['ready'] and len(revised['queries']) == 3
+    reduced = r.create_plan(BRAND, TASK, {'previous_plan': previous_context(result), 'queries': result['queries'][:2]})
+    assert reduced['ready'] and reduced['budget']['queries'] == 2
+
+
+@pytest.mark.parametrize('changes', [
+    {'queries': [{'keyword': '笔芯', 'kind': 'focus', 'provider': 'another'}]},
+    {'queries': [{'keyword': '笔芯', 'kind': 'focus', 'url': 'https://supplier.test'}]},
+    {'queries': [{'keyword': '笔芯', 'kind': 'unsafe'}]},
+    {'queries': [{'keyword': '笔芯', 'kind': 'focus', 'sort_type': 7.0}]},
+    {'queries': ['笔芯'] * 5}, {'queries': '笔芯'}, {'keyword': ['笔芯']},
+    {'assumptions': '假设'}, {'assumptions': ['长' * 241]}, {'assumptions': ['假设'] * 7},
+    {'approach': {'text': '思路'}}, {'approach': '长' * 601},
+    {'required_questions': [True]}, {'required_questions': ['长' * 161]},
+    {'start_date': '2026-02-30'},
+])
+def test_illegal_planner_protocol_still_rejected(changes):
+    with pytest.raises(ValueError):
+        r.create_plan(BRAND, TASK, planner=lambda *_: proposal(**changes))
+
+
+def test_recent_human_revision_supersedes_old_question_and_infers_new_method():
+    answer = '先理解品牌与竞品的产品价值表达差异，不再研究内容栏目。'
+    turns = [{'role': 'user', 'content': TASK['request']},
+             {'role': 'assistant', 'content': '先观察内容表达是否合适？'},
+             {'role': 'user', 'content': answer}]
+    def planner(prompt, payload):
+        assert payload['latest_user_request'] == answer
+        assert payload['research_question'] == TASK['request']
+        return proposal(task_type='brand_competition', question='品牌与竞品怎样解释兼容价值？')
+    result = r.create_plan(BRAND, {**TASK, 'task_type': 'content'}, {'conversation': turns}, planner=planner)
+    assert result['task_type'] == 'brand_competition'
+    assert result['question'] == '品牌与竞品怎样解释兼容价值？'
+    assert result['conversation'] == turns and result['ready']
+
+
+def test_previous_plan_is_context_and_does_not_lock_old_keyword_or_method():
+    old = r.create_plan(BRAND, TASK, {'keyword': '内容 表达', 'task_type': 'content'})
+    answer = '改为比较品牌与竞品怎样解释笔芯兼容价值。'
+    def planner(prompt, payload):
+        assert payload['previous_plan']['keyword'] == '内容 表达'
+        assert payload['latest_user_request'] == answer
+        assert 'keyword' not in payload['inputs'] and 'task_type' not in payload['inputs']
+        return proposal(task_type='brand_competition', keyword='笔芯 品牌比较')
+    result = r.create_plan(BRAND, TASK, {'previous_plan': previous_context(old), 'answers': answer}, planner=planner)
+    assert result['keyword'] == '笔芯 品牌比较' and result['task_type'] == 'brand_competition'
+    assert result['approach'] == r.METHODS['brand_competition']['comparison']
+
+
+def test_optional_questions_are_deferred_only_on_explicit_assumption_proceed():
+    suggestion = proposal(questions=['是否先聚焦中文内容？'], assumptions=['先看中文小红书内容，其他语言暂未纳入。'],
+                          approach='比较适配说明与使用自述，保留不同经验作为反例。')
+    pending = r.create_plan(BRAND, TASK, planner=lambda *_: suggestion)
+    assert not pending['ready'] and pending['questions'] == suggestion['questions']
+    result = r.create_plan(BRAND, TASK, {'proceed_with_assumptions': True}, planner=lambda *_: suggestion)
+    assert result['ready'] and not result['questions']
+    assert result['deferred_questions'] == suggestion['questions']
+    assert result['assumptions'] == suggestion['assumptions']
+    assert result['approach'] == suggestion['approach']
+    assert result['budget'] == r.BUDGET_DEFAULTS and result['source_config'] == pending['source_config']
+
+
+def test_deferred_unanswered_detail_stays_explicitly_unknown_without_inventing_answer():
+    result = r.create_plan(BRAND, TASK, {'proceed_with_assumptions': True},
+                           planner=lambda *_: proposal(questions=['是否已有后台运营指标？']))
+    assert result['ready'] and result['assumptions']
+    assert '保留为未知' in result['assumptions'][0]
+    assert result['deferred_questions'] == ['是否已有后台运营指标？']
+
+
+@pytest.mark.parametrize('answer', ['按建议推进', '好的，按你的建议继续', '这次先看本月',
+                                   '暂不确定，请先按合理假设建议研究方案。'])
+def test_assumption_proceed_never_turns_brand_only_or_control_reply_into_research_goal(answer):
+    result = r.create_plan(BRAND, {'request': BRAND['name']},
+                           {'answers': answer, 'proceed_with_assumptions': True},
+                           planner=lambda *_: proposal(question='凭行业猜测一个营销问题'))
+    assert not result['ready'] and r.DECISION_QUESTION in result['required_questions']
+    assert result['question'] != '凭行业猜测一个营销问题'
+
+
+def test_brand_name_with_only_month_is_still_missing_marketing_goal():
+    result = r.create_plan(BRAND, {'request': BRAND['name'] + ' 本月'},
+                           {'proceed_with_assumptions': True}, planner=lambda *_: proposal())
+    assert not result['ready'] and r.DECISION_QUESTION in result['required_questions']
+
+
+def test_unknown_model_method_is_illegal_even_when_user_explicitly_chose_valid_one():
+    with pytest.raises(ValueError, match='未知任务类型'):
+        r.create_plan(BRAND, TASK, {'task_type': 'product'}, planner=lambda *_: proposal(task_type='untrusted'))
+
+
+def test_required_questions_and_missing_research_path_cannot_be_skipped():
+    result = r.create_plan(BRAND, TASK, {'proceed_with_assumptions': True},
+                           planner=lambda *_: proposal(required_questions=['请确认比较哪两个品牌。']))
+    assert not result['ready'] and result['required_questions'] == ['请确认比较哪两个品牌。']
+    no_challenge = r.create_plan(BRAND, TASK, {'proceed_with_assumptions': True},
+                                planner=lambda *_: proposal(queries=proposal()['queries'][:1]))
+    assert not no_challenge['ready'] and no_challenge['required_questions']
+    no_queries = r.create_plan(BRAND, TASK, {'proceed_with_assumptions': True})
+    assert not no_queries['ready'] and no_queries['required_questions']
+    with pytest.raises(ValueError, match='布尔'):
+        r.create_plan(BRAND, TASK, {'proceed_with_assumptions': 'true'})
+
+
+def test_template_settings_preserve_accepted_assumptions_and_required_questions():
+    approved = r.create_plan(BRAND, TASK, {'proceed_with_assumptions': True},
+                            planner=lambda *_: proposal(questions=['是否只看中文？'], assumptions=['先仅研究中文样本。']))
+    revised = r.create_plan(BRAND, TASK, {'previous_plan': previous_context(approved), 'budget': {'samples': 12}})
+    assert revised['ready'] and revised['proceed_with_assumptions'] is True
+    assert revised['assumptions'] == approved['assumptions']
+    pending = r.create_plan(BRAND, TASK, {'proceed_with_assumptions': True},
+                           planner=lambda *_: proposal(required_questions=['请先确认比较对象。']))
+    unresolved = r.create_plan(BRAND, TASK, {'previous_plan': previous_context(pending)})
+    assert not unresolved['ready'] and unresolved['required_questions'] == ['请先确认比较对象。']
+
+
+def test_template_settings_keep_full_previous_question_instead_of_last_audience_answer():
+    root_question = '替换笔芯的适配说明怎样影响不同购买者对产品价值的理解？'
+    initial = r.create_plan(BRAND, TASK, planner=lambda *_: proposal(question=root_question))
+    revised = r.create_plan(BRAND, TASK, {'previous_plan': previous_context(initial),
+                                        'conversation': [{'role': 'user', 'content': '年轻的通勤人群'}],
+                                        'budget': {'samples': 12}})
+    assert revised['question'] == root_question and revised['ready']
+    explicit = r.create_plan(BRAND, TASK, {'previous_plan': previous_context(initial),
+                                         'question': '怎样理解笔芯与整笔的价值比较？'})
+    assert explicit['question'] == '怎样理解笔芯与整笔的价值比较？'
+
+
+def test_audience_only_answer_remains_context_for_the_original_research_question():
+    answer = '年轻的通勤人群'
+    def planner(prompt, payload):
+        assert payload['latest_user_request'] == answer
+        assert payload['task']['request'] == TASK['request']
+        assert payload['research_question'] == TASK['request']
+        return proposal(question='通勤人群怎样理解替换笔芯的兼容价值？')
+    result = r.create_plan(BRAND, TASK, {'answers': answer}, planner=planner)
+    assert result['question'] == '通勤人群怎样理解替换笔芯的兼容价值？'
+    assert result['clarification'] == answer
+
+
+def test_this_month_and_followup_window_revision_keep_root_question(monkeypatch):
+    class FixedDateTime:
+        @staticmethod
+        def now(zone):
+            return SimpleNamespace(date=lambda: r.date(2026, 10, 7))
+    monkeypatch.setattr(r, 'datetime', FixedDateTime)
+    monthly = r.create_plan(BRAND, TASK, {'keyword': '笔芯', 'time_window': '本月'})
+    assert (monthly['start_date'], monthly['end_date']) == ('2026-10-01', '2026-10-07')
+    revised = r.create_plan(BRAND, TASK, {'previous_plan': previous_context(monthly), 'answers': '只看上周'},
+                           planner=lambda *_: {'questions': []})
+    assert revised['question'] == TASK['request']
+    assert (revised['start_date'], revised['end_date']) == ('2026-09-28', '2026-10-04')
+    assert revised['queries'][0]['keyword'] == '笔芯' and revised['ready']
+    explicit = r.create_plan(BRAND, TASK, {'keyword': '笔芯', 'time_window': '本月',
+                           'start_date': '2026-08-01', 'end_date': '2026-08-31'})
+    assert (explicit['start_date'], explicit['end_date']) == ('2026-08-01', '2026-08-31')
+
+
+def test_data_change_draft_keeps_paired_windows_without_expanding_current_allowance():
+    result = r.create_plan(BRAND, TASK, planner=lambda *_: proposal(task_type='data_change'))
+    assert not result['ready'] and result['needs_revision']
+    assert len(result['queries']) == 3 and result['budget']['queries'] == 2
+    assert result['queries'][1]['period'] == 'previous'
+    assert any('3组' in error for error in result['planning_errors'])
+
+
+@pytest.mark.parametrize('context', [
+    [], {'brand_id': 'another-brand'}, {'budget': {'queries': 4}}, {'source_config': {'web': True}},
+    {'question': '长' * 2001}, {'queries': ['词'] * 5}, {'method': []},
+    {'proceed_with_assumptions': 'true'}, {'method': {'text': float('nan')}},
+])
+def test_previous_plan_context_is_bounded_read_only_and_cannot_expand_configuration(context):
+    with pytest.raises(ValueError):
+        r.create_plan(BRAND, TASK, {'previous_plan': context})
