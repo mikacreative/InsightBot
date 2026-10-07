@@ -6,6 +6,7 @@ Every fetch is best-effort; a failed feed or search is recorded and never fails 
 """
 from __future__ import annotations
 
+import calendar
 import json
 import os
 from datetime import datetime, timezone
@@ -73,8 +74,7 @@ def _published(entry) -> str | None:
     if not stamp:
         return None
     try:
-        import time
-        return datetime.fromtimestamp(time.mktime(stamp), timezone.utc).isoformat()
+        return datetime.fromtimestamp(calendar.timegm(stamp), timezone.utc).isoformat()
     except (OverflowError, ValueError, OSError):
         return None
 
@@ -84,6 +84,8 @@ def fetch_rss_context(feeds: list[dict], *, limit: int = RSS_LIMIT) -> dict:
     import feedparser
     items, errors = [], []
     for feed in feeds:
+        if len(items) >= limit:
+            break
         url, name = feed['url'], feed.get('name') or feed.get('id') or feed['url']
         try:
             response = safe_get(url, timeout=RSS_FETCH_TIMEOUT_S,

@@ -119,7 +119,7 @@ class Auth:
             if not user or not valid:
                 self.failures.setdefault(bucket, []).append(now)
                 return None
-            self.failures.pop(bucket, None)
+            # A valid account must not erase failures against other accounts.
             self.sessions = {key: value for key, value in self.sessions.items() if value['expires_at'] > now}
             token = secrets.token_urlsafe(32)
             session = {'token': token, 'csrf': secrets.token_urlsafe(32), 'username': username,

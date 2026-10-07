@@ -41,6 +41,33 @@ def test_cross_vendor_dedupe_preserves_enrichment():
     assert normalized[0]['conflicting_snapshots']
 
 
+@pytest.mark.parametrize('title_first', [True, False])
+@pytest.mark.parametrize('title_excerpt', ['仅有标题', '仅有标题，不能作为正文证据。' * 20],
+                         ids=['short-title', 'long-title'])
+def test_duplicate_body_replaces_title_grade_and_matching_excerpt(title_first, title_excerpt):
+    title = {**EVIDENCE[0], 'excerpt': title_excerpt, 'source_grade': 'title_only',
+             'limitation': 'Only the title was retrieved'}
+    body = {**EVIDENCE[0], 'provider': 'qiangua', 'excerpt': '虚构使用个案：这支笔在通勤时容易携带。',
+            'source_grade': 'qiangua_body', 'limitation': 'One fictional body sample'}
+    items = [title, body] if title_first else [body, title]
+    merged = normalize(items, 50)[0]
+    assert merged['id'] == normalize([title], 50)[0]['id']
+    assert merged['source_grade'] == 'qiangua_body'
+    assert merged['excerpt'] == body['excerpt']
+    assert merged['limitation'] == body['limitation']
+    assert len(merged['snapshots']) == 2
+
+
+def test_empty_duplicate_does_not_upgrade_title_to_body():
+    title = {**EVIDENCE[0], 'source_grade': 'title_only', 'limitation': 'Only a fictional title'}
+    empty = {**title, 'provider': 'qiangua', 'source_grade': 'qiangua_body', 'excerpt': '  ',
+             'limitation': 'No usable body returned'}
+    merged = normalize([title, empty], 50)[0]
+    assert merged['source_grade'] == 'title_only'
+    assert merged['excerpt'] == title['excerpt']
+    assert merged['limitation'] == title['limitation']
+
+
 def test_budget_and_path_validation(tmp_path):
     with pytest.raises(ValueError): normalize(EVIDENCE * 51, 50)
     with pytest.raises(ValueError): Desk(tmp_path).status('../../secret')

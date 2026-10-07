@@ -34,6 +34,13 @@ class DeskState(TypedDict, total=False):
     artifact: str
 
 
+def _excerpt_rank(grade: str) -> int:
+    """Prefer retrieved bodies over titles/snippets, without editorial ranking."""
+    if grade in ('title_only', 'search_snippet', 'rss_snippet'):
+        return 0
+    return 2 if grade == 'qiangua_body' else 1
+
+
 def normalize(items: list[dict], limit: int) -> list[dict]:
     if len(items) > limit:
         raise ValueError(f"Evidence budget exceeded ({limit})")
@@ -53,10 +60,16 @@ def normalize(items: list[dict], limit: int) -> list[dict]:
             found[key]["providers"] = sorted(set(found[key]["providers"] + [item.get("provider", "import")]))
             if not found[key]['source_id'] and item.get('source_id'):
                 found[key]['source_id'] = item['source_id']
-            snapshot = {k: item.get(k) for k in ('provider', 'excerpt', 'published_at', 'retrieved_at', 'limitation')}
+            snapshot = {k: item.get(k) for k in ('provider', 'excerpt', 'source_grade', 'published_at', 'retrieved_at', 'limitation')}
             found[key]['snapshots'].append(snapshot)
-            if len(str(item.get('excerpt', ''))) > len(found[key]['excerpt']):
-                found[key]['excerpt'] = str(item['excerpt'])[:12000]
+            excerpt = str(item.get('excerpt', '')).strip()
+            grade = item.get('source_grade', 'unverified sample')
+            current_rank = _excerpt_rank(found[key]['source_grade'])
+            candidate_rank = _excerpt_rank(grade)
+            if excerpt and (candidate_rank > current_rank or
+                            (candidate_rank == current_rank and len(excerpt) > len(found[key]['excerpt']))):
+                found[key].update(excerpt=excerpt[:12000], source_grade=grade,
+                                  limitation=item.get('limitation', 'Retrieved sample; not representative of a population'))
             found[key]['conflicting_snapshots'] = len({x.get('excerpt') for x in found[key]['snapshots']}) > 1
             continue
         excerpt = str(item.get("excerpt", "")).strip()
@@ -69,7 +82,7 @@ def normalize(items: list[dict], limit: int) -> list[dict]:
                       "published_at": item.get("published_at"), "retrieved_at": item.get("retrieved_at"),
                       "query": item.get("query", ""), "source_grade": item.get("source_grade", "unverified sample"),
                       "limitation": item.get("limitation", "Retrieved sample; not representative of a population"),
-                      "snapshots": [{k: item.get(k) for k in ("provider", "excerpt", "published_at", "retrieved_at", "limitation")}], "conflicting_snapshots": False}
+                      "snapshots": [{k: item.get(k) for k in ("provider", "excerpt", "source_grade", "published_at", "retrieved_at", "limitation")}], "conflicting_snapshots": False}
     return list(found.values())
 
 

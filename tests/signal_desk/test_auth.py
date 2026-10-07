@@ -56,6 +56,23 @@ def test_failed_login_rate_limit_and_release(tmp_path):
     assert auth.authenticate('missing', 'wrong', 'client') is None
 
 
+def test_valid_login_preserves_client_failure_history(tmp_path):
+    now = [1000]
+    auth = Auth(tmp_path, clock=lambda: now[0])
+    auth.create_user('staff', 'fictional-staff-password')
+    for _ in range(4):
+        assert auth.authenticate('admin', 'wrong', 'client') is None
+    assert auth.authenticate('staff', 'fictional-staff-password', 'client')
+    assert auth.authenticate('admin', 'wrong', 'client') is None
+    with pytest.raises(RateLimitError):
+        auth.authenticate('admin', 'wrong', 'client')
+    with pytest.raises(RateLimitError):
+        auth.authenticate('staff', 'fictional-staff-password', 'client')
+    assert auth.authenticate('staff', 'fictional-staff-password', 'other-client')
+    now[0] += Auth.FAILURE_WINDOW
+    assert auth.authenticate('staff', 'fictional-staff-password', 'client')
+
+
 def test_password_rotation_invalidates_sessions_and_bootstrap(tmp_path):
     auth = Auth(tmp_path)
     password = (tmp_path / 'bootstrap-admin.txt').read_text().strip()

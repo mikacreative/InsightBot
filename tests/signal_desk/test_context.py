@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -61,6 +62,45 @@ def test_search_web_records_errors_and_respects_limits(monkeypatch):
     monkeypatch.setattr(context, '_search_ddgs', lambda q, n: (_ for _ in ()).throw(ValueError('no provider')))
     failed = context.search_web_context({'enabled': True, 'provider': 'baidu'}, queries=['A'])
     assert failed['items'] == [] and failed['errors'][0]['provider'] == 'baidu'
+
+
+@pytest.mark.parametrize('host_timezone', ['UTC', 'Asia/Shanghai', 'America/Los_Angeles'])
+def test_rss_publication_is_utc_in_every_host_timezone(monkeypatch, host_timezone):
+    import os
+    import time
+    if not hasattr(time, 'tzset'):
+        pytest.skip('Host timezone switching is unavailable')
+    previous = os.environ.get('TZ')
+    monkeypatch.setenv('TZ', host_timezone)
+    time.tzset()
+    try:
+        entry = SimpleNamespace(published_parsed=(2026, 10, 7, 12, 34, 56, 2, 280, 0))
+        assert context._published(entry) == '2026-10-07T12:34:56+00:00'
+    finally:
+        if previous is None:
+            monkeypatch.delenv('TZ', raising=False)
+        else:
+            monkeypatch.setenv('TZ', previous)
+        time.tzset()
+
+
+@pytest.mark.parametrize('limit', [0, 2])
+def test_rss_budget_stops_before_fetching_unused_feeds(monkeypatch, limit):
+    fetched = []
+    items = ''.join(f'<item><title>Fictional sample {index}</title><link>https://example.org/{index}</link>'
+                    '<pubDate>Wed, 07 Oct 2026 12:34:56 GMT</pubDate></item>' for index in range(3))
+    xml = f'<rss version="2.0"><channel><title>Fictional feed</title>{items}</channel></rss>'
+    def fetch(url, **kwargs):
+        fetched.append(url)
+        if url.endswith('/unused'):
+            raise RuntimeError('Unused feed must not be contacted')
+        return Response(xml)
+    monkeypatch.setattr(context, 'safe_get', fetch)
+    result = context.fetch_rss_context([{'url': 'https://example.org/first'},
+                                        {'url': 'https://example.org/unused'}], limit=limit)
+    assert len(result['items']) == limit
+    assert result['errors'] == []
+    assert fetched == (['https://example.org/first'] if limit else [])
 
 
 def test_collect_context_combines_sources(monkeypatch, tmp_path):

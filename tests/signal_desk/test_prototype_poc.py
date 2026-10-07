@@ -36,6 +36,16 @@ class Engine:
             raise EngineError("engine unavailable")
         return copy.deepcopy(self.executions[identifier])
 
+    def find_execution(self, namespace, flow_id, request_id):
+        if not self.available:
+            raise EngineError("engine unavailable")
+        matches = [item for item in self.executions.values()
+                   if item["namespace"] == namespace and item["flowId"] == flow_id and
+                   item.get("inputs", {}).get("poc_request_id") == request_id and not item.get("trigger")]
+        if len(matches) > 1:
+            raise EngineError("ambiguous start")
+        return copy.deepcopy(matches[0]) if matches else None
+
     def resume(self, identifier, **decision):
         self.resumes += 1
         self.executions[identifier]["state"]["current"] = "RUNNING"
@@ -187,7 +197,7 @@ def test_loopback_engine_and_sanitized_errors():
     client.close()
 
 
-def test_lost_start_response_blocks_duplicates_and_callback_reconciles(tmp_path):
+def test_lost_start_response_is_found_without_repeating_start(tmp_path):
     class LostResponse(Engine):
         def create_execution(self, *args):
             super().create_execution(*args)
@@ -196,8 +206,10 @@ def test_lost_start_response_blocks_duplicates_and_callback_reconciles(tmp_path)
     app = Prototype(tmp_path, engine)
     with pytest.raises(EngineError):
         app.execute({"expected_version": 1, "request_id": "lost_response_1"})
-    with pytest.raises(Conflict, match="尚未确认"):
+    with pytest.raises(Conflict, match="正在执行"):
         app.execute({"expected_version": 1, "request_id": "new_attempt_1"})
+    assert app.data["requests"]["lost_response_1"]["status"] == "complete"
+    assert app.data["runs"]["execution_1"]["state"] == "RUNNING"
     record = app.data["plans"]["1"]
     result = app.callback("execution_1", "collect", {"plan_version": 1, "plan_digest": record["digest"],
                                                       "node_id": "collect", "module": "source.fixture",
@@ -205,6 +217,125 @@ def test_lost_start_response_blocks_duplicates_and_callback_reconciles(tmp_path)
     assert result["fictional"]
     assert app.data["requests"]["lost_response_1"]["status"] == "complete"
     assert engine.starts == 1
+
+
+class FailedStart(Engine):
+    def create_execution(self, *args):
+        if self.starts == 0:
+            self.starts += 1
+            raise EngineError("connection failed before engine accepted start")
+        return super().create_execution(*args)
+
+
+def failed_start(tmp_path):
+    engine = FailedStart()
+    app = Prototype(tmp_path, engine)
+    with pytest.raises(EngineError):
+        app.execute({"expected_version": 1, "request_id": "failed_start_1"})
+    return app, engine
+
+
+def test_absent_start_is_released_but_only_a_new_manual_request_can_execute(tmp_path):
+    app, engine = failed_start(tmp_path)
+    assert app.state()["runs"] == []
+    assert app.data["requests"]["failed_start_1"]["status"] == "not_started"
+    assert engine.starts == 1
+    restored = Prototype(tmp_path, engine)
+    with pytest.raises(Conflict):
+        restored.execute({"expected_version": 1, "request_id": "failed_start_1"})
+    result = restored.execute({"expected_version": 1, "request_id": "new_manual_start"})
+    assert result["runs"][0]["state"] == "RUNNING"
+    assert engine.starts == 2
+
+
+def test_unavailable_engine_keeps_unknown_start_blocked_without_replay(tmp_path):
+    app, engine = failed_start(tmp_path)
+    engine.available = False
+    assert app.state()["runs"] == []
+    assert app.data["requests"]["failed_start_1"]["status"] == "unknown"
+    with pytest.raises(Conflict, match="尚未确认"):
+        app.execute({"expected_version": 1, "request_id": "new_manual_start"})
+    assert engine.starts == 1
+    engine.available = True
+    app.sync_runs()
+    assert app.data["requests"]["failed_start_1"]["status"] == "not_started"
+    assert engine.starts == 1
+
+
+def test_late_execution_of_retired_request_cannot_run_a_module(tmp_path, monkeypatch):
+    app, engine = failed_start(tmp_path)
+    app.sync_runs()
+    record = app.data["plans"]["1"]
+    engine.executions["late_execution"] = {"id": "late_execution", "namespace": app.data["namespace"],
+                                           "flowId": record["flow_id"], "inputs": {"poc_request_id": "failed_start_1"},
+                                           "state": {"current": "RUNNING"}}
+    def forbidden(*args):
+        pytest.fail("A retired request must not execute a module")
+    monkeypatch.setattr(app, "_module", forbidden)
+    with pytest.raises(Conflict, match="已确认"):
+        app.callback("late_execution", "collect", {"plan_version": 1, "plan_digest": record["digest"],
+                                                    "node_id": "collect", "module": "source.fixture",
+                                                    "upstream": [], "request_id": "failed_start_1"})
+    assert "late_execution" not in app.data["runs"]
+
+
+def test_callback_can_confirm_unknown_start_without_search_index(tmp_path, monkeypatch):
+    app, engine = failed_start(tmp_path)
+    record = app.data["plans"]["1"]
+    engine.executions["confirmed_execution"] = {"id": "confirmed_execution", "namespace": app.data["namespace"],
+                                                "flowId": record["flow_id"], "inputs": {"poc_request_id": "failed_start_1"},
+                                                "state": {"current": "RUNNING"}}
+    def forbidden(*args):
+        pytest.fail("A callback verifies its own execution directly")
+    monkeypatch.setattr(engine, "find_execution", forbidden)
+    result = app.callback("confirmed_execution", "collect", {"plan_version": 1, "plan_digest": record["digest"],
+                                                             "node_id": "collect", "module": "source.fixture",
+                                                             "upstream": [], "request_id": "failed_start_1"})
+    assert result["fictional"]
+    assert app.data["requests"]["failed_start_1"]["execution_id"] == "confirmed_execution"
+
+
+def test_lookup_does_not_override_concurrent_callback_confirmation(tmp_path, monkeypatch):
+    app, engine = failed_start(tmp_path)
+    record = app.data["plans"]["1"]
+    engine.executions["confirmed_execution"] = {"id": "confirmed_execution", "namespace": app.data["namespace"],
+                                                "flowId": record["flow_id"], "inputs": {"poc_request_id": "failed_start_1"},
+                                                "state": {"current": "RUNNING"}}
+    def lookup(*args):
+        app.callback("confirmed_execution", "collect", {"plan_version": 1, "plan_digest": record["digest"],
+                                                       "node_id": "collect", "module": "source.fixture",
+                                                       "upstream": [], "request_id": "failed_start_1"})
+        return None  # A stale search response arrived after the callback.
+    monkeypatch.setattr(engine, "find_execution", lookup)
+    app.sync_runs()
+    assert app.data["requests"]["failed_start_1"]["status"] == "complete"
+    assert engine.starts == 1
+
+
+@pytest.mark.parametrize("result", [{}, {"id": "unrelated_execution"}])
+def test_malformed_lookup_result_keeps_start_unknown(tmp_path, monkeypatch, result):
+    app, engine = failed_start(tmp_path)
+    monkeypatch.setattr(engine, "find_execution", lambda *args: result)
+    app.sync_runs()
+    assert app.data["requests"]["failed_start_1"]["status"] == "unknown"
+    assert not app.data["runs"]
+
+
+@pytest.mark.parametrize("status", ["starting", "unknown"])
+@pytest.mark.parametrize("created", [True, False])
+def test_restart_reconciles_interrupted_start_against_engine(tmp_path, status, created):
+    engine = Engine()
+    app = Prototype(tmp_path, engine)
+    flow_id = app._install(app.data["plan"])
+    app.data["requests"]["interrupted_start"] = {"kind": "execute", "status": status, "plan_version": 1}
+    if created:
+        engine.create_execution(app.data["namespace"], flow_id, "interrupted_start")
+    app._save()
+    restored = Prototype(tmp_path, engine)
+    result = restored.state()
+    assert restored.data["requests"]["interrupted_start"]["status"] == ("complete" if created else "not_started")
+    assert len(result["runs"]) == int(created)
+    assert engine.starts == int(created)
 
 
 def test_next_schedule_refreshes_finished_run_without_browser_poll(tmp_path):

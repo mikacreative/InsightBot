@@ -90,11 +90,18 @@ class Prototype:
             if self.data.get("schema") != "signal-desk-kestra-poc-1":
                 raise ValueError("这个目录不是独立工作流原型，不能覆盖")
             workflow.validate_plan(self.data["plan"])
+            interrupted_start = False
+            for pending in self.data["requests"].values():
+                if pending["kind"] == "execute" and pending["status"] == "starting":
+                    pending["status"] = "unknown"
+                    interrupted_start = True
             if self.data.get("planning"):
                 interrupted = self.data["planning"]
                 self.data["requests"][interrupted]["status"] = "unknown"
                 self.data["planning"] = None
                 self.data["messages"].append({"role": "assistant", "content": "上次规划被中断，原方案保留；尚未开始研究。", "at": now()})
+                self._save()
+            elif interrupted_start:
                 self._save()
         else:
             self.data = {"schema": "signal-desk-kestra-poc-1", "namespace": "signaldesk.poc.p" + uuid.uuid4().hex[:12],
@@ -294,7 +301,10 @@ class Prototype:
             execution = self.engine.create_execution(self.data["namespace"], flow_id, operation_id)
         except EngineError as error:
             with self.lock:
-                self.data["requests"][operation_id]["status"] = "unknown" if error.unknown else "rejected"
+                pending = self.data["requests"][operation_id]
+                # A callback may have confirmed the execution before the response was lost.
+                if pending["status"] == "starting":
+                    pending["status"] = "unknown" if error.unknown else "rejected"
                 self._save()
             raise
         with self.lock:
@@ -312,7 +322,43 @@ class Prototype:
                                            "trigger": "schedule" if execution.get("trigger") else "manual"}
         return self.data["runs"][identifier]
 
-    def sync_runs(self):
+    def _reconcile_starts(self):
+        with self.lock:
+            targets = [(key, copy.deepcopy(self.data["plans"][str(item["plan_version"])]), item.get("execution_id"))
+                       for key, item in self.data["requests"].items()
+                       if item["kind"] == "execute" and item["status"] == "unknown" and
+                       str(item.get("plan_version")) in self.data["plans"]]
+        for key, record, identifier in targets:
+            try:
+                execution = (self.engine.execution(identifier) if identifier else
+                             self.engine.find_execution(self.data["namespace"], record["flow_id"], key))
+            except EngineError:
+                continue
+            with self.lock:
+                pending = self.data["requests"][key]
+                if pending["status"] != "unknown":
+                    continue  # A concurrent callback has already reconciled this request.
+                if execution is not None:
+                    if (not isinstance(execution, dict) or not isinstance(execution.get("id"), str) or
+                            not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", execution["id"]) or
+                            execution.get("namespace") != self.data["namespace"] or execution.get("flowId") != record["flow_id"] or
+                            execution.get("trigger") or not isinstance(execution.get("inputs"), dict) or
+                            execution["inputs"].get("poc_request_id") != key or
+                            (identifier and execution["id"] != identifier) or
+                            not isinstance(execution.get("state"), dict) or not isinstance(execution["state"].get("current"), str)):
+                        continue
+                    self._register_run(execution, record)
+                    pending.update(status="complete", execution_id=execution["id"])
+                else:
+                    # Retire the old request before releasing the start guard. Late callbacks
+                    # cannot execute modules, and only a new manual request may start again.
+                    pending["status"] = "not_started"
+                    self.data["messages"].append({"role": "assistant", "content": "已核对上次研究没有启动。可以重新点击开始研究。", "at": now()})
+                self._save()
+
+    def sync_runs(self, *, reconcile_starts=True):
+        if reconcile_starts:
+            self._reconcile_starts()
         with self.lock:
             targets = [key for key, run in self.data["runs"].items() if run["state"] in ACTIVE]
         for key in targets:
@@ -343,7 +389,7 @@ class Prototype:
     def callback(self, execution_id, node_id, payload):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", execution_id):
             raise ValueError("执行标识无效")
-        self.sync_runs()
+        self.sync_runs(reconcile_starts=False)
         execution = self.engine.execution(execution_id)
         with self.lock:
             record = self.data["plans"].get(str(payload.get("plan_version")))
@@ -355,7 +401,8 @@ class Prototype:
                 raise Conflict("执行请求不一致")
             if not execution.get("trigger"):
                 pending = self.data["requests"].get(marker)
-                if (not pending or pending["kind"] != "execute" or pending.get("plan_version") != record["plan"]["version"] or
+                if (not pending or pending["kind"] != "execute" or pending["status"] not in ("starting", "unknown", "complete") or
+                        pending.get("plan_version") != record["plan"]["version"] or
                         pending.get("execution_id", execution_id) != execution_id):
                     raise Conflict("执行不属于已确认的启动请求")
             plan = record["plan"]
