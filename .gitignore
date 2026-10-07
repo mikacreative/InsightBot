@@ -65,3 +65,8 @@ pytest-of-mikawang/
 data/signal-desk/
 .venv-signal-desk/
 !.env.signal-desk.example
+
+# Isolated Kestra workflow proof of concept; no runtime credentials in Git.
+.cache/signal-desk-kestra-poc/
+frontend/signal-desk-workflow-poc/node_modules/
+frontend/signal-desk-workflow-poc/dist/
