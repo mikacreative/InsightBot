@@ -48,6 +48,14 @@ detail call, and afterwards it settles with the code the vendor returned. Nothin
 the pipeline spends. A deployment that declares no envelope simply does not spend — the
 round falls back to the free fragment reader and says so, which is why the gate lives in
 the environment rather than in a caller argument (see :func:`envelope_from_env`).
+
+:data:`RECIPE_CALLS` is both a price and an allowance. The research modes of METHODOLOGY §4
+used to exist here only as a worst-case quote, so a mode could be quoted at ¥0.55 and still
+issue twelve calls, because the run took its allowances from one global budget. The table
+now also answers "how many calls may one round of this mode make", and
+``research_v2.mode_budget`` derives the round's allowances from it rather than restating
+them — one number per fact, and a mode that cannot pay for what it plans fails at planning
+time instead of at the statement.
 """
 from __future__ import annotations
 
@@ -76,17 +84,36 @@ SPEND_LEDGER_ENV = 'SIGNAL_DESK_SPEND_LEDGER'
 SEARCH_V4 = '/api/xiaohongshu/search-note/v4'
 DETAIL_V1 = '/api/xiaohongshu/get-note-detail/v1'
 
-# JustOneAPI-side planning envelope per research mode, in calls per period.
-# METHODOLOGY §4 sets the total call volume for each mode (Scan 2—3, Probe 5—10,
-# Frame 10—20), but those totals include 千瓜 calls, which are fixed-cost and are
-# therefore absent here. These splits are a planning assumption, not a measurement.
-# METHODOLOGY §5.4 caps body retrieval at the 0—3 selected notes; Probe and Frame add
-# headroom for a second selection pass across a competitor set.
+# The research modes of METHODOLOGY §4, as calls per round. Derived numbers are quoted
+# from the 2026-10-11 price export by quote_recipe().
+#
+# §4 sets each mode's total call volume (Scan 2—3, Probe 5—10, Frame 10—20); those totals
+# include 千瓜 calls, which are fixed-cost and therefore absent here. What is here is the
+# JustOneAPI recipe, and it was reconciled against §4 for the first time when the modes
+# moved into the execution layer (METHODOLOGY §4.1):
+#
+# * Scan needs **two searches**, not one: §3 makes a challenge query mandatory, and §3.8
+#   has Scan covering T, so a single-query scan cannot even be planned.
+# * Scan needs **one body**: §4 says its output is 议题地图「在用的词」, while §2.2 forbids
+#   reusing the ≤60-char search summary as language. A search-only scan therefore could not
+#   produce what the mode claims to. It costs ¥0.15 more per round and is worth stating.
+# * Probe (2+3 = ¥0.85) and Frame (3+6 = ¥1.50) already fitted both §3 and §4 unaltered.
 RECIPE_CALLS = {
-    'scan': {SEARCH_V4: 1},
+    'scan': {SEARCH_V4: 2, DETAIL_V1: 1},
     'probe': {SEARCH_V4: 2, DETAIL_V1: 3},
     'frame': {SEARCH_V4: 3, DETAIL_V1: 6},
 }
+RECIPE_VERSION = 'methodology-4-20261011'
+
+# The same recipe read as allowances, resolved to numbers **once, at import**.
+#
+# Deriving this per call would mean looking the endpoints up by module constant at the time
+# of use, and a lookup done then follows whatever the constant has become: patch DETAIL_V1 to
+# a v6 path that the recipe does not mention and body_reads silently falls to zero, which
+# looks exactly like a deliberate decision not to buy bodies. A zero allowance is a policy
+# statement, so it must never be reachable by accident — the second half of rule 1.
+RECIPE_ALLOWANCES = {mode: {'queries': recipe[SEARCH_V4], 'body_reads': recipe.get(DETAIL_V1, 0)}
+                     for mode, recipe in RECIPE_CALLS.items()}
 
 
 class BudgetDenied(Exception):
@@ -199,19 +226,31 @@ def append_ledger(rows, path: str | Path = DEFAULT_LEDGER) -> None:
         stream.write(payload)
 
 
-def reserved(rows, envelope: Envelope) -> Decimal:
+def _rows_in(row, envelope: Envelope, mode: str | None = None):
+    """Whether a ledger row belongs to this envelope, and optionally to this mode.
+
+    The mode filter is how a mode's spend becomes observable: an envelope is one brand's
+    money for one period, shared by every mode, so without the stamp the cost of a Frame is
+    not separable from the cost of the Scans around it. Rows written before modes were
+    recorded carry no mode and are therefore excluded by a filtered read, never counted into
+    the wrong mode.
+    """
+    if row.get('scope') != envelope.scope or row.get('period') != envelope.period:
+        return False
+    return not mode or str(row.get('mode') or '') == mode
+
+
+def reserved(rows, envelope: Envelope, mode: str | None = None) -> Decimal:
     """Spend already reserved against this envelope. Reservations count, not settlements."""
     total = Decimal('0')
     for row in rows:
-        if row.get('kind') != 'reserve':
-            continue
-        if row.get('scope') != envelope.scope or row.get('period') != envelope.period:
+        if row.get('kind') != 'reserve' or not _rows_in(row, envelope, mode):
             continue
         total += Decimal(str(row.get('estimated_cny', '0')))
     return total
 
 
-def consumed(rows, envelope: Envelope) -> Decimal:
+def consumed(rows, envelope: Envelope, mode: str | None = None) -> Decimal:
     """Budget that is gone or still held: settled actuals plus reservations still open.
 
     Settled reservations count at what they actually cost, so a call that failed and
@@ -220,8 +259,7 @@ def consumed(rows, envelope: Envelope) -> Decimal:
     (rule 2). :func:`reserved` answers a different question and is left alone: it sums
     estimates, so :func:`reconcile` can still compare them against the vendor.
     """
-    scoped = [row for row in rows
-              if row.get('scope') == envelope.scope and row.get('period') == envelope.period]
+    scoped = [row for row in rows if _rows_in(row, envelope, mode)]
     actuals = {row.get('reservation_id'): Decimal(str(row.get('actual_cny', '0')))
                for row in scoped if row.get('kind') == 'settle'}
     reserved_ids = {row.get('reservation_id') for row in scoped if row.get('kind') == 'reserve'}
@@ -236,8 +274,8 @@ def consumed(rows, envelope: Envelope) -> Decimal:
     return total
 
 
-def remaining(rows, envelope: Envelope) -> Decimal:
-    return Decimal(envelope.limit_cny) - consumed(rows, envelope)
+def remaining(rows, envelope: Envelope, mode: str | None = None) -> Decimal:
+    return Decimal(envelope.limit_cny) - consumed(rows, envelope, mode)
 
 
 def period_of(moment=None) -> str:
@@ -295,22 +333,35 @@ def estimate(calls, price_table: str | Path = pricing.DEFAULT_TABLE):
 
 
 def quote_recipe(recipe: str, price_table: str | Path = pricing.DEFAULT_TABLE) -> Decimal:
-    """Worst-case JustOneAPI cost of one period of the named research mode."""
+    """Worst-case JustOneAPI cost of one round of the named research mode.
+
+    Also the ceiling a round can reach: ``research_v2.mode_budget`` turns the same call
+    counts into execution allowances, so this figure is not an aspiration but the most the
+    mode's own recipe permits.
+    """
     if recipe not in RECIPE_CALLS:
         raise ValueError(f'unknown recipe {recipe!r}; expected one of {sorted(RECIPE_CALLS)}')
     return estimate(RECIPE_CALLS[recipe], price_table)[0]
 
 
 def authorize(calls, envelope: Envelope, *, run_id: str = '', channel: str = 'mcp',
-              scope_note: str = '', ledger: str | Path = DEFAULT_LEDGER) -> Decision:
+              scope_note: str = '', mode: str = '',
+              ledger: str | Path = DEFAULT_LEDGER) -> Decision:
     """Reserve budget for a call plan, or refuse it.
 
     Refusals are decisions, not exceptions raised from the pricing layer: the caller
     gets a reason code it can log and show, and ``BudgetDenied`` is only for callers
     that want the exception form.
+
+    ``mode`` is recorded, not enforced: the ceiling is still the envelope's, and the
+    mode's own call recipe is what bounded the plan that produced ``calls``. Stamping it
+    here is what lets :func:`report` separate what a Frame cost from what the Scans around
+    it cost, which is the only way to check a mode's recipe against reality.
     """
     if channel not in ('mcp', 'rest'):
         raise ValueError("channel must be 'mcp' or 'rest'")
+    if mode and not isinstance(mode, str):
+        raise ValueError('mode must be a string')
     rows = load_ledger(ledger)
     available = remaining(rows, envelope)
     try:
@@ -325,7 +376,7 @@ def authorize(calls, envelope: Envelope, *, run_id: str = '', channel: str = 'mc
     reservation_id = uuid.uuid4().hex[:12]
     append_ledger([{'kind': 'reserve', 'reservation_id': reservation_id, 'at': _now(),
                     'scope': envelope.scope, 'period': envelope.period, 'run_id': run_id,
-                    'channel': channel, 'scope_note': scope_note,
+                    'channel': channel, 'scope_note': scope_note, 'mode': mode,
                     'estimated_cny': str(total), 'lines': list(lines),
                     'price_table': Path(pricing.DEFAULT_TABLE).name,
                     'price_exported_at': pricing.EXPORTED_AT}], ledger)
@@ -370,6 +421,7 @@ def settle(reservation_id: str, *, code=None, actual_cny=None, note: str = '',
         actual = expected if actual_cny is None else Decimal(str(actual_cny))
     row = {'kind': 'settle', 'reservation_id': reservation_id, 'at': _now(),
            'scope': reservations[0]['scope'], 'period': reservations[0]['period'],
+           'mode': reservations[0].get('mode', ''),
            'estimated_cny': str(expected), 'actual_cny': str(actual),
            'variance_cny': str(actual - expected), 'note': note,
            'billing_codes_version': BILLING_CODES_VERSION}
@@ -399,24 +451,35 @@ def reconcile(observed_delta_cny, *, scope: str, period: str,
                                 and r.get('scope') == scope and r.get('period') == period)}
 
 
-def report(scope: str, period: str, limit_cny, ledger: str | Path = DEFAULT_LEDGER) -> dict:
+def report(scope: str, period: str, limit_cny, *, mode: str | None = None,
+           ledger: str | Path = DEFAULT_LEDGER) -> dict:
     """Envelope state for an operations view.
 
     ``reserved_cny`` is what was estimated and ``consumed_cny`` is what is actually gone
     or held; they differ once a call settles at something other than its estimate. The
     number the gate uses is ``remaining_cny``, which is derived from ``consumed_cny``.
+
+    ``by_mode`` answers the question the mode recipes raise: an envelope is shared by every
+    mode in the period, so the only way to see whether a Frame really costs what its recipe
+    claims is to separate it from the Scans that surround it. Passing ``mode`` scopes the
+    money figures to that mode — note that the limit itself stays the envelope's, since one
+    brand's ceiling is not split by mode; only spend is.
     """
     envelope = Envelope(scope, period, Decimal(str(limit_cny)))
     rows = load_ledger(ledger)
-    spend, held = reserved(rows, envelope), consumed(rows, envelope)
-    channels = {}
+    spend, held = reserved(rows, envelope, mode), consumed(rows, envelope, mode)
+    channels, modes = {}, {}
     for row in rows:
-        if row.get('kind') != 'reserve' or row.get('scope') != scope or row.get('period') != period:
+        if row.get('kind') != 'reserve' or not _rows_in(row, envelope):
             continue
         channels[row.get('channel', 'unknown')] = channels.get(row.get('channel', 'unknown'), 0) + 1
+        key = str(row.get('mode') or '')
+        modes[key] = modes.get(key, 0) + 1
     return {'scope': scope, 'period': period, 'limit_cny': str(envelope.limit_cny),
             'reserved_cny': str(spend), 'consumed_cny': str(held),
             'remaining_cny': str(envelope.limit_cny - held),
             'reservations': sum(channels.values()), 'by_channel': channels,
+            'by_mode': modes, 'mode_filter': mode or '',
+            'spent_by_mode': {key: str(consumed(rows, envelope, key)) for key in modes},
             'price_table': Path(pricing.DEFAULT_TABLE).name,
             'price_exported_at': pricing.EXPORTED_AT}

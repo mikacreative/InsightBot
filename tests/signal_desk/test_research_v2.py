@@ -154,8 +154,9 @@ def test_default_qiangua_checkout_is_sibling_of_product(monkeypatch):
     assert r.QianguaAdapter().repo == expected
 
 
-@pytest.mark.parametrize('method', ['brand_competition', 'platform', 'product', 'audience', 'content', 'data_change'])
-def test_six_methods_start_from_marketing_problem(method):
+@pytest.mark.parametrize('method', ['brand_competition', 'platform', 'product', 'audience',
+                                    'content', 'creator', 'data_change'])
+def test_every_method_starts_from_marketing_problem(method):
     result = plan(task_type=method, budget={'queries': 3} if method == 'data_change' else None)
     assert result['ready'] and result['task_type'] == method
     assert result['method']['signal_path'] and result['method']['cannot_claim']

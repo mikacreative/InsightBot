@@ -657,7 +657,7 @@ class WorkspaceV2:
                 if issue:
                     task['issue'] = copy.deepcopy(issue)
             inputs = {k: copy.deepcopy(payload[k]) for k in
-                      ('answers', 'task_type', 'queries', 'budget', 'sources', 'source_config',
+                      ('answers', 'task_type', 'mode', 'queries', 'budget', 'sources', 'source_config',
                        'keyword', 'start_date', 'end_date', 'time_window', 'audience', 'exclusions',
                        'hypothesis', 'conversation', 'previous_plan',
                        'proceed_with_assumptions') if k in payload}

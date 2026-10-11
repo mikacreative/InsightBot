@@ -24,7 +24,10 @@ def test_tasks_needing_an_unreachable_layer_are_reported():
     assert gaps['brand_competition'] == ['L3']
     assert gaps['audience'] == ['L2']
     assert gaps['data_change'] == ['T']
-    assert set(gaps) == {'brand_competition', 'product', 'audience', 'data_change'}
+    # 达人方向 needs L2 the same way 人群与使用情境 does — the two differ in what they ask
+    # of that layer, not in whether it exists, and it does not.
+    assert gaps['creator'] == ['L2']
+    assert set(gaps) == {'brand_competition', 'product', 'audience', 'creator', 'data_change'}
 
 
 def test_a_pipeline_that_covers_every_layer_reports_no_gaps():

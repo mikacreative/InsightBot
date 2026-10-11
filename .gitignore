@@ -25,6 +25,9 @@ venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+# The suite must run with --basetemp=.pytest-tmp inside the workspace: pytest's default
+# temp dir sits under the system folder, where the sandbox blocks it into setup errors.
+.pytest-tmp/
 .coverage
 htmlcov/
 

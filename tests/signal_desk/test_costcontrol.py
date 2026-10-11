@@ -59,8 +59,11 @@ def envelope(limit='5', scope='fictional-brand', period='2026-10'):
 def test_recipe_worst_case_costs_are_within_a_normal_month_envelope(tmp_path):
     ledger = tmp_path / 'spend.jsonl'
     e = envelope('5')
-    # scan 1x0.20; probe 2x0.20+3x0.15; frame 3x0.20+6x0.15
-    for recipe, expected in (('scan', '0.2000'), ('probe', '0.8500'), ('frame', '1.5000')):
+    # scan 2x0.20+1x0.15; probe 2x0.20+3x0.15; frame 3x0.20+6x0.15. Scan's recipe was
+    # reconciled with METHODOLOGY §4 when modes moved into the execution layer: §3 makes a
+    # challenge query mandatory and §4 says a scan reports 在用的词, which §2.2 forbids reading
+    # off a truncated summary — so a search-only scan could not produce what it claimed.
+    for recipe, expected in (('scan', '0.5500'), ('probe', '0.8500'), ('frame', '1.5000')):
         assert c.quote_recipe(recipe) == Decimal(expected)
         decision = c.authorize(c.RECIPE_CALLS[recipe], e, run_id=recipe, ledger=ledger)
         assert decision.allowed and decision.estimate_cny == Decimal(expected)
@@ -69,13 +72,13 @@ def test_recipe_worst_case_costs_are_within_a_normal_month_envelope(tmp_path):
 
 def test_reservation_covers_all_three_modes_then_refuses_the_next(tmp_path):
     ledger = tmp_path / 'spend.jsonl'
-    e = envelope('2.6')
+    e = envelope('3')
     spent = Decimal('0')
     for recipe in ('scan', 'probe', 'frame'):
         decision = c.authorize(c.RECIPE_CALLS[recipe], e, ledger=ledger)
         assert decision.allowed
         spent += decision.estimate_cny
-    assert spent == Decimal('2.5500') and c.remaining(c.load_ledger(ledger), e) == Decimal('0.0500')
+    assert spent == Decimal('2.9000') and c.remaining(c.load_ledger(ledger), e) == Decimal('0.1000')
     refused = c.authorize(c.RECIPE_CALLS['scan'], e, ledger=ledger)
     assert not refused.allowed and refused.reason == 'insufficient_budget'
     with pytest.raises(c.BudgetDenied):
@@ -111,13 +114,13 @@ def test_envelope_periods_and_scopes_do_not_leak_into_each_other(tmp_path):
 
 def test_settling_above_the_estimate_raises_the_hold_without_rewriting_the_row(tmp_path):
     ledger = tmp_path / 'spend.jsonl'
-    decision = c.authorize(c.RECIPE_CALLS['scan'], envelope('5'), ledger=ledger)
-    row = c.settle(decision.reservation_id, actual_cny='0.3500', note='detail also billed', ledger=ledger)
+    decision = c.authorize(c.RECIPE_CALLS['probe'], envelope('5'), ledger=ledger)
+    row = c.settle(decision.reservation_id, actual_cny='1.0000', note='detail also billed', ledger=ledger)
     assert row['variance_cny'] == '0.1500'
     # The reservation row itself is never edited — the ledger is append-only — but what
     # it counts as moves from the estimate to the actual, so the hold grows by ¥0.15.
-    assert c.remaining(c.load_ledger(ledger), envelope('5')) == Decimal('4.6500')
-    assert c.reserved(c.load_ledger(ledger), envelope('5')) == Decimal('0.2000')
+    assert c.remaining(c.load_ledger(ledger), envelope('5')) == Decimal('4.0000')
+    assert c.reserved(c.load_ledger(ledger), envelope('5')) == Decimal('0.8500')
     with pytest.raises(ValueError, match='already settled'):
         c.settle(decision.reservation_id, ledger=ledger)
     with pytest.raises(ValueError, match='unknown reservation'):
@@ -154,7 +157,7 @@ def test_failed_call_settles_at_zero_and_gives_the_budget_back(tmp_path):
     decision = c.authorize(c.RECIPE_CALLS['scan'], envelope('5'), ledger=ledger)
     row = c.settle(decision.reservation_id, code=301, note='采集失败', ledger=ledger)
     assert row['actual_cny'] == '0'
-    assert row['variance_cny'] == '-0.2000'
+    assert row['variance_cny'] == '-0.5500'
     assert row['billed'] is False and row['code_meaning'] == '采集失败，请重试'
     assert row['billing_codes_version'] == c.BILLING_CODES_VERSION
     # Held while in flight, released once it settles: a month of failed calls must not
@@ -166,11 +169,11 @@ def test_failed_call_settles_at_zero_and_gives_the_budget_back(tmp_path):
 def test_an_open_reservation_still_blocks_the_other_channel(tmp_path):
     """Releasing on settlement must not release anything that is still in flight."""
     ledger = tmp_path / 'spend.jsonl'
-    decision = c.authorize(c.RECIPE_CALLS['scan'], envelope('0.2'), ledger=ledger)
-    assert decision.allowed and c.remaining(c.load_ledger(ledger), envelope('0.2')) == Decimal('0')
+    decision = c.authorize(c.RECIPE_CALLS['scan'], envelope('0.55'), ledger=ledger)
+    assert decision.allowed and c.remaining(c.load_ledger(ledger), envelope('0.55')) == Decimal('0')
     settled = c.settle(decision.reservation_id, code=0, ledger=ledger)
-    assert settled['actual_cny'] == '0.2000'
-    assert c.remaining(c.load_ledger(ledger), envelope('0.2')) == Decimal('0')
+    assert settled['actual_cny'] == '0.5500'
+    assert c.remaining(c.load_ledger(ledger), envelope('0.55')) == Decimal('0')
 
 
 def test_successful_call_settles_at_the_estimate(tmp_path):
@@ -190,15 +193,20 @@ def test_settle_refuses_an_ambiguous_code_and_amount(tmp_path):
 
 def test_reconcile_and_report_expose_the_estimate_gap(tmp_path):
     ledger = tmp_path / 'spend.jsonl'
-    c.authorize(c.RECIPE_CALLS['probe'], envelope('5'), channel='mcp', ledger=ledger)
-    c.authorize(c.RECIPE_CALLS['scan'], envelope('5'), channel='rest', ledger=ledger)
+    c.authorize(c.RECIPE_CALLS['probe'], envelope('5'), channel='mcp', mode='probe', ledger=ledger)
+    c.authorize(c.RECIPE_CALLS['scan'], envelope('5'), channel='rest', mode='scan', ledger=ledger)
     state = c.report('fictional-brand', '2026-10', '5', ledger=ledger)
-    assert state['reserved_cny'] == '1.0500' and state['remaining_cny'] == '3.9500'
+    assert state['reserved_cny'] == '1.4000' and state['remaining_cny'] == '3.6000'
     # Nothing has settled yet, so what is held is what was estimated.
-    assert state['consumed_cny'] == '1.0500'
+    assert state['consumed_cny'] == '1.4000'
     assert state['by_channel'] == {'mcp': 1, 'rest': 1}
+    # One envelope carries every mode in the period, so spend has to be separable by mode:
+    # otherwise a Frame's real cost cannot be compared with the recipe that was quoted for it.
+    assert state['by_mode'] == {'probe': 1, 'scan': 1}
+    assert state['spent_by_mode'] == {'probe': '0.8500', 'scan': '0.5500'}
+    assert c.report('fictional-brand', '2026-10', '5', mode='scan', ledger=ledger)['consumed_cny'] == '0.5500'
     assert state['price_exported_at'] == pricing.EXPORTED_AT
-    gap = c.reconcile('1.2000', scope='fictional-brand', period='2026-10', ledger=ledger)
+    gap = c.reconcile('1.5500', scope='fictional-brand', period='2026-10', ledger=ledger)
     assert gap['variance_cny'] == '0.1500' and gap['reservations'] == 2
 
 

@@ -1,13 +1,14 @@
-# JustOneAPI 本机资产盘点与接线记录 v6
+# JustOneAPI 本机资产盘点与接线记录 v7
 
-日期：2026-10-11｜状态：**C 方案已落地，OAuth 已授权，端到端实测跑通，适配器已切 v4，证据等级已收敛为单一真源，费控门禁已接线**｜作用域：主力机
+日期：2026-10-11｜状态：**C 方案已落地，OAuth 已授权，端到端实测跑通，适配器已切 v4，证据等级已收敛为单一真源，费控门禁已接线，研究配方已与执行层核对**｜作用域：主力机
 配套：`DATA-SOURCES-v0.1.md` §2（能力面）／`scripts/justone_mcp_probe.py`（只读体检）／`scripts/check_v4_parser.py`（解析离线校验）／`config/pricing/justoneapi-pricing-20261011.csv`（官方价目表快照）
 
 > **v3**：v2 沿用的"搜索接口本身带正文、无需 N+1 详情调用"结论**被实测推翻**（§2.5），成本模型重写（§6）。
 > **v4**：按 Mika 决策**把 `providers.py` 从 v2 切到 v4**，同时修掉一处会让方法论失效的证据等级缺陷（§2.7）。这是本项目**首次真实修改 JustOneAPI 适配器代码**。
 > **v5**：三件事——① 拿到**官方全量价目表**（296 端点 × 35 平台），据此**纠正此前靠余额差分"推测"的单价**（§2.8 A）；② 实测确认**千瓜 detail 接口不返回任何正文**，`qiangua_body` 是幻影等级（§2.8 B）；③ 把 `METHODOLOGY.md` §5.2 的八等级词表与代码现用词表**合并为单一真源 `grades.py`**，未知等级改为 fail-closed（§2.8 C）。
 > **v5 增补**：把计费相关的全部说法对**官方使用指南**逐条核对（§2.9）。三条旧推断全部被官方确证（只有 `code=0` 计费／令牌上限非账户级／异步结算），并**发现一条我们没建模的配额轴——"每日成功请求次数"**（§2.9 C）。计费码表已转录进 `costcontrol.BILLING_CODES`，`settle()` 可按 code 结算。
-> **v6（本版）**：**把付费读取真正接到门禁上**（§2.8 E）。此前 `costcontrol.require()` 全项目零调用——**花钱的路开着、门禁不在路上**。接线后暴露并修掉三处只在真接线时才显形的问题：**结算不释放预留**（会自己关闭的门禁）、**业务码藏在错误文案里**、**参数名撞车**。信封改为**只从 `SIGNAL_DESK_SPEND_LIMIT_CNY` 来**，**未声明即不花钱**。
+> **v6**：**把付费读取真正接到门禁上**（§2.8 E）。此前 `costcontrol.require()` 全项目零调用——**花钱的路开着、门禁不在路上**。接线后暴露并修掉三处只在真接线时才显形的问题：**结算不释放预留**（会自己关闭的门禁）、**业务码藏在错误文案里**、**参数名撞车**。信封改为**只从 `SIGNAL_DESK_SPEND_LIMIT_CNY` 来**，**未声明即不花钱**。
+> **v7（本版）**：**三种研究模式从"报价表"变成"执行层的额度来源"**（§2.8 F）。`RECIPE_CALLS` 此前只能被 `quote_recipe()` 报价，不能约束任何一次运行（所有计划共用一套 `BUDGET_DEFAULTS`）。照配方核对时发现 **`scan` 少报两次调用**（§3 要求挑战查询、§2.2 禁止把截断摘要当语言复用），配方由 **¥0.20 改为 ¥0.55**；`probe`／`frame` 核对后不变。额度现由 `RECIPE_ALLOWANCES`（导入时解析一次）派生，**任何一笔花费都带 `mode` 标记**，`costcontrol.report()` 因此可按模式分账。
 
 ---
 
@@ -25,7 +26,7 @@
 10. **适配器已切 v4 + 修复证据等级缺陷**（v4 内容，§2.7）：`search-note/v2` → **v4**（参数名同步改名）；`source_grade` 从 `'search excerpt'` 改为 **`'search_snippet'`**——前者不在下游低等级词表内，曾被误判为中等级、**静默绕过"仅有摘要不能支持完整判断"这条编辑守卫**。
 11. **证据等级已收敛为单一真源**（本版新增，§2.8 C）：新建 `insightbot/signal_desk/grades.py` 承载八等级 + rank + `summary_only` + kind 谓词 + legacy alias 表；`search_snippet` 等 legacy token 归一为 `note_segment`。**未知等级一律 fail-closed 归为 `unverified`（rank 0）**——此类静默失效缺陷不会再有第二次。
 12. **⚠️ 映射后的真实后果：千瓜内容被完全排除在可交付卡片之外**（本版新增，§2.8 C）。`qiangua_body` 归一为 `note_segment`（`summary_only=True`），而 `editorial_v2` 守卫现在对所有 `summary_only` 材料生效 → **千瓜单源证据无法再支撑任何完整判断**。这是"摘要 ≠ 正文"方法论的必然结果，但**显著改变产出面**，需 Mika 知晓。
-13. **费控中台已落地**（本版新增，§2.8 D）：`pricing.py`（报价）+ `costcontrol.py`（门禁 + 账本）两层，把价目表变成**产品自身的额度治理能力**，而非仅一份参考文档。三条研究配方成本上限已固定：`scan` ¥0.20 ／ `probe` ¥0.85 ／ `frame` ¥1.50。
+13. **费控中台已落地**（§2.8 D 新增）：`pricing.py`（报价）+ `costcontrol.py`（门禁 + 账本）两层，把价目表变成**产品自身的额度治理能力**，而非仅一份参考文档。三条研究配方成本上限：`scan` **¥0.55** ／ `probe` ¥0.85 ／ `frame` ¥1.50；**v0.2.6 起配方同时是执行层的额度来源**（§2.8 F）。
 
 ---
 
@@ -483,11 +484,11 @@ MCP   xiaohongshu.search_note_v4       ─┘
 
 | 配方 | 调用构成 | 成本上限 |
 | --- | --- | --- |
-| `scan` | `search-note/v4` ×1 | **¥0.20** |
+| `scan` | `search-note/v4` ×2 ＋ `get-note-detail/v1` ×1 | **¥0.55** |
 | `probe` | `search-note/v4` ×2 ＋ `get-note-detail/v1` ×3 | **¥0.85** |
 | `frame` | `search-note/v4` ×3 ＋ `get-note-detail/v1` ×6 | **¥1.50** |
 
-**测试**：`tests/signal_desk/test_costcontrol.py` 26 项、`tests/signal_desk/test_spend_gate.py` 9 项全通过。本轮测试总览 **389 passed + 1 个既有失败**。
+**测试**：`tests/signal_desk/test_costcontrol.py` 26 项、`tests/signal_desk/test_spend_gate.py` 10 项、`tests/signal_desk/test_modes.py` 11 项全通过。本轮测试总览 **402 passed + 1 个既有失败**（kestra，与 HEAD 一致、与本轮无关）。
 
 > **测试环境更正**：此前判断 `tests/signal_desk/` 被 module 级 `importorskip` 跳过（"缺隔离运行时"）——**实测发现 `.venv-signal-desk/bin/python` 依赖齐全（含 `langgraph`／`httpx`／`requests`）**，本轮起改为**真实 pytest 全量运行**，不再用离线回放替代。§2.7 C 的离线校验保留为**零成本前置门禁**，但不再是唯一手段。
 
@@ -512,6 +513,32 @@ D 建成的三层一度是**"建好但没有调用点"**——`costcontrol.requi
 3. **参数名撞车**：`enrich` 内既有的 `ledger` 是**源账本列表**，若把花费账本也叫 `ledger` 会被直接覆盖（首轮实现即踩中，表现为 `TypeError: ... not 'list'`）→ 参数定名 **`spend_ledger`**。
 
 **仍在外面的路**：MCP 侧（本机直调 `call_endpoint`）不走本账本，只能靠"同一个信封"的人工约定。**门禁保护的是管线，不是账户。**
+
+#### F. ★ 配方从"报价"变成"额度"（2026-10-11 深夜，v0.2.6）
+
+**问题不是"配方算错了"，而是配方**从未被核对过**。`RECIPE_CALLS` 自建立以来只服务一个函数——`quote_recipe()`。它能报出"一次 Scan 最多 ¥0.20"，却**不约束任何一次运行**：所有计划的额度都来自同一套 `BUDGET_DEFAULTS`，于是一根打算读 12 条正文的探针，可以被报成 ¥0.55 的 Scan。**报价与执行之间没有连接**。
+
+把模式提到执行层时，两者第一次被并排放在一起核对，**立刻出现两处不一致（都在最便宜的那一档）**：
+
+| 配方项 | 原值 | 依据 | 现值 |
+| --- | --- | --- | --- |
+| Scan 的检索次数 | 1 | §3 要求计划**至少含一条挑战查询** ＋ 一条定向查询 → 1 次检索的 Scan **连计划都过不了**（`planning_errors`） | **2** |
+| Scan 的正文读取 | 0 | §4 说 Scan 产出"**在用的词**"，§2.2 明令 ≤60 字符摘要**不可用于语言复用** → 不取正文的 Scan **产不出它声称的产出** | **1** |
+
+→ `scan` 上限由 **¥0.20 改为 ¥0.55**；`probe`（¥0.85）与 `frame`（¥1.50）经同一核对**无需改动**。
+
+**改动本身很小，方式更重要**：额度不再另写一套数字，而是从同一张配方表派生——
+
+```python
+RECIPE_ALLOWANCES = {mode: {'queries': recipe[SEARCH_V4], 'body_reads': recipe.get(DETAIL_V1, 0)}
+                     for mode, recipe in RECIPE_CALLS.items()}   # 导入时解析一次
+```
+
+> **为什么必须"导入时解析一次"**：若在调用时按端点常量去查表，那个查询会跟随常量的**当时值**——把 `DETAIL_V1` 指向一个配方里没有的版本号，`body_reads` 会**静默变成 0**，而这看起来完全像是"有意不买正文"。**零额度是一种政策声明，不能有意外到达它的路径**（与 §2.8 D 规则 1 同构）。此点由 `tests/signal_desk/test_modes.py::test_allowances_do_not_follow_a_later_change_to_the_endpoint_constants` 锁死。
+
+**花费按模式可分账**：一个信封覆盖同一品牌同一期的所有模式，所以每笔预留带上 `mode`，`report()` 增加 `by_mode`／`spent_by_mode`，并可按模式过滤金额（**上限仍是信封的，不被模式切分**）。没有这个标记，"Frame 的真实成本是不是 ¥1.50"在账本上无法被回答——而修正配方的唯一依据，就是真实成本。
+
+**仍待裁定**：模式与任务不匹配时是**提示还是阻断**（现为提示，仅写入 limitations；方法论 §9.2 第 15 项），以及是否给每类任务配默认模式。
 
 
 ---
@@ -692,11 +719,11 @@ MCP 连通 · server=justoneapi-mcp v2.0.0 · protocol=2025-06-18
 | **纯检索（不取正文）** | — | — | **¥0.20／页** |
 | **检索 + 全部取正文（N=17）** | — | — | **¥2.75／页** |
 
-对应 `costcontrol.py` 的三条配方上限：
+对应 `costcontrol.py` 的三条配方上限（**v7 起同时是执行层的额度来源**，见 §2.8 F）：
 
 | 配方 | 调用构成 | 上限 |
 | --- | --- | --- |
-| `scan` | `search-note/v4` ×1 | ¥0.20 |
+| `scan` | `search-note/v4` ×2 ＋ `get-note-detail/v1` ×1 | ¥0.55 |
 | `probe` | `search-note/v4` ×2 ＋ `get-note-detail/v1` ×3 | ¥0.85 |
 | `frame` | `search-note/v4` ×3 ＋ `get-note-detail/v1` ×6 | ¥1.50 |
 

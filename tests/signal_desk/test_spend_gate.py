@@ -206,3 +206,21 @@ def test_the_envelope_belongs_to_the_brand_not_the_run(tmp_path):
     settled = [row['actual_cny'] for row in ledger_rows(tmp_path) if row['kind'] == 'settle']
     assert settled == ['0.1500']
     assert c.remaining(ledger_rows(tmp_path), envelope('0.20')) == Decimal('0.05')
+
+
+def test_a_paid_read_records_the_mode_that_authorised_it(tmp_path):
+    """One envelope carries every mode in the period, so spend must be separable by mode.
+
+    Without the stamp, a Frame's real cost cannot be compared with the recipe quoted for it,
+    and the breakdown that would show a mode's estimate drifting from reality is unavailable
+    exactly where it matters.
+    """
+    framed = r.create_plan(BRAND, TASK, {'keyword': '笔芯兼容', 'mode': 'frame'})
+    r.enrich(framed, collected(), draft(), tmp_path, adapter=FreeReader(),
+             body_adapter=PaidReader(), **spend(tmp_path))
+    assert ledger_rows(tmp_path)[0]['mode'] == 'frame'
+    assert ledger_rows(tmp_path)[1]['mode'] == 'frame'
+    state = c.report(BRAND['id'], c.period_of(), '5', ledger=tmp_path / 'spend.jsonl')
+    assert state['by_mode'] == {'frame': 1} and state['spent_by_mode'] == {'frame': '0.1500'}
+    assert c.report(BRAND['id'], c.period_of(), '5', mode='scan',
+                    ledger=tmp_path / 'spend.jsonl')['consumed_cny'] == '0'
