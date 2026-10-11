@@ -70,3 +70,11 @@ data/signal-desk/
 .cache/signal-desk-kestra-poc/
 frontend/signal-desk-workflow-poc/node_modules/
 frontend/signal-desk-workflow-poc/dist/
+
+# Local visual artefacts: product intro deck and weekly demo output.
+# Binary deliverables, regenerated from source; keep them out of history.
+docs/signal-desk/intro/
+docs/signal-desk/weekly-demo/
+
+# Agent workspace state, local to this machine (memory, sessions, caches).
+.workbuddy/
