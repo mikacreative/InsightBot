@@ -356,3 +356,39 @@ Mika 导出的价目表落盘为 `config/pricing/justoneapi-pricing-20261011.csv
 **测试**：新建 `tests/signal_desk/test_costcontrol.py` 16 项；首轮 7 项失败（配方端点用模糊简称命中不了价目表；算术期望错）→ 修正后全通过。**全量 351 passed**。
 
 **未动**：`workspace.py`、`web.py` 及真实调用路径——`costcontrol` 尚未强制接入 `require()`，因此**门禁目前是"可用但未强制"**。代码通路仍缺 `JUSTONEAPI_TOKEN`。**保留待验证**：v4 `total` 字段语义（Mika 裁定）。
+
+---
+
+### 2026-10-11（下午续）：层与实现核对 → 正文通路接通
+
+**触发**：Mika 认可 L1—4+T 分层逻辑，要求核对代码实现是否符合。核对方式是**按调用链与引用计数逐层核实**，不凭印象。
+
+**核对结论（详见 `METHODOLOGY.md` §2.5）**：
+
+| 层 | 判定 |
+| --- | --- |
+| L1 内容层 | 🟡 部分（检索 + 正文；**评论未接**） |
+| L2 人群层 | ❌ 零实现，且**等级体系里没有位置** |
+| L3 结构层 | ❌ 零实现（`brand_structure` 等级 0 处引用） |
+| L4 商业层 | ❌ 零实现，**等级体系里没有位置** |
+| T 时间轴 | ❌ 零实现（`trend_series` 0 处引用） |
+
+**四个最硬的发现**：
+
+1. **`providers.py` 没接进 v2 主链路**：`collect()` 硬编码 `sources: ['qiangua']`，适配器默认 `QianguaAdapter()`；`providers.py` 只被 `workspace.py:137`（v1 遗留，只取 `queries[0]`）与 `__main__.py`（CLI）引用。而 `note_body` 的唯一来源恰是 JustOneAPI → **死结**：v2 唯一数据源最高只到 `note_segment`，守卫正确拒掉全部摘要级材料，**管线因此产不出任何卡片**。
+2. **八等级是"文本粒度"词汇表，层是"决策层"词汇表**，两者不同维度。仅 L1 四个子层一一对应；`brand_structure`↔L3、`trend_series`↔T；**L2 与 L4 无等级**。
+3. **三种模式只活在费控层**：`RECIPE_CALLS` 有 scan／probe／frame，而 `research_v2.py` 里一个都没有，执行层是单套 `BUDGET_DEFAULTS`。
+4. **任务是 6 类不是 7 类**：代码与 PDD 均为六类模板，而 METHODOLOGY §3.5 已把"达人方向"升格为独立任务 → **文档先行、代码未跟**。
+
+**执行（Mika 批准 A+B）**：
+
+- **A. 正文通路接通** —— 新增 `providers.JustOneApiAdapter`（与 `QianguaAdapter` 同接口），接入 `research_v2.enrich()`；检索仍走千瓜。四个决定：无 token 退回千瓜片段（**行为逐字节一致，无回归风险**）；读取器进缓存键 `enrich-detail-<reader>-<hash>`；`BODY_OPERATIONS` 让 `body_reads` **跨读取器合并计数**；**形状不符直接报错，绝不猜测**。
+- **实测 detail 响应形状**（一次真实调用，¥0.15）：`data` 是 **list**，正文在 `data[0].note_list[0]`（61 字段）——与 `search-note` 的 `data.notes[]` **形状不同**。响应约 **80k 字符**（`images_list` 占约 20k），而正文 `desc` 仅 108 字符**且全是话题标签** → **"取到 desc" ≠ "desc 有可引用内容"**。成本含义：正文是"重载荷、小文本产出"，再次支持"只对终选取"。
+- **顺带修掉一处静默风险**：`justone_note_detail()` 原先只从环境读 token，而适配器的 `token` 参数形同虚设——两者不一致时会在很久之后以一句无关的"未配置"报错。现由 `_auth_token()` 统一解析。
+- **B. 层需求变成可检查的声明** —— `LAYERS` / `LAYER_PRIMARY|AUX`；`METHODS[*].layers`（按 §3.8）；`IMPLEMENTED_LAYERS` + `layer_gaps()`。**缺口自动写进计划与运行结果的 limitations**（UI 渲染 `collection.limitations`，因此缺口对操作者直接可见）。
+
+**新增测试**：`test_body_reader.py`（7 项）、`test_layers.py`（8 项）、`test_enrichment_v2.py` +5 项。**全量 375 passed + 1 既有失败**（kestra，与 HEAD 一致、与本轮无关）。
+
+**其他**：`.gitignore` 新增 `docs/signal-desk/intro/`、`docs/signal-desk/weekly-demo/`、`.workbuddy/` 三条（二进制产物与 Agent 工作区状态不入库）；`PDD.md` 单独提交。
+
+**未动 / 待决**：正文读者尚未接 `costcontrol.require()`（现由 token + `body_reads` + 令牌预算三道约束）；三种模式仍未上提到执行层；「达人方向」是否补为第 7 类，待 Mika 定契约口径。

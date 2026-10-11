@@ -1,8 +1,20 @@
 """Bounded, brand-scoped v0.2 research plans and read-only source collection.
 
 Public contracts are create_plan(brand, task, user_inputs), collect(plan, run_dir),
-and QianguaAdapter. The caller owns authorization and freezes the returned plan;
-this module never changes credentials or falls back to another paid provider.
+and QianguaAdapter. The caller owns authorization and freezes the returned plan.
+
+Two readers, two jobs — a stated division of labour, not a fallback:
+
+* **Retrieval** runs through 千瓜 only. It is a fixed-cost seat with monthly quotas,
+  so spending that allowance is the reason it is paid for.
+* **Bodies** run through JustOneAPI, because 千瓜's detail endpoint returns no content
+  field at all (measured 2026-10-11). Without that adapter no run can reach
+  ``grades.note_body``, and the editorial guard correctly refuses every summary-only
+  source — so a 千瓜-only pipeline produces no deliverable cards at all.
+
+Neither reader exists to rescue the other's failure. When JustOneAPI has no token the
+body read falls back to 千瓜's fragment: weaker evidence, no extra spend, and identical
+to the behaviour of a deployment that never had a token.
 """
 from __future__ import annotations
 
@@ -19,7 +31,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
-from . import grades
+from . import grades, providers
 from .context import fetch_rss_context, search_web_context
 from .core import normalize
 
@@ -30,43 +42,75 @@ BUDGET_DEFAULTS = {'queries': 2, 'pages_per_query': 1, 'samples': 20, 'body_read
 BUDGET_CAPS = {'queries': 4, 'pages_per_query': 2, 'samples': 60, 'body_reads': 6,
                'model_calls': 3, 'context_items': 12, 'search_queries': 2, 'rss_feeds': 3,
                'enrichment_rounds': 1}
+
+# Both operations read a note body. The body_reads allowance counts them together so
+# that switching reader cannot buy extra reads, and so a run that used 千瓜 yesterday
+# cannot re-read the same note for free today.
+BODY_OPERATIONS = ('note.search_by_url', 'note.get_note_detail')
 DELIVERY_DEFAULTS = {'version': 'selected-signals-0.2', 'max_cards': 3, 'max_lookback': 1,
                      'title_chars': 26, 'observation_chars': 120, 'brand_reference_chars': 60,
                      'boundary_chars': 45, 'question_chars': 40, 'card_chars': 280,
                      'lookback_chars': 120, 'scope_chars': 100, 'total_chars': 1000}
+# Evidence layers (METHODOLOGY §2). "Which questions can this data answer" is a
+# different axis from "how deep is this text" (grades.py): a note body is still L1.
+LAYERS = ('L1', 'L2', 'L3', 'L4', 'T')
+LAYER_PRIMARY, LAYER_AUX = 'primary', 'aux'
+
+# What the pipeline can actually reach today, by layer. Declared beside the task
+# requirements on purpose: a task may lean on a layer only because someone wrote the
+# reader, and layer_gaps() reports every place the two disagree. Without this, a task
+# named "品牌与竞争" can be served by L1 retrieval alone and nothing in the code says so.
+IMPLEMENTED_LAYERS = {
+    'L1': 'search-note/v4（千瓜检索）+ get-note-detail（JustOneAPI 正文）',
+    'L2': '',
+    'L3': '',
+    'L4': '',
+    'T': '',
+}
+
 METHODS = {
     'brand_competition': {
         'name': '品牌与竞争',
+        # METHODOLOGY §3.8: L3 is the task — L1 only illustrates a position it cannot measure.
+        'layers': {'L1': LAYER_AUX, 'L3': LAYER_PRIMARY, 'L4': LAYER_AUX, 'T': LAYER_AUX},
         'signal_path': ['用户指定的品牌问题与比较对象', '同窗样本中的表达与评价差异', '反向案例与覆盖缺口'],
         'focus': '观察与品牌问题有关的表达、认知和竞争线索', 'challenge': '不同评价',
         'comparison': '只比较已指定对象在同一检索窗口内的内容样本；未检索到不等于没有布局。',
         'cannot_claim': '本轮为千瓜内容样本，不据此声称品牌市场份额、投放规模、品牌资产或经营表现。'},
     'platform': {
         'name': '平台与渠道',
+        'layers': {'L1': LAYER_PRIMARY, 'L2': LAYER_AUX, 'T': LAYER_AUX},
         'signal_path': ['用户关心的平台或渠道问题', '平台表达与使用方式线索', '官方说明及不同使用反馈'],
         'focus': '观察指定平台或渠道问题的内容线索', 'challenge': '不同反馈',
         'comparison': '区分用户分享、平台官方说明和研究推断；其他渠道只有核验后的外部来源才能比较。',
         'cannot_claim': '千瓜主要覆盖小红书样本，不推断全渠道表现、平台算法因果或未经核验的规则变化。'},
     'product': {
         'name': '产品与价值理解',
+        # L4 carries the commercial read (what is sold, at what scale); L1 supplies the wording.
+        'layers': {'L1': LAYER_PRIMARY, 'L3': LAYER_AUX, 'L4': LAYER_PRIMARY},
         'signal_path': ['用户指定的产品理解问题', '利益点表达与使用反馈', '困惑、替代选择及相反经验'],
         'focus': '观察产品价值如何被理解、描述或质疑', 'challenge': '使用疑问',
         'comparison': '比较有出处的价值表达与使用情境，区分个人评价、品牌说法和经确认的产品事实。',
         'cannot_claim': '样本评价不代表产品质量普查、销量、转化率或购买意愿；不补写未经确认的产品事实。'},
     'audience': {
         'name': '人群与使用情境',
+        # L2 (creator/user profiles) carries the人群 read; L1 self-reports are the entry point.
+        'layers': {'L1': LAYER_PRIMARY, 'L2': LAYER_PRIMARY},
         'signal_path': ['营销问题涉及的人群假设', '来源明确的使用情境与决策障碍', '不同理解及反向经验'],
         'focus': '观察与本次营销问题有关的人群表达和使用情境', 'challenge': '不同体验',
         'comparison': '比较有来源的使用情境、理解和障碍，不将发帖作者或粉丝属性等同于目标人群。',
         'cannot_claim': '不能从笔记推断财富、购买意愿、人群规模或未被证实的产品需求。'},
     'content': {
         'name': '内容与沟通',
+        'layers': {'L1': LAYER_PRIMARY, 'L2': LAYER_AUX, 'T': LAYER_AUX},
         'signal_path': ['本次营销沟通问题', '相关表达、已有解释与理解缺口', '相反反馈及替代解释'],
         'focus': '观察与沟通问题有关的内容表达和理解差异', 'challenge': '不同观点',
         'comparison': '比较同一沟通问题中的不同表达与解释，不将关键词命中量视为总体占比。',
         'cannot_claim': '高互动不等于普遍需求或传播效果；只提供沟通参考，不生成栏目排期或投放方案。'},
     'data_change': {
         'name': '数据与变化',
+        # T is the only layer that can support the word "trend" (METHODOLOGY §2.1 rule 3).
+        'layers': {'L3': LAYER_AUX, 'L4': LAYER_AUX, 'T': LAYER_PRIMARY},
         'signal_path': ['待解释的变化及指标口径', '同窗可比性与内容构成', '替代解释与缺失指标'],
         'focus': '检查与指定变化问题有关的样本及其口径', 'challenge': '不同表现',
         'comparison': '同查询、同排序、等长窗口比较；分页样本不足以构成总体趋势。',
@@ -79,6 +123,30 @@ TASK_ALIASES = {
     '内容方向': 'content', '数据与变化': 'data_change', '数据变化': 'data_change', 'data': 'data_change',
 }
 DECISION_QUESTION = '这次希望理解哪个营销问题？可从品牌竞争、平台渠道、产品价值、人群情境、内容沟通或数据变化中选择。'
+
+
+def missing_primary_layers(mode, implemented=None):
+    """Primary layers this task needs that the pipeline has no reader for."""
+    available = IMPLEMENTED_LAYERS if implemented is None else implemented
+    return [layer for layer in LAYERS
+            if METHODS[mode]['layers'].get(layer) == LAYER_PRIMARY and not available.get(layer)]
+
+
+def layer_gaps(implemented=None):
+    """Every task leaning on a layer the pipeline cannot reach.
+
+    Only primary layers count as gaps: a missing auxiliary layer weakens a read without
+    invalidating it, so it is a caveat rather than a gap. This is the check that keeps a
+    task name and its evidence honest — it reports the difference between what a task
+    declares it needs and what the code can actually fetch, instead of leaving that
+    difference for a reviewer to notice by hand.
+    """
+    gaps = []
+    for key in sorted(METHODS):
+        missing = missing_primary_layers(key, implemented)
+        if missing:
+            gaps.append({'task_type': key, 'name': METHODS[key]['name'], 'missing_primary': missing})
+    return gaps
 
 
 def _conversation(value):
@@ -537,6 +605,7 @@ def create_plan(brand: dict, task: dict, user_inputs: dict | None = None, *, pla
     if sources.get('qiangua') is False:
         raise ValueError('v0.2千瓜为社交主源，不能静默替换为其他数据商')
     source_config = {'qiangua': True, 'web': bool(sources.get('web', sources.get('search', False))), 'rss': bool(sources.get('rss', False))}
+    missing_layers = missing_primary_layers(mode)
     return {'method_version': METHOD_VERSION, 'ready': not questions and not planning_errors,
             'questions': questions, 'required_questions': required[:3], 'deferred_questions': deferred,
             'planner_questions': ai_questions, 'planner_required_questions': ai_required,
@@ -547,14 +616,17 @@ def create_plan(brand: dict, task: dict, user_inputs: dict | None = None, *, pla
             'brand_id': brand.get('id', brand.get('brand_id')), 'brand_snapshot': brand,
             'task_id': task.get('id', task.get('task_id')), 'task': task, 'question': objective,
             'conversation': conversation, 'clarification': clarification, 'latest_user_request': latest,
-            'task_type': mode, 'method': METHODS[mode], 'keyword': keyword, 'queries': cleaned,
+            'task_type': mode, 'method': METHODS[mode], 'layers': dict(METHODS[mode]['layers']),
+            'keyword': keyword, 'queries': cleaned,
             'start_date': start.isoformat(), 'end_date': end.isoformat(),
             'audience': _text(str(inputs.get('audience') or brand.get('audience') or ''), 1000),
             'hypothesis': _text(str(inputs.get('hypothesis') or ''), 1000),
             'exclusions': _text(str(inputs.get('exclusions') or ''), 1000),
             'budget': budget, 'source_config': source_config, 'delivery_profile': dict(DELIVERY_DEFAULTS),
             'limitations': [METHODS[mode]['cannot_claim'], '网站搜索与RSS只提供待核验背景，未读原文不能作为支持证据。',
-                            '检索摘要或标题不足以支持完整判断；正文不可用时可交付零稿。'],
+                            '检索摘要或标题不足以支持完整判断；正文不可用时可交付零稿。']
+                           + ([f'本轮未接入 {"／".join(missing_layers)} 证据层，该任务的判断强度低于方法要求。']
+                              if missing_layers else []),
             'manual_work': '核对来源与观点边界，选择或修订精选判断，批准具体交付版本。'}
 
 
@@ -740,25 +812,68 @@ def collect(plan: dict, run_dir, *, adapter=None, context_config=None) -> dict:
     errors += context_errors
     search_calls = [r for r in ledger if r['operation'] == 'content.search_notes']
     status = 'failed' if search_calls and all(r['status'] == 'failed' for r in search_calls) else 'partial' if errors else 'complete' if evidence else 'empty'
+    # A task may declare a layer the pipeline has no reader for. Naming that in the run's
+    # own limitations is what turns the declaration into something an operator can see.
+    missing_layers = missing_primary_layers(plan['task_type']) if plan.get('task_type') in METHODS else []
     collection = {'status': status, 'sources': ['qiangua'], 'errors': errors, 'queries': queries,
                   # Counted through grades, not by token: "summary_only" covers titles and truncated
                   # search summaries alike, and only a retrieved note_body counts as a body.
                   'summary_only': sum(grades.summary_only(e['source_grade']) for e in evidence),
                   'bodies': sum(grades.is_body(e['source_grade']) for e in evidence),
                   'limitations': ['分页检索样本，不代表全量人群或市场；检索总量不作总体统计。',
-                                  '网站搜索和RSS条目只作背景，不计证据、不能引用为支持。']}
+                                  '网站搜索和RSS条目只作背景，不计证据、不能引用为支持。']
+                                 + ([f'本轮未接入 {"／".join(missing_layers)} 证据层，该任务的判断强度低于方法要求。']
+                                    if missing_layers else [])}
     result = {'plan_hash': plan_hash, 'evidence': evidence, 'external_context': external[:budget['context_items']],
               'collection': collection, 'coverage': {**collection, 'evidence_count': len(evidence)}, 'ledger': ledger}
     private_json(cache, result)
     return result
 
 
-def enrich(plan, collected, draft, run_dir, *, adapter=None):
+def _body_reader(body_adapter, fallback):
+    """Choose who reads a note body, and name the choice for the ledger.
+
+    JustOneAPI goes first when a token is configured, because it is the only reader
+    that returns note text. Without a token the caller gets 千瓜's fragment instead:
+    the same spend, and the same behaviour as before this adapter existed.
+    """
+    if body_adapter is not None and getattr(body_adapter, 'configured', True):
+        return body_adapter, 'justoneapi'
+    return fallback, 'qiangua'
+
+
+def _detail_note(response, reader_name, source):
+    """Normalise a detail response from either reader into evidence shape.
+
+    Returns ``None`` when the source answered but carried no usable text. That is a
+    different outcome from raising: returning None means "no body here", raising means
+    the answer could not be trusted at all.
+    """
+    if reader_name == 'justoneapi':
+        return providers.detail_to_evidence(response, url=source['url'], query=source.get('query', ''))
+    detail_item = dict(response.get('normalized_note') or response.get('note') or {})
+    raw = detail_item.get('raw') if isinstance(detail_item.get('raw'), dict) else detail_item
+    target = _source_url(source['url'])
+    returned_urls = [value.get(key) for value in (detail_item, raw)
+                     for key in ('url', 'Url', 'WebShare') if value.get(key)]
+    returned_id = raw.get('NoteId') or raw.get('Id')
+    if (any(_source_url(returned_url) != target for returned_url in returned_urls) or
+            returned_id and source.get('source_id') and str(returned_id) != str(source['source_id'])):
+        raise SourceError('千瓜返回的笔记与请求来源不一致，未挂入正文。')
+    if not detail_item.get('url'):
+        detail_item['url'] = source['url']
+    return _note(detail_item, {'keyword': source.get('query', '')})
+
+
+def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None):
     """One gap-directed round, within the frozen total source and model allowance.
 
     No new queries, providers, URLs or samples are admitted here. Detail bodies
     update existing evidence in place, retaining its ID and original snapshots.
     The next AI edit, not this function, decides whether a candidate is selected.
+
+    ``adapter`` reads 千瓜; ``body_adapter`` reads note bodies through JustOneAPI.
+    Both are injectable so tests never need a token or a network call.
     """
     requests = draft.get('enrichment_requests', [])
     validate_enrichment_requests(requests, collected.get('evidence', []), draft.get('candidates', []))
@@ -785,7 +900,7 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
         # This ledger is independent of checkpoints, including unfinished spends.
         ledger = json.loads(ledger_path.read_text(encoding='utf-8'))
         result['ledger'] = ledger
-    attempted_before = [row for row in ledger if row.get('operation') == 'note.search_by_url']
+    attempted_before = [row for row in ledger if row.get('operation') in BODY_OPERATIONS]
     if collected.get('enrichment'):
         audit['reason'] = 'round_limit'
     elif not requests:
@@ -798,6 +913,7 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
         audit['reason'] = 'body_budget'
     else:
         adapter = adapter or QianguaAdapter()
+        body_reader, reader_name = _body_reader(body_adapter, adapter)
         by_id = {item['id']: item for item in result['evidence']}
         targets = {}
         for request in requests:
@@ -810,22 +926,27 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
                     target['candidate_ids'].append(request['candidate_id'])
         used_urls = {_source_url(row['url']) for row in attempted_before if row.get('url')}
         remaining = budget['body_reads'] - len(attempted_before)
+        operation = 'note.get_note_detail' if reader_name == 'justoneapi' else 'note.search_by_url'
         for url, target in targets.items():
-            outcome = {**target, 'operation': 'note.search_by_url'}
+            outcome = {**target, 'operation': operation}
             if url in used_urls or not remaining:
                 outcome.update(status='skipped', reason='already_attempted' if url in used_urls else 'body_budget')
                 audit['outcomes'].append(outcome)
                 continue
-            cache_name = 'enrich-detail-' + hashlib.sha256(url.encode()).hexdigest()[:24]
+            # The reader is part of the cache key: a body fetched by one reader never
+            # answers a request made to the other, so adding a token later cannot be
+            # masked by an earlier fragment-only attempt.
+            cache_name = f'enrich-detail-{reader_name}-' + hashlib.sha256(url.encode()).hexdigest()[:24]
             # Unknown outcomes are never retried under another candidate or name.
             if (directory / (cache_name + '.started')).exists() and not (directory / (cache_name + '.json')).exists():
                 outcome.update(status='unknown', reason='uncertain_request')
                 audit['outcomes'].append(outcome)
                 result.setdefault('collection', {}).setdefault('errors', []).append(
-                    {'source': 'qiangua', 'operation': 'enrichment', 'message': '正文请求结果未知；需先核对记录，不自动重试。'})
+                    {'source': reader_name, 'operation': 'enrichment',
+                     'message': '正文请求结果未知；需先核对记录，不自动重试。'})
                 continue
             source = by_id[target['evidence_ids'][0]]
-            record = {'source': 'qiangua', 'operation': 'note.search_by_url', 'phase': 'enrichment',
+            record = {'source': reader_name, 'operation': operation, 'phase': 'enrichment',
                       'url': source['url'], **target, 'status': 'started'}
             ledger.append(record)
             private_json(ledger_path, ledger)
@@ -837,19 +958,10 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
             audit['outcomes'].append(outcome)
             private_json(directory / 'enrichment-attempt-v2.json', audit)
             try:
-                response = _cached_call(directory, cache_name, lambda value=source: adapter.detail(value['url']))
-                detail_item = dict(response.get('normalized_note') or response.get('note') or {})
-                raw = detail_item.get('raw') if isinstance(detail_item.get('raw'), dict) else detail_item
-                returned_urls = [value.get(key) for value in (detail_item, raw)
-                                 for key in ('url', 'Url', 'WebShare') if value.get(key)]
-                returned_id = raw.get('NoteId') or raw.get('Id')
-                if (any(_source_url(returned_url) != url for returned_url in returned_urls) or
-                        returned_id and source.get('source_id') and str(returned_id) != str(source['source_id'])):
-                    raise SourceError('千瓜返回的笔记与请求来源不一致，未挂入正文。')
-                if not detail_item.get('url'):
-                    detail_item['url'] = source['url']
-                detail = _note(detail_item, {'keyword': source.get('query', '')})
-                # 千瓜 detail 的顶点是 note_segment，不是 note_body；拿不到可读文本才留在 note_meta。
+                response = _cached_call(directory, cache_name, lambda value=source: body_reader.detail(value['url']))
+                detail = _detail_note(response, reader_name, source)
+                # Only a reader that returns note text reaches note_body; a fragment
+                # reader tops out at note_segment, and no text at all stays note_meta.
                 if not detail or grades.is_meta(detail['source_grade']):
                     record.update(status='success', text_available=False)
                     outcome.update(status='no_text')
@@ -857,19 +969,21 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
                     for eid in target['evidence_ids']:
                         item = by_id[eid]
                         snapshot = {k: detail.get(k) for k in ('provider', 'excerpt', 'published_at', 'retrieved_at', 'limitation')}
-                        snapshot.update(operation='note.search_by_url', phase='enrichment',
+                        snapshot.update(operation=operation, phase='enrichment',
                                         candidate_ids=target['candidate_ids'])
                         item.setdefault('snapshots', []).append(snapshot)
-                        item.update({k: detail[k] for k in ('excerpt', 'source_grade', 'limitation')})
+                        # provider moves with the text: once JustOneAPI supplies the body,
+                        # the excerpt is no longer 千瓜's and the card must say so.
+                        item.update({k: detail[k] for k in ('excerpt', 'source_grade', 'limitation', 'provider')})
                         audit['text_added'] += 1
                     record.update(status='success', text_available=True)
                     outcome.update(status='text_added')
-            except (SourceError, ValueError, TypeError, AttributeError, OSError):
+            except (SourceError, RuntimeError, ValueError, TypeError, AttributeError, OSError):
                 # Supplier content/errors may contain account data; expose code-owned text only.
-                record.update(status='failed', error='千瓜正文补证未完成；未自动重试。')
+                record.update(status='failed', error='正文补证未完成；未自动重试。')
                 outcome.update(status='failed', reason='source_error')
                 result.setdefault('collection', {}).setdefault('errors', []).append(
-                    {'source': 'qiangua', 'operation': 'enrichment', 'message': record['error']})
+                    {'source': reader_name, 'operation': 'enrichment', 'message': record['error']})
             private_json(ledger_path, ledger)
             private_json(directory / 'enrichment-attempt-v2.json', audit)
         if all(o['status'] == 'text_added' for o in audit['outcomes']):

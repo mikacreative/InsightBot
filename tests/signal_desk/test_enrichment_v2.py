@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("langgraph.checkpoint.sqlite", reason="Install requirements-signal-desk.txt for the isolated Signal Desk runtime")
 
-from insightbot.signal_desk import editorial_v2 as e, research_v2 as r
+from insightbot.signal_desk import editorial_v2 as e, grades, providers, research_v2 as r
 from insightbot.signal_desk.workspace_v2 import WorkspaceV2
 
 
@@ -192,7 +192,9 @@ def test_failed_and_unknown_requests_are_not_resent_or_exposed(tmp_path):
     directory = tmp_path / 'unknown'
     directory.mkdir()
     key = hashlib.sha256(r._source_url(EVIDENCE[0]['url']).encode()).hexdigest()[:24]
-    (directory / f'enrich-detail-{key}.started').touch()
+    # The reader is part of the cache key, so an unfinished body read is unfinished
+    # for that reader only — not for whichever reader happens to run next.
+    (directory / f'enrich-detail-qiangua-{key}.started').touch()
     unknown = r.enrich(plan(), collected(), draft(), directory, adapter=adapter)
     assert unknown['enrichment']['outcomes'][0]['status'] == 'unknown'
     assert unknown['collection']['status'] == 'partial'
@@ -345,3 +347,71 @@ def test_graph_unresolved_gap_keeps_zero_cards_and_discloses_fetch_failure(tmp_p
     assert state['delivery']['cards'] == [] and state['delivery']['candidates'][0]['disposition'] == 'research'
     assert state['enrichment']['outcomes'][0]['status'] == ('failed' if failure else 'no_text')
     assert len(adapter.details) == 1 and calls == ['editor', 'reedit']
+
+
+class BodyReader:
+    """Stands in for JustOneAPI: same surface as 千瓜's adapter, but returns note text."""
+
+    configured = True
+
+    def __init__(self, note_id='n1', desc='笔杆型号刻在笔夹内侧，我按型号对照表确认兼容。'):
+        self.note_id, self.desc, self.urls = note_id, desc, []
+
+    def detail(self, url):
+        self.urls.append(url)
+        return {'code': 0, 'data': [{'model_type': 'note', 'note_list': [
+            {'id': self.note_id, 'title': '替换笔芯的兼容问题', 'desc': self.desc, 'time': 1791540718}]}]}
+
+
+def test_body_reader_is_the_only_path_to_note_body(tmp_path):
+    """千瓜 tops out at note_segment; JustOneAPI is what makes a card possible at all."""
+    reader = BodyReader()
+    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=Adapter(), body_adapter=reader)
+    assert reader.urls == [EVIDENCE[0]['url']]
+    item = result['evidence'][0]
+    assert item['source_grade'] == 'note_body' and grades.is_body(item['source_grade'])
+    assert item['provider'] == 'JustOneAPI' and item['excerpt'].startswith('笔杆型号')
+    assert result['ledger'][0]['source'] == 'justoneapi'
+    assert result['ledger'][0]['operation'] == 'note.get_note_detail'
+    assert result['enrichment']['outcomes'][0]['status'] == 'text_added'
+
+
+def test_missing_token_changes_nothing(tmp_path):
+    """No token is not an error: the run behaves exactly as it did before the adapter."""
+    reader = providers.JustOneApiAdapter(token='')
+    adapter = Adapter()
+    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=adapter, body_adapter=reader)
+    assert len(adapter.details) == 1
+    assert result['evidence'][0]['source_grade'] == 'note_segment'
+    assert result['ledger'][0]['source'] == 'qiangua'
+
+
+def test_body_allowance_counts_both_readers(tmp_path):
+    """An attempt made under one reader spends the other reader's allowance too."""
+    initial, research = collected(), draft()
+    initial['ledger'].append({'operation': 'note.search_by_url',
+                              'url': 'https://www.xiaohongshu.com/explore/other', 'status': 'failed'})
+    reader = BodyReader()
+    result = r.enrich(plan(body_reads=1), initial, research, tmp_path, adapter=Adapter(), body_adapter=reader)
+    assert reader.urls == [] and result['enrichment']['reason'] == 'body_budget'
+
+
+def test_body_reader_never_files_a_different_note(tmp_path):
+    """A body attached to the wrong source id is worse than no body."""
+    reader = BodyReader(note_id='n2')
+    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=Adapter(), body_adapter=reader)
+    assert result['evidence'][0]['source_grade'] == 'note_meta'
+    assert result['enrichment']['outcomes'][0]['status'] == 'failed'
+    assert result['collection']['errors'][0]['source'] == 'justoneapi'
+
+
+def test_body_reader_cache_is_per_reader(tmp_path):
+    """Adding a token later must not be masked by an earlier fragment-only attempt."""
+    directory = tmp_path / 'per-reader'
+    directory.mkdir()
+    key = hashlib.sha256(r._source_url(EVIDENCE[0]['url']).encode()).hexdigest()[:24]
+    (directory / f'enrich-detail-qiangua-{key}.started').touch()
+    reader = BodyReader()
+    result = r.enrich(plan(), collected(), draft(), directory, adapter=Adapter(), body_adapter=reader)
+    assert reader.urls == [EVIDENCE[0]['url']]
+    assert result['enrichment']['outcomes'][0]['status'] == 'text_added'
