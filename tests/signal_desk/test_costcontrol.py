@@ -109,12 +109,15 @@ def test_envelope_periods_and_scopes_do_not_leak_into_each_other(tmp_path):
     assert c.remaining(c.load_ledger(ledger), c.Envelope('brand-b', '2026-10', Decimal('5'))) == Decimal('5')
 
 
-def test_settle_records_variance_without_moving_the_reservation(tmp_path):
+def test_settling_above_the_estimate_raises_the_hold_without_rewriting_the_row(tmp_path):
     ledger = tmp_path / 'spend.jsonl'
     decision = c.authorize(c.RECIPE_CALLS['scan'], envelope('5'), ledger=ledger)
     row = c.settle(decision.reservation_id, actual_cny='0.3500', note='detail also billed', ledger=ledger)
     assert row['variance_cny'] == '0.1500'
-    assert c.remaining(c.load_ledger(ledger), envelope('5')) == Decimal('4.8000')
+    # The reservation row itself is never edited — the ledger is append-only — but what
+    # it counts as moves from the estimate to the actual, so the hold grows by ¥0.15.
+    assert c.remaining(c.load_ledger(ledger), envelope('5')) == Decimal('4.6500')
+    assert c.reserved(c.load_ledger(ledger), envelope('5')) == Decimal('0.2000')
     with pytest.raises(ValueError, match='already settled'):
         c.settle(decision.reservation_id, ledger=ledger)
     with pytest.raises(ValueError, match='unknown reservation'):
@@ -146,7 +149,7 @@ def test_unknown_billing_code_is_assumed_charged():
     assert c.code_meaning(999) == '未知业务码 999'
 
 
-def test_failed_call_settles_at_zero_not_at_the_estimate(tmp_path):
+def test_failed_call_settles_at_zero_and_gives_the_budget_back(tmp_path):
     ledger = tmp_path / 'spend.jsonl'
     decision = c.authorize(c.RECIPE_CALLS['scan'], envelope('5'), ledger=ledger)
     row = c.settle(decision.reservation_id, code=301, note='采集失败', ledger=ledger)
@@ -154,8 +157,20 @@ def test_failed_call_settles_at_zero_not_at_the_estimate(tmp_path):
     assert row['variance_cny'] == '-0.2000'
     assert row['billed'] is False and row['code_meaning'] == '采集失败，请重试'
     assert row['billing_codes_version'] == c.BILLING_CODES_VERSION
-    # The reservation itself is untouched: the budget was still held while in flight.
-    assert c.remaining(c.load_ledger(ledger), envelope('5')) == Decimal('4.8000')
+    # Held while in flight, released once it settles: a month of failed calls must not
+    # close an envelope that never spent anything.
+    assert c.consumed(c.load_ledger(ledger), envelope('5')) == Decimal('0')
+    assert c.remaining(c.load_ledger(ledger), envelope('5')) == Decimal('5')
+
+
+def test_an_open_reservation_still_blocks_the_other_channel(tmp_path):
+    """Releasing on settlement must not release anything that is still in flight."""
+    ledger = tmp_path / 'spend.jsonl'
+    decision = c.authorize(c.RECIPE_CALLS['scan'], envelope('0.2'), ledger=ledger)
+    assert decision.allowed and c.remaining(c.load_ledger(ledger), envelope('0.2')) == Decimal('0')
+    settled = c.settle(decision.reservation_id, code=0, ledger=ledger)
+    assert settled['actual_cny'] == '0.2000'
+    assert c.remaining(c.load_ledger(ledger), envelope('0.2')) == Decimal('0')
 
 
 def test_successful_call_settles_at_the_estimate(tmp_path):
@@ -179,10 +194,46 @@ def test_reconcile_and_report_expose_the_estimate_gap(tmp_path):
     c.authorize(c.RECIPE_CALLS['scan'], envelope('5'), channel='rest', ledger=ledger)
     state = c.report('fictional-brand', '2026-10', '5', ledger=ledger)
     assert state['reserved_cny'] == '1.0500' and state['remaining_cny'] == '3.9500'
+    # Nothing has settled yet, so what is held is what was estimated.
+    assert state['consumed_cny'] == '1.0500'
     assert state['by_channel'] == {'mcp': 1, 'rest': 1}
     assert state['price_exported_at'] == pricing.EXPORTED_AT
     gap = c.reconcile('1.2000', scope='fictional-brand', period='2026-10', ledger=ledger)
     assert gap['variance_cny'] == '0.1500' and gap['reservations'] == 2
+
+
+# --- the gate's own configuration: no declared limit means no paid call -----------------
+
+def test_no_declared_limit_means_no_spending(monkeypatch):
+    monkeypatch.delenv(c.SPEND_LIMIT_ENV, raising=False)
+    assert c.envelope_from_env('fictional-brand') is None
+    monkeypatch.setenv(c.SPEND_LIMIT_ENV, '   ')
+    assert c.envelope_from_env('fictional-brand') is None
+
+
+def test_declared_limit_becomes_an_envelope_for_the_named_scope(monkeypatch):
+    monkeypatch.setenv(c.SPEND_LIMIT_ENV, '2.60')
+    e = c.envelope_from_env('fictional-brand', period='2026-10')
+    assert (e.scope, e.period, e.limit_cny) == ('fictional-brand', '2026-10', Decimal('2.60'))
+    # A typo in a ceiling is loud, not silently "this deployment never spends".
+    monkeypatch.setenv(c.SPEND_LIMIT_ENV, 'about two yuan')
+    with pytest.raises(ValueError, match=c.SPEND_LIMIT_ENV):
+        c.envelope_from_env('fictional-brand')
+
+
+def test_period_follows_the_vendor_day_boundary():
+    # 2026-10-31T17:00Z is 2026-11-01 in Asia/Shanghai, which is where the vendor counts.
+    from datetime import datetime, timezone
+    stamp = datetime(2026, 10, 31, 17, 0, tzinfo=timezone.utc)
+    assert c.period_of(stamp) == '2026-11'
+    assert c.period_of(datetime(2026, 10, 31, 15, 0, tzinfo=timezone.utc)) == '2026-10'
+
+
+def test_ledger_location_is_overridable(monkeypatch, tmp_path):
+    monkeypatch.delenv(c.SPEND_LEDGER_ENV, raising=False)
+    assert c.ledger_from_env() == c.DEFAULT_LEDGER
+    monkeypatch.setenv(c.SPEND_LEDGER_ENV, str(tmp_path / 'spend.jsonl'))
+    assert c.ledger_from_env() == tmp_path / 'spend.jsonl'
 
 
 def test_ledger_file_is_created_owner_only(tmp_path):

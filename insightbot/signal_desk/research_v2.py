@@ -15,6 +15,12 @@ Two readers, two jobs — a stated division of labour, not a fallback:
 Neither reader exists to rescue the other's failure. When JustOneAPI has no token the
 body read falls back to 千瓜's fragment: weaker evidence, no extra spend, and identical
 to the behaviour of a deployment that never had a token.
+
+The body reader is also the only part of this module that costs money per call, so it is
+the only part that goes through :mod:`costcontrol`. A token alone does not spend: the run
+must also be deployed with an envelope declared (``SIGNAL_DESK_SPEND_LIMIT_CNY``), because
+a ceiling nobody wrote down is not a ceiling. Without one the round uses the free fragment
+reader and records that it did.
 """
 from __future__ import annotations
 
@@ -31,7 +37,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
-from . import grades, providers
+from . import costcontrol, grades, providers
 from .context import fetch_rss_context, search_web_context
 from .core import normalize
 
@@ -61,7 +67,7 @@ LAYER_PRIMARY, LAYER_AUX = 'primary', 'aux'
 # reader, and layer_gaps() reports every place the two disagree. Without this, a task
 # named "品牌与竞争" can be served by L1 retrieval alone and nothing in the code says so.
 IMPLEMENTED_LAYERS = {
-    'L1': 'search-note/v4（千瓜检索）+ get-note-detail（JustOneAPI 正文）',
+    'L1': 'search-note/v4（千瓜检索）+ get-note-detail（JustOneAPI 正文，需声明花费额度）',
     'L2': '',
     'L3': '',
     'L4': '',
@@ -830,16 +836,34 @@ def collect(plan: dict, run_dir, *, adapter=None, context_config=None) -> dict:
     return result
 
 
-def _body_reader(body_adapter, fallback):
-    """Choose who reads a note body, and name the choice for the ledger.
+def _detail_cache_name(reader_name, url):
+    """Cache key for one body read.
 
-    JustOneAPI goes first when a token is configured, because it is the only reader
-    that returns note text. Without a token the caller gets 千瓜's fragment instead:
-    the same spend, and the same behaviour as before this adapter existed.
+    The reader is part of the key on purpose: a body fetched by one reader never answers
+    a request made to the other, so adding a token (or an envelope) later cannot be
+    masked by an earlier fragment-only attempt that is still sitting on disk.
     """
-    if body_adapter is not None and getattr(body_adapter, 'configured', True):
-        return body_adapter, 'justoneapi'
-    return fallback, 'qiangua'
+    return f'enrich-detail-{reader_name}-' + hashlib.sha256(url.encode()).hexdigest()[:24]
+
+
+def _body_reader(body_adapter, fallback, envelope):
+    """Choose who reads a note body, and say why when it is not the paid reader.
+
+    JustOneAPI is the only reader that returns note text, and the only one that costs
+    money per call. So it runs only under a declared envelope (:mod:`costcontrol`); with
+    no token, or with no envelope, the caller gets 千瓜's fragment instead — weaker
+    evidence, no spend, and the same behaviour as before either existed.
+
+    The two refusals are not the same thing, which is why they are distinguished:
+    a missing token is a deployment that never bought bodies, while a missing envelope is
+    a deployment that could buy them and did not say how much. Only the second one is
+    worth telling the operator about on every run.
+    """
+    if body_adapter is None or not getattr(body_adapter, 'configured', True):
+        return fallback, 'qiangua', 'unconfigured'
+    if envelope is None:
+        return fallback, 'qiangua', 'no_envelope'
+    return body_adapter, 'justoneapi', ''
 
 
 def _detail_note(response, reader_name, source):
@@ -865,15 +889,23 @@ def _detail_note(response, reader_name, source):
     return _note(detail_item, {'keyword': source.get('query', '')})
 
 
-def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None):
+def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
+           envelope=None, spend_ledger=None):
     """One gap-directed round, within the frozen total source and model allowance.
 
     No new queries, providers, URLs or samples are admitted here. Detail bodies
     update existing evidence in place, retaining its ID and original snapshots.
     The next AI edit, not this function, decides whether a candidate is selected.
 
-    ``adapter`` reads 千瓜; ``body_adapter`` reads note bodies through JustOneAPI.
-    Both are injectable so tests never need a token or a network call.
+    ``adapter`` reads 千瓜; ``body_adapter`` reads note bodies through JustOneAPI and
+    defaults to the real one, so the production path is the same one the tests drive.
+    Both are injectable so a test never needs a token or a network call.
+
+    ``envelope`` is the spend ceiling every paid body read draws on, and ``spend_ledger``
+    overrides where those reservations are recorded — named apart from this module's own
+    source ledger, which is a different record of a different thing. Both default to the
+    environment (see :func:`costcontrol.envelope_from_env`); with neither declared the
+    round falls back to the free reader rather than spending unbounded.
     """
     requests = draft.get('enrichment_requests', [])
     validate_enrichment_requests(requests, collected.get('evidence', []), draft.get('candidates', []))
@@ -913,7 +945,16 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None):
         audit['reason'] = 'body_budget'
     else:
         adapter = adapter or QianguaAdapter()
-        body_reader, reader_name = _body_reader(body_adapter, adapter)
+        body_adapter = body_adapter if body_adapter is not None else providers.JustOneApiAdapter()
+        if envelope is None and str(plan.get('brand_id') or '').strip():
+            # The envelope is the brand's, not the run's: two runs for one brand in one
+            # period must share one ceiling, or the ceiling is per-run and means nothing.
+            envelope = costcontrol.envelope_from_env(plan['brand_id'])
+        spend_path = Path(spend_ledger) if spend_ledger is not None else costcontrol.ledger_from_env()
+        body_reader, reader_name, declined = _body_reader(body_adapter, adapter, envelope)
+        if declined == 'no_envelope':
+            result.setdefault('collection', {}).setdefault('limitations', []).append(
+                f'未声明花费额度（{costcontrol.SPEND_LIMIT_ENV}），正文补读改用免费片段；本轮不含完整正文。')
         by_id = {item['id']: item for item in result['evidence']}
         targets = {}
         for request in requests:
@@ -926,25 +967,48 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None):
                     target['candidate_ids'].append(request['candidate_id'])
         used_urls = {_source_url(row['url']) for row in attempted_before if row.get('url')}
         remaining = budget['body_reads'] - len(attempted_before)
-        operation = 'note.get_note_detail' if reader_name == 'justoneapi' else 'note.search_by_url'
+        paid = reader_name == 'justoneapi'
+        refused = ''
         for url, target in targets.items():
+            operation = 'note.get_note_detail' if paid else 'note.search_by_url'
             outcome = {**target, 'operation': operation}
+            if refused:
+                # The envelope ran out mid-round; every later target is refused for the
+                # same reason, and saying so beats leaving them out of the record.
+                outcome.update(status='skipped', reason='budget_denied')
+                audit['outcomes'].append(outcome)
+                continue
             if url in used_urls or not remaining:
                 outcome.update(status='skipped', reason='already_attempted' if url in used_urls else 'body_budget')
                 audit['outcomes'].append(outcome)
                 continue
-            # The reader is part of the cache key: a body fetched by one reader never
-            # answers a request made to the other, so adding a token later cannot be
-            # masked by an earlier fragment-only attempt.
-            cache_name = f'enrich-detail-{reader_name}-' + hashlib.sha256(url.encode()).hexdigest()[:24]
+            cache_name = _detail_cache_name(reader_name, url)
+            cached = (directory / (cache_name + '.json')).is_file()
             # Unknown outcomes are never retried under another candidate or name.
-            if (directory / (cache_name + '.started')).exists() and not (directory / (cache_name + '.json')).exists():
+            if (directory / (cache_name + '.started')).exists() and not cached:
                 outcome.update(status='unknown', reason='uncertain_request')
                 audit['outcomes'].append(outcome)
                 result.setdefault('collection', {}).setdefault('errors', []).append(
                     {'source': reader_name, 'operation': 'enrichment',
                      'message': '正文请求结果未知；需先核对记录，不自动重试。'})
                 continue
+            reservation = None
+            if paid and not cached:
+                # Reserve before the call, never after: the reservation is what stops a
+                # retry, a parallel run or the MCP channel from authorising against the
+                # same money. A cache hit is not a call, so it neither reserves nor bills.
+                try:
+                    reservation = costcontrol.require({costcontrol.DETAIL_V1: 1}, envelope,
+                                                      run_id=directory.name, channel='rest',
+                                                      scope_note=operation, ledger=spend_path)
+                except costcontrol.BudgetDenied as denial:
+                    refused = denial.decision.reason
+                    outcome.update(status='skipped', reason='budget_denied')
+                    audit['outcomes'].append(outcome)
+                    result.setdefault('collection', {}).setdefault('errors', []).append(
+                        {'source': 'costcontrol', 'operation': 'enrichment',
+                         'message': f'花费额度不足（{denial.decision.detail}），正文补读已停止。'})
+                    continue
             source = by_id[target['evidence_ids'][0]]
             record = {'source': reader_name, 'operation': operation, 'phase': 'enrichment',
                       'url': source['url'], **target, 'status': 'started'}
@@ -957,6 +1021,7 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None):
             outcome.update(status='started')
             audit['outcomes'].append(outcome)
             private_json(directory / 'enrichment-attempt-v2.json', audit)
+            response = failure = None
             try:
                 response = _cached_call(directory, cache_name, lambda value=source: body_reader.detail(value['url']))
                 detail = _detail_note(response, reader_name, source)
@@ -978,12 +1043,23 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None):
                         audit['text_added'] += 1
                     record.update(status='success', text_available=True)
                     outcome.update(status='text_added')
-            except (SourceError, RuntimeError, ValueError, TypeError, AttributeError, OSError):
+            except (SourceError, RuntimeError, ValueError, TypeError, AttributeError, OSError) as error:
                 # Supplier content/errors may contain account data; expose code-owned text only.
+                failure = error
                 record.update(status='failed', error='正文补证未完成；未自动重试。')
                 outcome.update(status='failed', reason='source_error')
                 result.setdefault('collection', {}).setdefault('errors', []).append(
                     {'source': reader_name, 'operation': 'enrichment', 'message': record['error']})
+            if reservation is not None:
+                # Settle by the code the vendor returned, never by the estimate: a call
+                # that failed is free, and a code the table does not know counts as
+                # charged. Outside the try/except on purpose — bookkeeping that cannot be
+                # written must stop the run rather than be swallowed as a source failure.
+                code = getattr(failure, 'code', None)
+                if isinstance(response, dict):
+                    code = response.get('code')
+                costcontrol.settle(reservation.reservation_id, code=code, note=operation,
+                                   ledger=spend_path)
             private_json(ledger_path, ledger)
             private_json(directory / 'enrichment-attempt-v2.json', audit)
         if all(o['status'] == 'text_added' for o in audit['outcomes']):
@@ -991,7 +1067,7 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None):
         else:
             audit['status'] = 'partial' if audit['attempted'] else 'skipped'
         if not audit['attempted']:
-            audit['reason'] = 'already_attempted'
+            audit['reason'] = 'budget_denied' if refused else 'already_attempted'
     collection = result.setdefault('collection', {})
     collection['summary_only'] = sum(grades.summary_only(e.get('source_grade')) for e in result.get('evidence', []))
     collection['bodies'] = sum(grades.is_body(e.get('source_grade')) for e in result.get('evidence', []))

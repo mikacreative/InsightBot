@@ -22,6 +22,11 @@ Design rules, each one earned from a real failure mode:
 4. **Settle by business code, not by estimate.** The vendor bills ``code=0`` only; every
    other code is free. Guessing an amount means a failed call either over-charges the
    ledger or hides a real charge. See :data:`BILLING_CODES`.
+5. **Settlement releases the hold.** Rule 2 keeps a reservation counted while a call is
+   in flight, but a reservation that has settled counts at what it actually cost. A call
+   that failed and settled at zero therefore gives its budget back. Counting raw
+   reservations forever would let a month of failed calls close an envelope that had
+   spent nothing — a gate that shuts itself.
 
 Deliberate non-goals: 千瓜 spend is a fixed annual seat cost with monthly quotas, not a
 per-call charge, so it does not belong in this ledger. Only variable spend is governed.
@@ -38,7 +43,11 @@ timeout specifically to avoid "重复请求或误判错误" after network jitter
 retry against a call that in fact succeeded is a double charge, which is exactly what the
 pre-call reservation prevents.
 
-Nothing in the pipeline calls this yet — it is wired in on approval, not by default.
+``research_v2.enrich`` is the one caller: before every paid body read it reserves that one
+detail call, and afterwards it settles with the code the vendor returned. Nothing else in
+the pipeline spends. A deployment that declares no envelope simply does not spend — the
+round falls back to the free fragment reader and says so, which is why the gate lives in
+the environment rather than in a caller argument (see :func:`envelope_from_env`).
 """
 from __future__ import annotations
 
@@ -47,13 +56,20 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from insightbot.signal_desk import pricing
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LEDGER = ROOT / 'data' / 'signal-desk-spend.jsonl'
+
+# How a machine declares that it is allowed to spend. Both live in the environment
+# because the gate must be a deployment decision, not a default a caller can forget to
+# pass: an unset limit means "no paid calls", which is the safe reading of silence.
+SPEND_LIMIT_ENV = 'SIGNAL_DESK_SPEND_LIMIT_CNY'
+SPEND_LEDGER_ENV = 'SIGNAL_DESK_SPEND_LEDGER'
 
 # Endpoints are written as full REST paths on purpose: quoting must be exact. A fuzzy
 # match on a billing path can silently attach the wrong price to a corrected endpoint name.
@@ -195,8 +211,70 @@ def reserved(rows, envelope: Envelope) -> Decimal:
     return total
 
 
+def consumed(rows, envelope: Envelope) -> Decimal:
+    """Budget that is gone or still held: settled actuals plus reservations still open.
+
+    Settled reservations count at what they actually cost, so a call that failed and
+    settled at zero returns its hold (rule 5). Unsettled ones still count at their
+    estimate, which is what stops a second channel authorising against the same money
+    (rule 2). :func:`reserved` answers a different question and is left alone: it sums
+    estimates, so :func:`reconcile` can still compare them against the vendor.
+    """
+    scoped = [row for row in rows
+              if row.get('scope') == envelope.scope and row.get('period') == envelope.period]
+    actuals = {row.get('reservation_id'): Decimal(str(row.get('actual_cny', '0')))
+               for row in scoped if row.get('kind') == 'settle'}
+    reserved_ids = {row.get('reservation_id') for row in scoped if row.get('kind') == 'reserve'}
+    total = Decimal('0')
+    for row in scoped:
+        if row.get('kind') == 'reserve':
+            total += actuals.get(row.get('reservation_id'), Decimal(str(row.get('estimated_cny', '0'))))
+        elif row.get('kind') == 'settle' and row.get('reservation_id') not in reserved_ids:
+            # A settlement whose reservation is missing from the ledger is still money
+            # out; counting it errs towards over-reporting rather than losing a charge.
+            total += Decimal(str(row.get('actual_cny', '0')))
+    return total
+
+
 def remaining(rows, envelope: Envelope) -> Decimal:
-    return Decimal(envelope.limit_cny) - reserved(rows, envelope)
+    return Decimal(envelope.limit_cny) - consumed(rows, envelope)
+
+
+def period_of(moment=None) -> str:
+    """The period a call made at ``moment`` belongs to.
+
+    The vendor counts its per-endpoint request quota on ``Asia/Shanghai`` days, so that
+    is the boundary used here. Whether an envelope should *reset* on that boundary is
+    still an open decision (METHODOLOGY §9.2); keeping the choice in one function is the
+    point of having this at all.
+    """
+    stamp = moment or datetime.now(timezone.utc)
+    stamp = stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+    return stamp.astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m')
+
+
+def envelope_from_env(scope, *, period: str = '', at=None) -> 'Envelope | None':
+    """The envelope this machine may spend under, or ``None`` when none is declared.
+
+    ``None`` is a decision, not a missing value: no envelope means no paid call, and a
+    paid reader must fall back to a free one. A malformed amount is raised rather than
+    treated as absent, because a typo in a spend ceiling should be loud, not degrade
+    into "this deployment never spends" and get debugged as a source failure.
+    """
+    raw = os.environ.get(SPEND_LIMIT_ENV, '').strip()
+    if not raw:
+        return None
+    try:
+        limit = Decimal(raw)
+    except InvalidOperation:
+        raise ValueError(f'{SPEND_LIMIT_ENV} must be a decimal CNY amount, got {raw!r}') from None
+    return Envelope(str(scope), period or period_of(at), limit)
+
+
+def ledger_from_env() -> Path:
+    """Where spend rows go. Overridable so a test or a second machine can point elsewhere."""
+    value = os.environ.get(SPEND_LEDGER_ENV, '').strip()
+    return Path(value).expanduser() if value else DEFAULT_LEDGER
 
 
 def estimate(calls, price_table: str | Path = pricing.DEFAULT_TABLE):
@@ -272,6 +350,9 @@ def settle(reservation_id: str, *, code=None, actual_cny=None, note: str = '',
     zero rather than at the reserved estimate. ``actual_cny`` stays available for the
     cases where reconciliation produces a number no single code can explain, e.g. a
     batch whose charges the vendor merged.
+
+    Settlement never rewrites the reservation row (the ledger is append-only); it changes
+    what the reservation *counts as* from here on, via :func:`consumed`.
     """
     if code is not None and actual_cny is not None:
         raise ValueError('pass either code or actual_cny, not both')
@@ -319,17 +400,23 @@ def reconcile(observed_delta_cny, *, scope: str, period: str,
 
 
 def report(scope: str, period: str, limit_cny, ledger: str | Path = DEFAULT_LEDGER) -> dict:
-    """Envelope state for an operations view."""
+    """Envelope state for an operations view.
+
+    ``reserved_cny`` is what was estimated and ``consumed_cny`` is what is actually gone
+    or held; they differ once a call settles at something other than its estimate. The
+    number the gate uses is ``remaining_cny``, which is derived from ``consumed_cny``.
+    """
     envelope = Envelope(scope, period, Decimal(str(limit_cny)))
     rows = load_ledger(ledger)
-    spend = reserved(rows, envelope)
+    spend, held = reserved(rows, envelope), consumed(rows, envelope)
     channels = {}
     for row in rows:
         if row.get('kind') != 'reserve' or row.get('scope') != scope or row.get('period') != period:
             continue
         channels[row.get('channel', 'unknown')] = channels.get(row.get('channel', 'unknown'), 0) + 1
     return {'scope': scope, 'period': period, 'limit_cny': str(envelope.limit_cny),
-            'reserved_cny': str(spend), 'remaining_cny': str(envelope.limit_cny - spend),
+            'reserved_cny': str(spend), 'consumed_cny': str(held),
+            'remaining_cny': str(envelope.limit_cny - held),
             'reservations': sum(channels.values()), 'by_channel': channels,
             'price_table': Path(pricing.DEFAULT_TABLE).name,
             'price_exported_at': pricing.EXPORTED_AT}

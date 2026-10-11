@@ -17,6 +17,24 @@ DETAIL_URL = 'https://api.justoneapi.com/api/xiaohongshu/get-note-detail/v1'
 VALID_TIME_FILTERS = ('ONE_DAY', 'ONE_WEEK', 'HALF_YEAR')
 
 
+class ProviderError(RuntimeError):
+    """A source failure safe to show, carrying whatever the vendor actually told us.
+
+    ``code`` is the business code from the response body and ``http_status`` the transport
+    status when there was one. They exist because the spend ledger settles a failed call
+    at zero *by code* and would otherwise have to guess: recovering the code by parsing
+    the message works exactly until the message is reworded, and then a failed call
+    silently keeps holding budget it never used.
+
+    Neither field may carry the token — these messages reach operators.
+    """
+
+    def __init__(self, message, *, code=None, http_status=None):
+        super().__init__(message)
+        self.code = code
+        self.http_status = http_status
+
+
 def _auth_token(token=None):
     """Resolve the token in one place.
 
@@ -36,13 +54,17 @@ def justone_note_detail(note_id: str, token=None):
         response = httpx.get(DETAIL_URL,
                              params={'token': token, 'noteId': note_id}, timeout=45, follow_redirects=False)
         if response.status_code != 200:
-            raise RuntimeError(f'JustOneAPI HTTP {response.status_code}')
+            raise ProviderError(f'JustOneAPI HTTP {response.status_code}',
+                                http_status=response.status_code)
         result = response.json()
+    except ProviderError:
+        raise
     except Exception:
-        raise RuntimeError('JustOneAPI request failed or outcome uncertain; no automatic retry') from None
+        raise ProviderError('JustOneAPI request failed or outcome uncertain; no automatic retry') from None
     if result.get('code') != 0:
-        code = result.get('code')
-        raise RuntimeError(f'JustOneAPI business error {code}; check authentication, permission or balance')
+        raise ProviderError('JustOneAPI business error '
+                            f'{result.get("code")}; check authentication, permission or balance',
+                            code=result.get('code'))
     return result
 
 
@@ -60,16 +82,21 @@ def justone_search(keyword: str, note_time: str | None = None, token=None):
     try:
         response = httpx.get(SEARCH_URL, params=params, timeout=120, follow_redirects=False)
         if response.status_code != 200:
-            raise RuntimeError('HTTP failure')
+            raise ProviderError(f'JustOneAPI HTTP {response.status_code}',
+                                http_status=response.status_code)
         result = response.json()
+    except ProviderError:
+        raise
     except Exception:
-        raise RuntimeError('JustOneAPI request failed or outcome uncertain; no automatic retry') from None
+        raise ProviderError('JustOneAPI request failed or outcome uncertain; no automatic retry') from None
     if result.get('code') != 0:
-        raise RuntimeError(f"JustOneAPI business error {result.get('code')}; inspect account permission/balance")
+        raise ProviderError('JustOneAPI business error '
+                            f'{result.get("code")}; inspect account permission/balance',
+                            code=result.get('code'))
     data = result.get('data')
     # v4 nests the page under data.notes; a page with zero hits still returns an empty list.
     if not isinstance(data, dict) or not isinstance(data.get('notes'), list):
-        raise RuntimeError('JustOneAPI search schema changed; not a zero-result search')
+        raise ProviderError('JustOneAPI search schema changed; not a zero-result search')
     return {'provider': 'JustOneAPI', 'endpoint': 'search-note/v4', 'query': keyword, 'page': 1,
             'sort': 'general', 'note_time': note_time,
             'limitations': ('One search page. desc is a truncated summary (measured <=60 chars, not the note '

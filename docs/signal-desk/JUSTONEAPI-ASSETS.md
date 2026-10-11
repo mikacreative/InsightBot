@@ -1,12 +1,13 @@
-# JustOneAPI 本机资产盘点与接线记录 v5
+# JustOneAPI 本机资产盘点与接线记录 v6
 
-日期：2026-10-11｜状态：**C 方案已落地，OAuth 已授权，端到端实测跑通，适配器已切 v4，证据等级已收敛为单一真源，费控中台已落地**｜作用域：主力机
+日期：2026-10-11｜状态：**C 方案已落地，OAuth 已授权，端到端实测跑通，适配器已切 v4，证据等级已收敛为单一真源，费控门禁已接线**｜作用域：主力机
 配套：`DATA-SOURCES-v0.1.md` §2（能力面）／`scripts/justone_mcp_probe.py`（只读体检）／`scripts/check_v4_parser.py`（解析离线校验）／`config/pricing/justoneapi-pricing-20261011.csv`（官方价目表快照）
 
 > **v3**：v2 沿用的"搜索接口本身带正文、无需 N+1 详情调用"结论**被实测推翻**（§2.5），成本模型重写（§6）。
 > **v4**：按 Mika 决策**把 `providers.py` 从 v2 切到 v4**，同时修掉一处会让方法论失效的证据等级缺陷（§2.7）。这是本项目**首次真实修改 JustOneAPI 适配器代码**。
-> **v5（本版）**：三件事——① 拿到**官方全量价目表**（296 端点 × 35 平台），据此**纠正此前靠余额差分"推测"的单价**（§2.8 A）；② 实测确认**千瓜 detail 接口不返回任何正文**，`qiangua_body` 是幻影等级（§2.8 B）；③ 把 `METHODOLOGY.md` §5.2 的八等级词表与代码现用词表**合并为单一真源 `grades.py`**，未知等级改为 fail-closed（§2.8 C）。
+> **v5**：三件事——① 拿到**官方全量价目表**（296 端点 × 35 平台），据此**纠正此前靠余额差分"推测"的单价**（§2.8 A）；② 实测确认**千瓜 detail 接口不返回任何正文**，`qiangua_body` 是幻影等级（§2.8 B）；③ 把 `METHODOLOGY.md` §5.2 的八等级词表与代码现用词表**合并为单一真源 `grades.py`**，未知等级改为 fail-closed（§2.8 C）。
 > **v5 增补**：把计费相关的全部说法对**官方使用指南**逐条核对（§2.9）。三条旧推断全部被官方确证（只有 `code=0` 计费／令牌上限非账户级／异步结算），并**发现一条我们没建模的配额轴——"每日成功请求次数"**（§2.9 C）。计费码表已转录进 `costcontrol.BILLING_CODES`，`settle()` 可按 code 结算。
+> **v6（本版）**：**把付费读取真正接到门禁上**（§2.8 E）。此前 `costcontrol.require()` 全项目零调用——**花钱的路开着、门禁不在路上**。接线后暴露并修掉三处只在真接线时才显形的问题：**结算不释放预留**（会自己关闭的门禁）、**业务码藏在错误文案里**、**参数名撞车**。信封改为**只从 `SIGNAL_DESK_SPEND_LIMIT_CNY` 来**，**未声明即不花钱**。
 
 ---
 
@@ -486,9 +487,32 @@ MCP   xiaohongshu.search_note_v4       ─┘
 | `probe` | `search-note/v4` ×2 ＋ `get-note-detail/v1` ×3 | **¥0.85** |
 | `frame` | `search-note/v4` ×3 ＋ `get-note-detail/v1` ×6 | **¥1.50** |
 
-**测试**：`tests/signal_desk/test_costcontrol.py` 16 项全通过。本轮测试总览 **351 passed**。
+**测试**：`tests/signal_desk/test_costcontrol.py` 26 项、`tests/signal_desk/test_spend_gate.py` 9 项全通过。本轮测试总览 **389 passed + 1 个既有失败**。
 
 > **测试环境更正**：此前判断 `tests/signal_desk/` 被 module 级 `importorskip` 跳过（"缺隔离运行时"）——**实测发现 `.venv-signal-desk/bin/python` 依赖齐全（含 `langgraph`／`httpx`／`requests`）**，本轮起改为**真实 pytest 全量运行**，不再用离线回放替代。§2.7 C 的离线校验保留为**零成本前置门禁**，但不再是唯一手段。
+
+#### E. ★ 门禁接线（2026-10-11 晚，v0.2.5）
+
+D 建成的三层一度是**"建好但没有调用点"**——`costcontrol.require()` 全项目零调用，付费正文读取实际只靠"是否配了 `JUSTONEAPI_TOKEN`"授权。现在唯一的付费调用点（`research_v2.enrich` 的正文补读）**逐次**走门禁：
+
+| 环节 | 行为 |
+| --- | --- |
+| 选读取器 | 有 token **且**声明了信封 → `JustOneApiAdapter`；缺任一项 → 免费片段读取器，原因写进 `collection.limitations` |
+| 调用前 | `require({DETAIL_V1: 1}, 品牌 × 期信封)` → 先写 `reserve` 行（`channel='rest'`） |
+| 调用后 | `settle(reservation_id, code=<业务码>)` → `code=0` 计费，其余按 ¥0 结算 |
+| 缓存命中 | **不预留、不结算**（缓存命中不是调用，为它记账就是凭空收费） |
+| 额度不足 | 本轮停止，后续目标标 `budget_denied`，写入 `collection.errors` |
+
+**信封只从环境变量来**：`SIGNAL_DESK_SPEND_LIMIT_CNY`（可选 `SIGNAL_DESK_SPEND_LEDGER`）。**未声明即不花钱**——**"有 token" 与 "被允许花钱" 必须分开**。
+
+接线暴露并修掉三处**只在真接线时才显形**的问题：
+
+1. **结算不释放预留**：`remaining` 原先只减 `reserve` 行 → 一次失败调用**永久占住**额度，一个月的失败足以把信封耗空而实际零支出。新增 `consumed()` ＝ 已结算实际值 ＋ 未结算预留估算值；未结算的预留照旧占用（防双花不减弱）。`reconcile()` 仍用 `reserved()`（估算值）对照账单——**两个函数回答不同问题，故不合并**。
+2. **业务码藏在错误文案里**：`settle(code=...)` 拿不到码就只能按预留额多记失败调用。新增 `providers.ProviderError`，显式携带 `code`／`http_status`（靠解析文案取码"能用，直到文案被改写"）。
+3. **参数名撞车**：`enrich` 内既有的 `ledger` 是**源账本列表**，若把花费账本也叫 `ledger` 会被直接覆盖（首轮实现即踩中，表现为 `TypeError: ... not 'list'`）→ 参数定名 **`spend_ledger`**。
+
+**仍在外面的路**：MCP 侧（本机直调 `call_endpoint`）不走本账本，只能靠"同一个信封"的人工约定。**门禁保护的是管线，不是账户。**
+
 
 ---
 
@@ -712,7 +736,8 @@ MCP 连通 · server=justoneapi-mcp v2.0.0 · protocol=2025-06-18
 | **适配器版本过旧** | ✅ **已修**：`search-note/v2` → **v4**，参数名同步改（§2.7 A） |
 | **证据等级口径** | ✅ **已收敛为单一真源**：`grades.py` 承载八等级 + alias 归一 + **未知等级 fail-closed**（§2.8 C）；四个调用点全部接入。**"两套词表并存但未打通"这一状态已终结。** |
 | **千瓜正文能力** | ✅ **已定性（且为否定结论）**：`note.search_by_url` 实测 40 字段无任何内容字段 → `qiangua_body` 是幻影等级，千瓜最高只能到 `note_segment`（§2.8 B）。**`note_body` 唯一来源＝JustOneAPI detail 接口。** |
-| **费控/额度中台** | ✅ **已落地**：`pricing.py`（报价）+ `costcontrol.py`（门禁 + 账本），21 项测试通过（§2.8 D）。⚠️ 待接：真实调用路径尚未强制走 `require()` |
+| **费控/额度中台** | ✅ **已落地并接线**：`pricing.py`（报价）+ `costcontrol.py`（门禁 + 账本），35 项测试通过（§2.8 D／E）。付费正文读取**逐次走 `require()` → `settle(code=)`**；信封由 `SIGNAL_DESK_SPEND_LIMIT_CNY` 声明，**未声明即不花钱**。⚠️ 仍在外面的路：MCP 直调不走本账本 |
+| **第二配额轴未建模** | ⚠️ 官方有"用户 × 接口"**每日成功请求限额**（`Asia/Shanghai` 日、跨 TOKEN 合并计数、超限 `303`+429 不计费）。`Envelope` 只表达货币 → 可能过金额校验却被上游拒。是否纳入属产品判断（§2.9 C） |
 | **计费规则** | ✅ **已由官方文档确证并转录进代码**：`costcontrol.BILLING_CODES`（只有 `code=0` 计费），`settle(code=...)` 可按业务码结算（§2.9 A） |
 | **每日成功请求限额（第二配额轴）** | ⚠️ **未建模**：官方明确存在"用户 × 接口"的每日成功次数上限（`Asia/Shanghai` 日、跨 TOKEN 合并计数、超限 `303`+429 不计费）。`Envelope` 只建模货币 → 方案可能过金额校验却被上游拒（§2.9 C）。**待 Mika 决定是否纳入** |
 | **代码通路接线细节** | ✅ **已明确**：`https://api.justoneapi.com`，token 走 **URL 参数** `?token=...`（§2.9 E）。仍缺 token 本身 |
@@ -762,11 +787,17 @@ python3 scripts/check_v4_parser.py
 # 9) 全量测试（真实运行，不再跳过）
 .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p no:cacheprovider --basetemp=.pytest-tmp
 #    注：pytest 默认临时目录在系统 /var/folders 下，会被执行沙箱拦成 169 个 setup error。
-#    用工作区内的 --basetemp 才是可信结果（当前 355 passed + 1 个既有失败，见 §7 末注）。
+#    用工作区内的 --basetemp 才是可信结果（当前 389 passed + 1 个既有失败，见 §7 末注）。
 rm -rf .pytest-tmp
 
 # 10) 计费码表（离线）
 .venv-signal-desk/bin/python -c "from insightbot.signal_desk import costcontrol as c; print(c.code_meaning(301), c.is_billed(301)); print(c.BILLING_CODES_VERSION)"
+
+# 11) 花费信封（门禁的开关本身，离线）
+.venv-signal-desk/bin/python -c "from insightbot.signal_desk import costcontrol as c; print(c.envelope_from_env('demo'))"
+#    未打印任何信封 = 本机未声明额度 = 正文补读只走免费片段读取器（安全降级，不报错）
+SIGNAL_DESK_SPEND_LIMIT_CNY=2.60 .venv-signal-desk/bin/python -c "from insightbot.signal_desk import costcontrol as c; print(c.envelope_from_env('demo'))"
+#    注：可选 SIGNAL_DESK_SPEND_LEDGER 指定账本位置（默认 data/signal-desk-spend.jsonl，已 gitignore）
 ```
 
 **权威来源（两个，都需登录/公开各异）**：

@@ -3,12 +3,13 @@ import copy
 import hashlib
 import json
 import threading
+from decimal import Decimal
 
 import pytest
 
 pytest.importorskip("langgraph.checkpoint.sqlite", reason="Install requirements-signal-desk.txt for the isolated Signal Desk runtime")
 
-from insightbot.signal_desk import editorial_v2 as e, grades, providers, research_v2 as r
+from insightbot.signal_desk import costcontrol, editorial_v2 as e, grades, providers, research_v2 as r
 from insightbot.signal_desk.workspace_v2 import WorkspaceV2
 
 
@@ -33,6 +34,17 @@ SELECTED_TEXT = '\n'.join([
 
 def plan(**budget):
     return r.create_plan(BRAND, TASK, {'keyword': '笔芯兼容', 'budget': budget})
+
+
+def spend(tmp_path, limit='5'):
+    """A declared ceiling plus a scratch ledger.
+
+    The paid reader is only reachable with an envelope, and the envelope only comes from
+    the caller or the environment — never from a default. Tests declare one here so the
+    real spend gate is exercised instead of a stand-in.
+    """
+    return {'envelope': costcontrol.Envelope(BRAND['id'], '2026-10', Decimal(limit)),
+            'spend_ledger': tmp_path / 'spend.jsonl'}
 
 
 # 千瓜 detail was measured on 2026-10-11 to return note metadata only (40 fields, no content
@@ -366,7 +378,8 @@ class BodyReader:
 def test_body_reader_is_the_only_path_to_note_body(tmp_path):
     """千瓜 tops out at note_segment; JustOneAPI is what makes a card possible at all."""
     reader = BodyReader()
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=Adapter(), body_adapter=reader)
+    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=Adapter(), body_adapter=reader,
+                      **spend(tmp_path))
     assert reader.urls == [EVIDENCE[0]['url']]
     item = result['evidence'][0]
     assert item['source_grade'] == 'note_body' and grades.is_body(item['source_grade'])
@@ -380,10 +393,14 @@ def test_missing_token_changes_nothing(tmp_path):
     """No token is not an error: the run behaves exactly as it did before the adapter."""
     reader = providers.JustOneApiAdapter(token='')
     adapter = Adapter()
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=adapter, body_adapter=reader)
+    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=adapter, body_adapter=reader,
+                      **spend(tmp_path))
     assert len(adapter.details) == 1
     assert result['evidence'][0]['source_grade'] == 'note_segment'
     assert result['ledger'][0]['source'] == 'qiangua'
+    # A declared ceiling does not conjure a token, and the free reader is not a downgrade
+    # worth reporting: this deployment never bought bodies in the first place.
+    assert not [line for line in result['collection'].get('limitations', []) if '花费额度' in line]
 
 
 def test_body_allowance_counts_both_readers(tmp_path):
@@ -392,14 +409,16 @@ def test_body_allowance_counts_both_readers(tmp_path):
     initial['ledger'].append({'operation': 'note.search_by_url',
                               'url': 'https://www.xiaohongshu.com/explore/other', 'status': 'failed'})
     reader = BodyReader()
-    result = r.enrich(plan(body_reads=1), initial, research, tmp_path, adapter=Adapter(), body_adapter=reader)
+    result = r.enrich(plan(body_reads=1), initial, research, tmp_path, adapter=Adapter(),
+                      body_adapter=reader, **spend(tmp_path))
     assert reader.urls == [] and result['enrichment']['reason'] == 'body_budget'
 
 
 def test_body_reader_never_files_a_different_note(tmp_path):
     """A body attached to the wrong source id is worse than no body."""
     reader = BodyReader(note_id='n2')
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=Adapter(), body_adapter=reader)
+    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=Adapter(),
+                      body_adapter=reader, **spend(tmp_path))
     assert result['evidence'][0]['source_grade'] == 'note_meta'
     assert result['enrichment']['outcomes'][0]['status'] == 'failed'
     assert result['collection']['errors'][0]['source'] == 'justoneapi'
@@ -412,6 +431,7 @@ def test_body_reader_cache_is_per_reader(tmp_path):
     key = hashlib.sha256(r._source_url(EVIDENCE[0]['url']).encode()).hexdigest()[:24]
     (directory / f'enrich-detail-qiangua-{key}.started').touch()
     reader = BodyReader()
-    result = r.enrich(plan(), collected(), draft(), directory, adapter=Adapter(), body_adapter=reader)
+    result = r.enrich(plan(), collected(), draft(), directory, adapter=Adapter(),
+                      body_adapter=reader, **spend(tmp_path))
     assert reader.urls == [EVIDENCE[0]['url']]
     assert result['enrichment']['outcomes'][0]['status'] == 'text_added'

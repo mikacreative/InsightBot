@@ -391,4 +391,36 @@ Mika 导出的价目表落盘为 `config/pricing/justoneapi-pricing-20261011.csv
 
 **其他**：`.gitignore` 新增 `docs/signal-desk/intro/`、`docs/signal-desk/weekly-demo/`、`.workbuddy/` 三条（二进制产物与 Agent 工作区状态不入库）；`PDD.md` 单独提交。
 
-**未动 / 待决**：正文读者尚未接 `costcontrol.require()`（现由 token + `body_reads` + 令牌预算三道约束）；三种模式仍未上提到执行层；「达人方向」是否补为第 7 类，待 Mika 定契约口径。
+**未动 / 待决**：三种模式仍未上提到执行层；「达人方向」是否补为第 7 类，待 Mika 定契约口径。
+
+---
+
+## 2026-10-11 深夜（续）：把付费读取真正接到门禁上
+
+Mika：「接着做」——即上一轮列的待决第 1 项（正文读者的费控接线）。
+
+**问题不是"缺一个检查"，而是"门禁建好了却不在路上"**：`costcontrol.require()` 全项目**零调用**，付费正文读取实际只靠"是否配了 `JUSTONEAPI_TOKEN`"授权。**唯一付费调用点**是 `research_v2.enrich` 的正文补读，本轮把它逐次接上：
+
+| 环节 | 行为 |
+| --- | --- |
+| 选读取器 | 有 token **且**声明了信封 → `JustOneApiAdapter`（**默认构造，生产路径与测试同一条**）；缺任一项 → 免费片段读取器 |
+| 调用前 | `require({DETAIL_V1: 1}, 品牌 × 期信封)` → 先写 `reserve` 行（`channel='rest'`） |
+| 调用后 | `settle(reservation_id, code=<业务码>)` → `code=0` 计费，其余按 ¥0 结算 |
+| 缓存命中 | **不预留、不结算**（缓存命中不是调用） |
+| 额度不足 | 本轮停止，后续目标标 `budget_denied`，写入 `collection.errors` |
+
+**信封只从环境变量来**（`SIGNAL_DESK_SPEND_LIMIT_CNY`，可选 `SIGNAL_DESK_SPEND_LEDGER`）——**未声明即不花钱**，退回免费片段并把原因写进 `collection.limitations`（UI 可见），**不报错**。理由：默认值会让任何调用方在忘传参数时拿到花钱许可，而忘传参数恰恰最常见。**"有 token" 与 "被允许花钱" 必须分开。**
+
+**接线暴露的三处只在真接线时才显形的问题**：
+
+1. **结算不释放预留** —— `remaining` 原先只减 `reserve` 行 → 一次失败调用**永久占住**额度，一个月的失败足以把信封耗空而实际零支出（**一个会自己关闭的门禁**）。新增 `consumed()` ＝ 已结算实际值 ＋ 未结算预留估算值；`remaining` 改用它。**不变量保持**：未结算的预留照旧占用（防双花不减弱）。`reconcile()` 保留 `reserved()` 与账单对照——两个函数回答不同问题，不合并。
+2. **业务码藏在错误文案里** —— `settle(code=...)` 拿不到码就只能按预留额多记失败调用。新增 `providers.ProviderError`（携带 `code`／`http_status`，且**不得携带 token**）。靠解析文案取码"能用，直到文案被改写"。
+3. **参数名撞车** —— `enrich` 内既有的 `ledger` 是**源账本列表**，花费账本若同名会被直接覆盖，首轮实现即踩中（`TypeError: ... not 'list'`）。参数定名 **`spend_ledger`**。
+
+**新增测试**：`test_spend_gate.py`（9 项，**打的是真门禁而非替身**）：预留→按码结算、失败按 ¥0 结算并退还、缓存命中不记账、额度不足不调用来源、未定价端点拒付、有 token 无信封不花钱、默认读取器就是真的那个、信封按品牌而非按运行、两个运行共用一个信封。`test_costcontrol.py` 16→**26 项**（新增信封来源／期界／账本位置）。
+
+**全量 389 passed + 1 既有失败**（kestra，与 HEAD 一致、与本轮无关）。
+
+**仍在外面的路**：MCP 侧（本机直调 `call_endpoint`）不走本账本，只能靠"同一个信封"的人工约定。**门禁保护的是管线，不是账户。**
+
+**待决（新）**：信封是否按自然月重置（现由 `period_of()` 用 `Asia/Shanghai` 日界算期，但重置口径未定）。
