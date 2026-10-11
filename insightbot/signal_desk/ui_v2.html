@@ -136,9 +136,9 @@ function validationProblems(){const v=run.validation||run.quality||{};const raw=
 function renderValidation(){const errors=validationProblems();const a=$('delivery-validation');a.replaceChildren();a.classList.toggle('hidden',!errors.length);if(errors.length){a.append(node('strong','以下问题需要审稿修正'));const list=node('ul');for(const e of errors)list.append(node('li',e));a.append(list)}}
 function renderEnrichment(container){
  const audit=run.enrichment;if(!audit||!Object.keys(audit).length)return;
- const reasons={round_limit:'计划未开放或已用完补证轮次',model_budget:'没有剩余重编额度，未再调用来源',body_budget:'本轮正文额度已用完',already_attempted:'该来源已请求过，不重复调用',no_requests:'没有需要补读的具体缺口',uncertain_request:'请求结果未知，需先核对记录',source_error:'正文补读未完成，未自动重试'};
- const outcomes={body_added:'已取得正文',no_body:'接口仍未提供正文',failed:'补读失败',unknown:'请求结果未知',started:'已提交，结果待核对',skipped:'未调用'};
- container.append(node('h3','按证据缺口补读'),para('本轮尝试 '+(audit.attempted||0)+' 次正文读取，补充 '+(audit.usable_bodies_added||0)+' 条证据正文。','notice'));
+ const reasons={round_limit:'计划未开放或已用完补证轮次',model_budget:'没有剩余重编额度，未再调用来源',body_budget:'本轮补读额度已用完',already_attempted:'该来源已请求过，不重复调用',no_requests:'没有需要补读的具体缺口',uncertain_request:'请求结果未知，需先核对记录',source_error:'正文补读未完成，未自动重试'};
+ const outcomes={text_added:'已取得正文片段',no_text:'接口未提供可读文本',failed:'补读失败',unknown:'请求结果未知',started:'已提交，结果待核对',skipped:'未调用'};
+ container.append(node('h3','按证据缺口补读'),para('本轮尝试 '+(audit.attempted||0)+' 次片段补读，补充 '+(audit.text_added||0)+' 条可读文本（千瓜接口不提供完整正文）。','notice'));
  if(audit.reason)container.append(para(reasons[audit.reason]||'本轮补证未执行','notice'));
  for(const request of audit.requests||[]){const row=node('div',null,'evidence');row.append(node('strong','待核验：'+request.gap),para('会改变的判断：'+request.expected_change,'notice'));
   for(const outcome of (audit.outcomes||[]).filter(o=>(o.candidate_ids||[]).includes(request.candidate_id))){const titles=(outcome.evidence_ids||[]).map(id=>sourceLabel((run.evidence||[]).find(e=>e.id===id)||{id}));row.append(para(titles.join('、')+' · '+(outcomes[outcome.status]||'未完成')+(outcome.reason?' · '+(reasons[outcome.reason]||'未完成'):''),'notice'))}container.append(row)}

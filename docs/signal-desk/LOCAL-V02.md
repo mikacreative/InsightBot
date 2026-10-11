@@ -9,7 +9,7 @@
 - 本轮本机完整回归为 **662 passed, 6 warnings**，Python 编译及差异检查通过；前端类型检查、构建及启动脚本语法在先前提交前通过。[先前 GitHub PR Test](https://github.com/mikacreative/InsightBot/actions/runs/37624378698) 在 Python 3.12 下为 **390 passed, 9 skipped**；最新提交的 CI 与再次审阅以 PR 为准。9 个模块因 CI 未安装独立 LangGraph 依赖而跳过，不能将 CI 结果解释为完整 Signal Desk 验收。
 - 本轮同步时，18876 原工作区与 18977 独立原型健康接口均正常；原型方案为 v8，自动执行暂停，三次验证执行均为 `SUCCESS`。实际 AI 规划、原生定时触发及重启审核恢复的证据见文末；来源样本和发布渠道仍为虚构／模拟。
 - 本轮已修复首轮五项审阅发现；下一步核对新提交的 CI 与再次审阅，再以一条真实研究路径接入现有千瓜、精选编辑及审核能力，保留品牌权限、凭据、单轮额度与方案版本。管理员模块目录、真实频道和正式产品迁移仍按 [PDD 第13节](PDD.md#13-可管理研究工作流kestra-本机原型) 分阶段验收。
-- 真实供应商研究质量、同议题两期业务试读、长期重复调度与商用可用性仍待验证。千瓜最近一次只读鉴权结果为 401；恢复真实研究前重新核验接口授权，不能把先前失败当作当前可用性判断。
+- 真实供应商研究质量、同议题两期业务试读、长期重复调度与商用可用性仍待验证。千瓜授权已于 2026-10-08 续期，2026-10-11 复核为 fresh（`auth test` 返回 Jessie Zhou，接口权限 7/7 可用）；10-07 的 401 记录不再适用。恢复真实研究前仍需处理文末 2026-10-11 记录的两处链路问题。
 - 主工作区 `InsightBot` 的 `main` 有尚未提交的文档改动；继续保留，后续合并使用独立工作树。当前 PR、CI 与本机测试不构成生产部署或品牌数据迁移授权。
 
 ## 入口与数据
@@ -204,3 +204,155 @@ PYTHONPATH=.:editorial-intelligence .venv-signal-desk/bin/python -m pytest -q
 新增 **36 项**回归，覆盖有效登录穿插失败尝试、三种主机时区、零额度／后续源故障、正文长度与顺序、启动丢响应、未创建、重启、迟到回调、并发确认及不完整引擎查询。完整入口为 **662 passed, 6 warnings**；6 条仍为既有 feedparser 弃用提示。Python 编译和 `git diff --check` 通过。
 
 在保留的 Kestra **1.3.42** 上只读核验新查询：原执行正确匹配、虚构未发出请求确认为不存在；原执行仍为 `SUCCESS`。本轮恢复场景使用隔离单元测试，没有新建真实研究、调用供应商或模型、启用日程或发布结果。修改已纳入同一 PR 的审阅范围；合并与部署仍须另行决定。
+
+### 2026-10-07：两页营销产品介绍
+
+按 Mika 的追加要求，介绍内容改为 imagegen 制作的两页精简横版：第一页讲面向品牌与营销团队的 AI 研究工作台价值；第二页只保留三步使用方式及卖点、内容、竞品、人群四类问题。暂用 Signal Desk 作为展示名，保留内部试用标记；没有加入未经验证的客户、成效、数据覆盖或正式发布承诺。
+
+交付：[第一页](intro/Signal-Desk-introduction-01.png)、[第二页](intro/Signal-Desk-introduction-02.png)、[两页 PDF](intro/Signal-Desk-product-introduction.pdf)。最终图片均为 1672×941；PDF 保持原图比例与两页顺序，已逐页渲染检查。生成与修订提示词保存在 [本机视觉记录](/Users/mikawang/.codex/visualizations/2026/10/07/01a11509-f964-71f2-9eb4-227a1e6d1b56/signal-desk-intro/two-page-prompts.json)。本轮是介绍材料，不改变 PDD 或产品能力验收状态。
+
+### 2026-10-07：产品介绍可编辑 PPT
+
+追加交付 [两页可编辑 PPT](intro/Signal-Desk-product-introduction-editable-YGGBi.pptx)，保留原图构图、纸张质感与绿色视觉。按 Mika 的修改删除第一页“问题导向／少量精选／证据可查”及第二页末尾的说明口号；采用 agency-writing 改写正文、使用步骤与场景文案。YGGBi 使用官网项目的正式绿色字标，原始 PNG 字节完整嵌入；出处见 [官网 Logo 规范](/Users/mikawang/Documents/GitHub/yggbi-com/docs/logo-usage.md)。原来的 PNG／PDF 保留作参考，更新内容以本次 PPT 为准。
+
+主体标题、正文、步骤编号、场景标签、两个流程箭头及背景可编辑；纸张插画、小图标和字标为独立图片，插画内的报告标题保留在图片中。插画已通过 imagegen 分离为透明素材。更新预览：[第一页](intro/Signal-Desk-product-introduction-YGGBi-01.png)、[第二页](intro/Signal-Desk-product-introduction-YGGBi-02.png)。PPT 为 16:9，约 4 MB；27 处原生文字和 2 个原生连接箭头已核对，文件结构与重新导入检查通过。最终文件经 Artifact Tool 与配置了本机中文字体的 LibreOffice 逐页渲染检查。PowerPoint 已打开初版第一页核对显示，最终版的原生检查因电脑锁屏中断，没有完成实际编辑保存测试。重建脚本和验证记录保存在 [本机制作目录](/Users/mikawang/.codex/visualizations/2026/10/07/01a11509-f964-71f2-9eb4-227a1e6d1b56/signal-desk-intro/pptx-work/build/)。
+
+### 2026-10-08：周报呈现演示
+
+按 Mika 的要求制作预期周报样稿，以原型中的虚构品牌澄野及通勤杯议题展示两条本周发现、一条上期回看、一个讨论问题与范围说明。前三类内容用自然短段落呈现，第三页展开六段模拟体验及对应判断；全稿明确标为演示，不引用真实用户发言，也不作为实际采集或研究结果。使用 PDD 第7节的试点篇幅上限，沿用产品介绍的绿色视觉与正式 YGGBi 字标。
+
+交付：[三页可编辑 PPT](weekly-demo/Signal-Desk-weekly-report-demo-YGGBi.pptx)、[三页 PDF](weekly-demo/Signal-Desk-weekly-report-demo-YGGBi.pdf)。预览：[本周发现](weekly-demo/Signal-Desk-weekly-report-demo-01.png)、[回看与讨论](weekly-demo/Signal-Desk-weekly-report-demo-02.png)、[依据展开](weekly-demo/Signal-Desk-weekly-report-demo-03.png)。主体文字、背景和依据表格均为原生可编辑对象，字标为独立图片。文件结构、篇幅、表格对象、字标原始字节和重新导入检查通过；保存后的最终 PPT 经 Artifact Tool 与 LibreOffice 逐页渲染检查，PDF 为该 PPT 的实际导出。未在 PowerPoint 中进行编辑保存测试。制作脚本与检查记录保存在 [本机制作目录](/Users/mikawang/.codex/visualizations/2026/10/07/01a11509-f964-71f2-9eb4-227a1e6d1b56/signal-desk-weekly-demo/build/)。本轮仅制作展示材料，不改变周报自动生成、真实研究质量或频道交付的验收状态。
+
+### 2026-10-08：周报改为 HTML 邮件样稿
+
+Mika 修正展示方向：周报应优先是一封精美的邮件，观点鲜明、文字简短，以适当的数据或图表支撑观点，末尾集中列出 References。已同步 PDD 第7.1节。之前的三页 PPT 保留作版式探索，本次展示以邮件样稿为准。
+
+交付：[可编辑 HTML 邮件预览](weekly-demo/email/Signal-Desk-weekly-email.html)、[含 HTML 与内嵌图片的邮件文件](weekly-demo/email/Signal-Desk-weekly-email.eml)。样刊采用 lululemon 2026财年Q2的真实公开财报，以中国大陆净收入公布口径 +4%、剔除汇率 −2%、可比销售剔除汇率 −8% 支撑“营收增长不等于原有生意更强”的判断；显示季度截至日期与2026-09-03公告日期，不冒充当周新采集结果。两项 References 直接链接公司公告及 SEC 10-Q，图表与 CSV 保存于 `weekly-demo/email/assets/`，沿用正式 YGGBi 字标。
+
+邮件采用单列、表格布局、内联 CSS 与手机样式，图片通过 MIME Content-ID 内嵌，附纯文本回退；预览 HTML 自包含。收件人与发件地址留空，邮件未发送。网页预览在1280、390与320像素宽度检查图片、横向溢出、品牌标识、引用锚点和控制台；修正窄屏字标换行与预览 favicon 404。浏览器为隔离的无头 Chrome，经现有 Playwright 调用；未使用用户登录会话。MIME 结构、图片对应关系和 logo 字节已核对，尚未做 Gmail／Outlook／Apple Mail 的实际收件测试。制作与预览检查记录位于 [本机制作目录](/Users/mikawang/.codex/visualizations/2026/10/07/01a11509-f964-71f2-9eb4-227a1e6d1b56/signal-desk-weekly-email/)。本轮未实现产品内邮件发送或定时投递。
+
+### 2026-10-11：千瓜授权复核与真实链路发现
+
+按续签请求复核千瓜授权。结论是**当前不需要续签**；同时发现两处会使真实研究无法产出证据的链路问题。以下均为只读验证：未调用规划或编辑模型，未修改凭证，未启用日程，未发布结果，未使用任何客户材料。
+
+#### 授权状态（实测）
+
+- 工作树 `/Users/mikawang/Documents/GitHub/qiangua-insights`，解释器使用本工作树 `.venv-signal-desk`。
+- `auth test` → `{"status":"success","user":"Jessie Zhou"}`。
+- `auth health-check` → `{"status":"ok","message":"授权正常","user":"Jessie Zhou","cookie_freshness":{"status":"fresh","days_old":2}}`。
+- `auth.check_permissions` → `{"total":7,"available":7,"blocked":0}`。
+- 凭证文件 `auth/qian_gua_cookie.json` 的 `updated_at` 为 `2026-10-08T19:59:45`，晚于本文件先前的 10-07／10-08 记录，此前未登记。故 10-07 的 401 属历史状态，已不适用。
+- Signal Desk 侧直连复核：`SIGNAL_DESK_QIANGUA_REPO` 未设置，适配器按默认同级目录解析到 `qiangua-insights`，脚本存在、Python 环境正确，`QianguaAdapter().auth()` → `True`。授权门禁已通过。
+
+#### 发现一：检索能力接线错误，真实运行必然零稿
+
+- 适配器 `QianguaAdapter.search()` 调用 `content.search_notes`，底层为 `POST /v1/Note/GetNoteHotList`（通用笔记热榜，非关键词检索）。
+- 实测返回 10 条：`XhsNoteUrl` 全为 `null`、`WebShare` 为空字符串，`normalized_items[].url` 全为 `None`。该能力自带限制说明亦写明 `Results are from the general note hot list, not keyword-specific samples.`
+- `_note()` 要求 URL 合法才保留，故全部计入 `missing_url`，`kept=0`，证据池为空。
+- 正确路径实测可用：`keyword.search` 取得 `WordId`（例：`潮玩` → `WordId 62271`），再以 `keyword.notes` 传 `word_id` + 日期窗，返回带 `Url`（例：`https://www.xiaohongshu.com/explore/6ac2158b0000000002012a71`）以及作者、发布时间、互动数据的笔记样本。
+- 影响：按当前接线，任何真实研究都会得到零条可用来源；这与"证据不足"在结果上无法区分，也使 `missing_url` 长期偏高而不被识别为接线故障。
+
+#### 发现二：正文不可得，证据强度上限为 title_only
+
+- `content.search_notes` 返回中 `Content` 与 `VerifyContent` 均为空字符串；仅 `MatchContent` 非空，但它是带 `<font>` 高亮标记的关键词命中片段（约 160—200 字），不构成完整正文。
+- `keyword.notes` 返回 URL 与指标，无正文字段。
+- `note.search_by_url`（`POST /Track/SearchNoteByUrl`）返回 40 个字段全部为元数据，不含 `Content`／`Desc`／`NoteContent`。
+- 本地 `qiangua-insights` 的 client 与 capability 清单中未见任何返回笔记正文的接口。
+- 影响：`_note()` 的 `source_grade` 恒为 `title_only`，限制说明恒为"仅标题，未取得正文"。阶段 C 的正文补读在真实链路上无法把来源升级为 `qiangua_body`，而 PDD 第 4.2／7.4 节要求主张须由证据支持并说明个案边界——仅有标题时产品只能输出线索，无法交付其承诺的判断强度。
+
+#### 边界与后续
+
+- 本轮未执行真实品牌研究，未验证同议题两期业务试读、长期重复调度与商用可用性。
+- 上述两处链路问题**尚未修改任何代码**；修法与范围（能力替换、正文来源、`delivery_profile` 是否相应收窄）需另行确认后再报验收。
+- 千瓜为公开笔记样本。以上验证取自中性关键词，不涉及客户材料，未向外部模型发送数据。
+
+### 2026-10-11：千瓜前端抓包复核——正文不可得已获 endpoint 级证据
+
+针对"发现二"，本轮在 `qiangua-insights` 仓库做了实时驱动抓包复核（注入已存 Cookie + 无头 Chrome + Vuex 运行时内省，非离线 HAR 猜测），结论升级为 endpoint 级证据：
+
+- 抓包脚本：`qiangua-insights/scripts/har_capture_notes.py`；产物写 `.cache/har/`（已 gitignore）；完整记录见该仓库 `docs/mcp/note-body-research-20261011.md`。
+- 千瓜前端共暴露 **5 个可用的笔记级 endpoint**，其中 `v1/note/GetNoteDetail`（参数 `noteId` + `sign`，42 字段）和评论明细 `v5/note/GetNoteComments` 为本次实测打通；`GetNoteDetail` 此前未注册进上游仓库。
+- 对同一篇真实笔记逐接口核对：`GetNoteDetail` 42 字段全为元数据；`GetNoteAnalyse` 60 字段中 `VerifyContent` 为空字符串；`GetNoteListByComment` 单条 item 的 `Content`／`VerifyContent`／`MatchContent` 均为空，仅 `ContentWordSegment`（词段+权重）有值。
+- 全站 396 个前端 JS chunk 静态扫描，未见任何 `GetNoteContent`／`NoteBody` 类 endpoint 常量。
+- **判定**：千瓜官方前端不提供笔记正文，`source_grade` 的 `qiangua_body` 等级在当前接口面下不可达。这不是适配器实现缺陷，而是产品契约问题——「正文补读」需重新定义为「评论命中片段 + 词段权重 + 标签 + 互动结构」的组合证据，或在 PDD 中下调「洞察」一词的准入门槛。
+- 上游文档同步：`docs/mcp/note-body-research-20261011.md`（新建）、`har-capability-audit.md` 与 `endpoint-research.md`（加交叉指引）。
+- 本轮**未改动任何 capability 代码**，也未改动 Signal Desk 代码；若要把 `GetNoteDetail` 注册为上游 capability，需按 `qiangua-insights/AGENTS.md` 第 141 条同时改三处并补 mock 测试。
+
+### 2026-10-11：千瓜配额实测——额度最窄能力不能进关键路径
+
+在确认正文不可得之后，进一步核验「长期稳定运行」所需的数据预算，实测拿到逐功能配额表（完整表见 `qiangua-insights/docs/mcp/quota-map-20261011.md`）：
+
+- 查询入口：`GET User/GetUserOperationCountV3?type=<N>`。额度**按功能独立**，非账户级单一池。本周期 2026-09-22 10:30 → 2026-10-22 10:30（按购买日滚动，非自然月）。
+- 宽额度：`热搜词搜索` 6000、`笔记分析`／`跳转原文` 4500、`笔记搜索` 4000、`达人搜索` 2400、`关键词搜索` 800（次/月）。
+- 窄额度：`评论搜索` **15 次/月，本周期已用尽（剩余 0，已触发额度提示）**；`评论趋势分析` 15；`店铺搜索`／`店铺分析` 各 10；`笔记内容解析`／`达人内容解析` 各 20；各 `*对比` 50—200。
+- 零额度：`直播录屏`、`素材搜索／分析`、`达人健康等级更新`、`评论相关笔记分析报告`。
+- 计量性质：**前端流程层门控，非数据接口层**——直连 8 个数据 endpoint（笔记搜索、笔记分析、笔记详情、笔记评论、取 URL 等）实测消耗均为 0；扣减发生在前端调用 `GetUserOperationCountV3` 校验之后。**该路径绕开平台计费约定，不作为产品方案依据，仅作事实记录。**
+- **对产品的影响**：以「每月 4 期、每品牌每期 1 次调用」换算，单账户可支撑品牌数分别为——笔记搜索 1000、笔记分析／跳转原文 1125、达人搜索 600，而 **评论搜索仅 3**、店铺搜索 2、笔记内容解析 5。即：任何依赖评论数据的「每期等量」交付承诺，在额度层面即不可实现，与正文不可得叠加后，评论数据在两个维度上都无法充当长期主要证据源。
+- 反向结论：`source_grade` 的重定义应**优先落在宽额度能力上**（笔记分析 + 跳转原文 + 笔记搜索的组合证据），把评论数据降为「低频定向补证」，并要求调度器按剩余额度做采样预算与降级，而不是把窄额度能力写进关键路径。
+- 本轮同样**未改动任何代码**。
+
+### 2026-10-11（晚）：适配器切 v4 ＋ 证据等级对齐——本轮首次改代码
+
+Mika 决策："设了上限。可以切 v4。" 前几轮结论均为"代码一行未动"，本轮起不再成立。
+
+**改了三个文件**（详见 `JUSTONEAPI-ASSETS.md` §2.7）：
+
+- `insightbot/signal_desk/providers.py`：`search-note/v2` → **v4**。**不是换 URL 那么简单**——v4 把参数名全改了（`sort`→`sortType`、`noteTime`→**`timeFilter`**、`noteType '_0'`→`'ALL'`），且返回结构由 `data.items[].note` 改为 **`data.notes[]`**（元素直接是 note，无 `model_type` 包裹）。只改路径会让**时间筛选静默失效**。
+- 同文件：`source_grade` 由 `'search excerpt'` 改为 **`'search_snippet'`**。原值不在下游低等级词表 `('title_only','search_snippet','rss_snippet')` 内 → `_excerpt_rank` 兜底判为中等级，且 `editorial_v2` 的"仅有摘要不能支持完整判断"守卫**完全不触发**。这与方法论 §2.2 刚写下的"把截断摘要当正文引用是最容易犯的错"**是同一个错误，只是发生在代码里**。**一处改动，三处守卫自动恢复**（`core.py` / `editorial_v2.py` / `research_v2.py` 一行未动）。另补 `desc_length` 与 `body_verified: False` 两个可程序化检查的字段。
+- `tests/signal_desk/test_workflow.py`：`test_verified_search_normalization` fixture 从 v2 结构改 v4 结构；**新增** `test_search_summary_is_graded_as_snippet` 把等级修复锁进测试。
+- 新建 `scripts/check_v4_parser.py`：用 2026-10-11 保存的**真实 v4 响应**（3 页 57 条）离线校验，不联网不耗额度 → `parsed 57 notes; longest desc = 60 chars; grades = {'search_snippet'}`；`_excerpt_rank('search_snippet')=0` 而旧值 `'search excerpt'=1`（确证曾被误判）。
+
+**账户状态变化**：令牌由 `Default` 换为 **`SignalDeskTest`**，`budgetAmount 10.9`／`usedAmount 0.9`／`remainingAmount 10`。⚠️ **该上限是令牌级而非账户级**——只约束绑定此令牌的通路，若 codex 侧仍用 `Default` 令牌则不受此上限保护，共享同一账户余额。
+
+**测试环境说明（既有状态，非本次引入）**：`tests/signal_desk/` 在本机被 module 级 `pytest.importorskip("langgraph.checkpoint.sqlite")` 跳过（缺 `requirements-signal-desk.txt` 的隔离运行时），故改用真实响应做等价校验，强度不低于 mock 测试。
+
+**未动**：`workspace.py`（`:137` 仍只取 `queries[0]`）、`web.py`、`core.py`、`editorial_v2.py`、`research_v2.py`；代码通路仍缺 `JUSTONEAPI_TOKEN`。**遗留**：`METHODOLOGY.md` §5.2 的八等级与代码现行词表**并存未打通**，正式切换需一次显式映射。
+
+> ⚠️ **更正（同日深夜）**：上段"测试环境说明"**结论不成立**。实测 `.venv-signal-desk/bin/python` 依赖齐全（含 `langgraph`／`httpx`／`requests`），`tests/signal_desk/` **可以直接真实运行**。此前判断为"缺隔离运行时故被 skip"是误读，已改为**真实 pytest 全量运行**（本轮 351 passed）。`check_v4_parser.py` 保留为**零成本前置门禁**，但不再是唯一验证手段。
+
+### 2026-10-11（深夜）：证据等级单一真源 ＋ 千瓜幻影等级定性 ＋ 费控中台
+
+Mika 指令："映射也做了。保留（`total` 语义），下次再验证。导了一份价目表看是否有用……也许可以让我们的产品本身能够有个费控、额度中台？"
+
+本轮一次做完三件事。
+
+#### 一、证据等级收敛为单一真源（`grades.py`）
+
+上一轮的修法（`'search excerpt'` → `'search_snippet'`）只是**让 `providers.py` 对齐代码现行词表**，并未消除"两套词表并存"。本轮从根因下手：新建 `insightbot/signal_desk/grades.py` 作为唯一承载。
+
+- 八等级 + 两个标记值（`unverified`／`external_context`）+ `rank` + `summary_only` + kind 谓词 + legacy alias 表；`GRADE_VOCABULARY_VERSION = '2026-10-11.1'`。
+- **未知等级改为 fail-closed** → 归 `unverified`（rank 0、`summary_only=True`）。**根因不再是"用错了词"，而是"词表可以分叉"；fail-closed 让分叉必然被拒。**
+- 四个调用点全部接入：`core.py`（`_excerpt_rank`／`_sample_kind`／默认值）、`editorial_v2.py`（守卫改 `grades.summary_only`）、`providers.py`、`research_v2.py`（`_note()` 及三处字段更名）。
+- `scripts/check_v4_parser.py` 移除 `ast` 提取 hack，改直接 import；输出升级为三组检查（分级词表／legacy token 解析／unknown fail-closed）。
+- 新增测试：`test_legacy_grade_tokens_still_resolve`、`test_unknown_grade_fails_closed`；`test_search_summary_is_graded_as_segment_not_body` 等 5 项重命名对齐新词表。
+
+**⚠️ 必须知晓的后果**：`qiangua_body` → `note_segment`（`summary_only=True`），而守卫现在对所有 `summary_only` 材料生效 → **千瓜单源证据被完全排除在客户可交付卡片之外**。这是"摘要 ≠ 正文"方法论的**正确**结果，但确实改变了产出面。三条出路见 `METHODOLOGY.md` §9.2 第 13 项（推荐：千瓜价值归位于结构层／趋势层，本就不受该守卫约束）。
+
+#### 二、千瓜 `note.search_by_url` 实测：确认无正文
+
+用千瓜 CLI 真实拉取，逐字段检查：**返回 40 个字段，无任何内容字段**（`Title` 17 字符、`Tag` 空、`VerifyContent` 不存在）。
+
+→ `qiangua_body` 是**幻影等级**：代码里存在，但对应能力在任何接口上都不存在。**千瓜在本项目里最高只能到摘要级**；`note_body` 唯一来源是 JustOneAPI detail 接口（同条笔记：搜索 59 字符 vs detail 108 字符）。
+
+> 执行细节：`.workbuddy` 的 Python 3.13.12 缺 `requests`，改用 `/Users/mikawang/.pyenv/shims/python3`（含 requests 2.33.1）才跑通千瓜 CLI。
+
+#### 三、价目表 → 费控／额度中台
+
+Mika 导出的价目表落盘为 `config/pricing/justoneapi-pricing-20261011.csv`（296 行，`¥` 已剥离、`允许/未开通` → `allowed/unavailable`），并建两层代码：
+
+| 层 | 文件 | 内容 |
+| --- | --- | --- |
+| 报价 | `pricing.py` | `normalize_id()`／`Quote`（含 `chargeable`）／`price_table()`（带 key 冲突检测）／`quote()`／`price_of()`／`cheapest()`／`table_summary()`；`EXPORTED_AT` 记录导出时点 |
+| 门禁 + 账本 | `costcontrol.py` | `Envelope`／`Decision`／`BudgetDenied`；`load_ledger`（畸形行 raise，不跳过）／`append_ledger`（`0o600`）／`reserved`／`remaining`／`estimate`／`quote_recipe`／`authorize`／`require`／`settle`／`reconcile`／`report` |
+
+**关键设计**：① `chargeable = unit_price is not None and permission == PERMISSION_ALLOWED` —— **未知单价／未开通端点一律拒付**（fail-closed，不是"按 0 算"）；② **pre-call reserve** 先在账本写预留行，防重试／并行／双通路对同一余额重复授权（双花）；③ 端点命名归一，REST `/api/xiaohongshu/search-note/v4` 与 MCP `xiaohongshu.search_note_v4` 共用同一 join key `xiaohongshu_search_note_v4`。
+
+**价目表关键读数**：296 端点 × 35 平台，¥0.05—¥1.50；不可定价 2 条（京东 `get-item-detail/v2`、pixabay `search-image/v1`，均 `未开通`）。小红书 16 端点中 15 个 ¥0.15、1 个 ¥0.20（`search-note/v4`）、1 个 ¥0.50（`ask-dots`）——**本项目主链路恰好全在最便宜档**。
+
+**研究成果**：`scan` **¥0.20** ／ `probe` **¥0.85** ／ `frame` **¥1.50**（对应方法论 §4 三模式）。
+
+**⚠️ 一处必须纠正的旧结论**：`get-note-detail/v1` 此前记为"未观测到扣费（≤¥0.10）"——**错**。官方价目表确证为 **¥0.15**（与 v2 同价），`get-note-comment/v2` 亦为 ¥0.15。误判根因是**计费异步结算**：5 次调用理论值 ¥0.90 − 实测 ¥0.75 = ¥0.15，恰好等于**一笔 detail 尚未入账**。**纪律：单价以官方价目表为准，余额只用于对账。**
+
+**测试**：新建 `tests/signal_desk/test_costcontrol.py` 16 项；首轮 7 项失败（配方端点用模糊简称命中不了价目表；算术期望错）→ 修正后全通过。**全量 351 passed**。
+
+**未动**：`workspace.py`、`web.py` 及真实调用路径——`costcontrol` 尚未强制接入 `require()`，因此**门禁目前是"可用但未强制"**。代码通路仍缺 `JUSTONEAPI_TOKEN`。**保留待验证**：v4 `total` 字段语义（Mika 裁定）。

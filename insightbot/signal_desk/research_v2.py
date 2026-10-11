@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
+from . import grades
 from .context import fetch_rss_context, search_web_context
 from .core import normalize
 
@@ -209,7 +210,7 @@ def validate_enrichment_requests(requests, evidence, candidates):
                 raise ValueError('补证须说明具体缺口及对取舍或边界的影响')
         for eid in ids:
             source = by_id[eid]
-            if source.get('source_grade') != 'title_only' or 'qiangua' not in source.get('providers', []):
+            if not grades.is_meta(source.get('source_grade')) or 'qiangua' not in source.get('providers', []):
                 raise ValueError('补证仅支持已采集千瓜笔记的正文缺口')
             _source_url(source.get('url', ''))
 
@@ -616,8 +617,10 @@ def _note(item, query):
             'source_id': str(raw.get('NoteId') or raw.get('Id') or ''), 'title': title,
             'excerpt': excerpt[:12000], 'published_at': item.get('publish_time') or raw.get('PublishTime'),
             'retrieved_at': datetime.now(timezone.utc).isoformat(), 'query': query['keyword'],
-            'source_grade': 'qiangua_body' if body else 'title_only',
-            'limitation': '千瓜返回的笔记正文片段，属于个案自述，未独立核实。' if body else '仅标题，未取得正文；只能发现线索，不能支持完整判断。'}
+            # 千瓜无正文接口（METHODOLOGY §5.2 endpoint 级确认），所以这里最高只能到 note_segment：
+            # 有可读文本就是命中片段，没有就只有 note_meta。声称 note_body 会高估证据强度。
+            'source_grade': 'note_segment' if body else 'note_meta',
+            'limitation': ('千瓜返回的笔记正文片段，属于个案自述，未独立核实。' if body else '仅标题，未取得正文；只能发现线索，不能支持完整判断。')}
 
 
 def _cached_call(directory, name, callback):
@@ -690,16 +693,16 @@ def collect(plan: dict, run_dir, *, adapter=None, context_config=None) -> dict:
     # Legacy plans retain their initial reads. New plans reserve this same total
     # allowance for bodies chosen by editorial gaps, not arbitrary list order.
     initial_reads = 0 if budget['enrichment_rounds'] else budget['body_reads']
-    for index, item in enumerate([e for e in items if e['source_grade'] == 'title_only'][:initial_reads]):
+    for index, item in enumerate([e for e in items if grades.is_meta(e['source_grade'])][:initial_reads]):
         record = {'source': 'qiangua', 'operation': 'note.search_by_url', 'url': item['url']}
         try:
             response = _cached_call(directory, f'detail-{index}', lambda value=item: adapter.detail(value['url']))
             detail_item = dict(response.get('normalized_note') or response.get('note') or {})
             detail_item.setdefault('url', item['url'])
             detail = _note(detail_item, {'keyword': item['query']})
-            if detail and detail['source_grade'] != 'title_only':
+            if detail and not grades.is_meta(detail['source_grade']):
                 item.update({k: detail[k] for k in ('excerpt', 'source_grade', 'limitation')})
-            record.update(status='success', body_available=item['source_grade'] != 'title_only')
+            record.update(status='success', text_available=not grades.is_meta(item['source_grade']))
         except SourceError as error:
             record.update(status='failed', error=str(error))
             errors.append({'source': 'qiangua', 'operation': 'detail', 'message': str(error)})
@@ -738,8 +741,10 @@ def collect(plan: dict, run_dir, *, adapter=None, context_config=None) -> dict:
     search_calls = [r for r in ledger if r['operation'] == 'content.search_notes']
     status = 'failed' if search_calls and all(r['status'] == 'failed' for r in search_calls) else 'partial' if errors else 'complete' if evidence else 'empty'
     collection = {'status': status, 'sources': ['qiangua'], 'errors': errors, 'queries': queries,
-                  'title_only': sum(e['source_grade'] == 'title_only' for e in evidence),
-                  'usable_bodies': sum(e['source_grade'] != 'title_only' for e in evidence),
+                  # Counted through grades, not by token: "summary_only" covers titles and truncated
+                  # search summaries alike, and only a retrieved note_body counts as a body.
+                  'summary_only': sum(grades.summary_only(e['source_grade']) for e in evidence),
+                  'bodies': sum(grades.is_body(e['source_grade']) for e in evidence),
                   'limitations': ['分页检索样本，不代表全量人群或市场；检索总量不作总体统计。',
                                   '网站搜索和RSS条目只作背景，不计证据、不能引用为支持。']}
     result = {'plan_hash': plan_hash, 'evidence': evidence, 'external_context': external[:budget['context_items']],
@@ -773,7 +778,7 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
         return saved['collected']
     result = copy.deepcopy(collected)
     audit = {'round': 1, 'requests': copy.deepcopy(requests), 'outcomes': [], 'attempted': 0,
-             'usable_bodies_added': 0, 'status': 'skipped', 'reason': ''}
+             'text_added': 0, 'status': 'skipped', 'reason': ''}
     ledger_path = directory / 'source-ledger-v2.json'
     ledger = result.setdefault('ledger', [])
     if ledger_path.is_file():
@@ -844,9 +849,10 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
                 if not detail_item.get('url'):
                     detail_item['url'] = source['url']
                 detail = _note(detail_item, {'keyword': source.get('query', '')})
-                if not detail or detail['source_grade'] == 'title_only':
-                    record.update(status='success', body_available=False)
-                    outcome.update(status='no_body')
+                # 千瓜 detail 的顶点是 note_segment，不是 note_body；拿不到可读文本才留在 note_meta。
+                if not detail or grades.is_meta(detail['source_grade']):
+                    record.update(status='success', text_available=False)
+                    outcome.update(status='no_text')
                 else:
                     for eid in target['evidence_ids']:
                         item = by_id[eid]
@@ -855,9 +861,9 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
                                         candidate_ids=target['candidate_ids'])
                         item.setdefault('snapshots', []).append(snapshot)
                         item.update({k: detail[k] for k in ('excerpt', 'source_grade', 'limitation')})
-                        audit['usable_bodies_added'] += 1
-                    record.update(status='success', body_available=True)
-                    outcome.update(status='body_added')
+                        audit['text_added'] += 1
+                    record.update(status='success', text_available=True)
+                    outcome.update(status='text_added')
             except (SourceError, ValueError, TypeError, AttributeError, OSError):
                 # Supplier content/errors may contain account data; expose code-owned text only.
                 record.update(status='failed', error='千瓜正文补证未完成；未自动重试。')
@@ -866,15 +872,15 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None):
                     {'source': 'qiangua', 'operation': 'enrichment', 'message': record['error']})
             private_json(ledger_path, ledger)
             private_json(directory / 'enrichment-attempt-v2.json', audit)
-        if all(o['status'] == 'body_added' for o in audit['outcomes']):
+        if all(o['status'] == 'text_added' for o in audit['outcomes']):
             audit['status'] = 'complete'
         else:
             audit['status'] = 'partial' if audit['attempted'] else 'skipped'
         if not audit['attempted']:
             audit['reason'] = 'already_attempted'
     collection = result.setdefault('collection', {})
-    collection['title_only'] = sum(e.get('source_grade') == 'title_only' for e in result.get('evidence', []))
-    collection['usable_bodies'] = len(result.get('evidence', [])) - collection['title_only']
+    collection['summary_only'] = sum(grades.summary_only(e.get('source_grade')) for e in result.get('evidence', []))
+    collection['bodies'] = sum(grades.is_body(e.get('source_grade')) for e in result.get('evidence', []))
     if collection.get('errors'):
         collection['status'] = 'partial'
     result['coverage'] = {**collection, 'evidence_count': len(result.get('evidence', []))}

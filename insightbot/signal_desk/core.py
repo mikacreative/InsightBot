@@ -15,6 +15,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from langgraph.checkpoint.sqlite import SqliteSaver
 
+from insightbot.signal_desk import grades
 from insightbot.signal_desk.context import collect_context, load_context_config
 
 
@@ -35,10 +36,12 @@ class DeskState(TypedDict, total=False):
 
 
 def _excerpt_rank(grade: str) -> int:
-    """Prefer retrieved bodies over titles/snippets, without editorial ranking."""
-    if grade in ('title_only', 'search_snippet', 'rss_snippet'):
-        return 0
-    return 2 if grade == 'qiangua_body' else 1
+    """Prefer retrieved bodies over titles/snippets, without editorial ranking.
+
+    Thin alias over grades.rank so stored runs and older imports keep working; the
+    ordering itself now lives in grades.py and is not restated here.
+    """
+    return grades.rank(grade)
 
 
 def normalize(items: list[dict], limit: int) -> list[dict]:
@@ -63,7 +66,7 @@ def normalize(items: list[dict], limit: int) -> list[dict]:
             snapshot = {k: item.get(k) for k in ('provider', 'excerpt', 'source_grade', 'published_at', 'retrieved_at', 'limitation')}
             found[key]['snapshots'].append(snapshot)
             excerpt = str(item.get('excerpt', '')).strip()
-            grade = item.get('source_grade', 'unverified sample')
+            grade = item.get('source_grade', grades.UNVERIFIED)
             current_rank = _excerpt_rank(found[key]['source_grade'])
             candidate_rank = _excerpt_rank(grade)
             if excerpt and (candidate_rank > current_rank or
@@ -80,7 +83,7 @@ def normalize(items: list[dict], limit: int) -> list[dict]:
                       "excerpt": excerpt, "platform": item.get("platform", "web"),
                       "source_id": item.get("source_id", ""), "providers": [item.get("provider", "import")],
                       "published_at": item.get("published_at"), "retrieved_at": item.get("retrieved_at"),
-                      "query": item.get("query", ""), "source_grade": item.get("source_grade", "unverified sample"),
+                      "query": item.get("query", ""), "source_grade": item.get("source_grade", grades.UNVERIFIED),
                       "limitation": item.get("limitation", "Retrieved sample; not representative of a population"),
                       "snapshots": [{k: item.get(k) for k in ("provider", "excerpt", "source_grade", "published_at", "retrieved_at", "limitation")}], "conflicting_snapshots": False}
     return list(found.values())
@@ -106,9 +109,10 @@ Each card:
 - plan_sections: list (0-3) of plan sections this signal would change, named as in brief.plan_impact, e.g. "v7 第04节".
 - quotes: list (0-2) of {"evidence_id", "text"}; text must be an exact substring of that evidence excerpt (code checks it), never paraphrased.
 - recommended_action: one concrete thing the team should do or stop doing.
-- evidence_strength: strong / medium / weak. Evidence whose source_grade is a comment thread, or a conclusion that repeats
-  the query keyword which retrieved most of its supporting evidence (evidence.query), is at most medium; frequency of a
-  searched keyword is never evidence of prevalence.
+- evidence_strength: strong / medium / weak. Evidence graded note_comment, or a conclusion that repeats
+  the query keyword which retrieved most of its supporting evidence (evidence.query), is at most medium. A card whose
+  support is entirely note_meta or note_segment (titles or truncated search summaries) is rejected by the reviewer.
+  Frequency of a searched keyword is never evidence of prevalence.
 - disposition (action/research/observe/drop), observation, interpretation, brand_relevance, limitations, next_step:
   reviewer fields kept for internal audit.
 - figure: null, or {"label", "evidence_ids", "denominator"} for the one number the team should remember. denominator is
@@ -129,8 +133,7 @@ Maximum 3 cards for this alpha; empty is valid. Each textual field at most 120 C
 
 
 def _sample_kind(item):
-    grade = str(item.get('source_grade', '')).rsplit('|', 1)[-1].strip().lower()
-    return 'commercial' if 'commercial' in grade else 'general' if grade == 'general' else 'unclassified'
+    return grades.kind(item.get('source_grade'))
 
 
 def populations(evidence):
@@ -325,7 +328,7 @@ def validate_signal(card, by_id, groups, evidence=()):
             raise ValueError('Quote is not verbatim from its evidence')
     validate_figure(card.get('figure'), groups, evidence)
     supporting = [by_id[i] for i in card['evidence_ids']]
-    comment_only = all('comment' in str(e.get('source_grade', '')).lower() for e in supporting)
+    comment_only = all(grades.is_comment(e.get('source_grade')) for e in supporting)
     if card['evidence_strength'] == 'strong' and (comment_only or _keyword_led(card, supporting)):
         raise ValueError('Comment-only or keyword-led evidence is at most medium strength')
 

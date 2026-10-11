@@ -9,7 +9,10 @@ from insightbot.signal_desk import editorial_v2 as e
 from insightbot.signal_desk.research_v2 import create_plan
 
 
-EVIDENCE = [{'id': 'E1', 'title': '家庭分工', 'url': 'https://example.com/note1', 'excerpt': '我与家人协商了退休之后的照护分工。', 'source_grade': 'qiangua_body'}]
+# note_body is the only grade that can support a deliverable card: a retrieved note body,
+# reachable in production only through JustOneAPI get-note-detail. A 千瓜 fragment or a
+# truncated search summary (note_segment) is summary-only and is rejected by the guard below.
+EVIDENCE = [{'id': 'E1', 'title': '家庭分工', 'url': 'https://example.com/note1', 'excerpt': '我与家人协商了退休之后的照护分工。', 'source_grade': 'note_body'}]
 TEXT = '''CANDIDATE|C01|select|照护分工影响退休安排|E1|-|补充家庭分工的理解
 CARD|C01|signal|退休安排还受照护分工影响|个案中，作者把照护家人的责任纳入退休安排。|讨论退休生活时，可将家庭分工纳入问题清单。|单个自述，不能代表目标人群。|现有问题清单是否覆盖了谁照护谁？|E1|-
 CHECK|C01|yes|yes|yes|yes|yes|yes
@@ -57,7 +60,9 @@ def test_unknown_source_overlap_title_only_and_same_origin_not_trend():
     result['cards'][0]['counter_evidence_ids'] = ['invented']
     assert any('未知' in x for x in e.validate_edition(result, EVIDENCE))
     result = parsed()
-    assert any('仅有标题' in x for x in e.validate_edition(result, [{**EVIDENCE[0], 'source_grade': 'title_only'}]))
+    for summary_grade in ('note_meta', 'note_segment', 'title_only', 'search_snippet'):
+        assert any('仅有标题' in x for x in e.validate_edition(
+            result, [{**EVIDENCE[0], 'source_grade': summary_grade}]))
     result['cards'][0]['claim_type'] = 'trend'
     assert any('时间序列' in x for x in e.validate_edition(result, EVIDENCE))
     result['cards'][0]['time_series'] = {'metric': 'invented'}

@@ -56,10 +56,10 @@ def test_actual_qiangua_normalized_note_shape_and_missing_url():
             'publish_time': '2026-09-01', 'raw': {'NoteId': 'qg123', 'Desc': '用户反馈笔芯型号容易混淆。'}}
     result = r._note(note, {'keyword': '笔芯兼容'})
     assert result['excerpt'] == '用户反馈笔芯型号容易混淆。'
-    assert result['source_grade'] == 'qiangua_body'
+    assert result['source_grade'] == 'note_segment'
     assert r._note({'Title': '没链接'}, {'keyword': 'test'}) is None
     result = r._note({'Title': '标题', 'Url': note['url']}, {'keyword': 'test'})
-    assert result['source_grade'] == 'title_only'
+    assert result['source_grade'] == 'note_meta'
 
 
 class Adapter:
@@ -88,8 +88,8 @@ def test_collection_bounds_body_read_actual_shape_and_cache(tmp_path):
     first = r.collect(p, tmp_path, adapter=adapter)
     assert len(adapter.searches) == 2 and len(adapter.details) == 1
     assert len(first['evidence']) == 2
-    assert first['collection']['usable_bodies'] == 1
-    assert first['collection']['title_only'] == 1
+    assert first['collection']['bodies'] == 0
+    assert first['collection']['summary_only'] == 2
     assert r.collect(p, tmp_path, adapter=adapter) == first
     assert len(adapter.searches) == 2
     with pytest.raises(ValueError, match='不同计划'):

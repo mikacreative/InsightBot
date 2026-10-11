@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from . import grades
 from .research_v2 import (DELIVERY_DEFAULTS, execution_budget, model_calls_used,
                          private_json, validate_enrichment_requests)
 
@@ -28,7 +29,7 @@ EDITOR_PROMPT = '''你是独立的品牌信号主编。任务是精选少量值�
 保留至多三条最有价值且不同义重复的稿件。不按维度凑栏目，不按热度或频次机械排行。
 合格为零时 cards 为空；采集失败与没有新信号须分别说明，不能以零稿掩盖故障。
 selected判断必须通过：来源可核查、主张有依据、任务相关、品牌参考具体、非处方、较历史有增量。
-标题不是正文，title_only材料只能产生 research/observe/drop，不能支持交付判断。
+标题与截断摘要都不是正文，note_meta／note_segment 材料只能产生 research/observe/drop，不能支持交付判断。
 外部背景为搜索摘要或RSS发现，不能引用、不能计数、不能替代正文证据。重复传播只算同一原始来源。
 不把个案包装为人群普遍需求、财富、购买意愿、趋势或因果。trend必须有输入证据内真实可比时间序列。
 同一话题已出现时，只有新的实质理解才再选；用历史反馈修正取舍。不要推断客户同意过任何动作。
@@ -43,8 +44,8 @@ LOOKBACK|历史交付ID|回看短句|新证据ID列表
 SCOPE|实际观察范围和缺口
 每个 CARD 必须对应 select 的 CANDIDATE 和六项全部yes的CHECK。其余候选无需CARD。
 GAP可省略，仅在enrichment_policy.allowed=true时提出。每个待研究候选最多一个GAP，整期最多六个。
-只能补读该候选已关联的title_only千瓜笔记正文，不提出新检索、URL、供应商或新的研究范围。
-缺口和预期影响各不超过240字符；说明为什么正文会改变候选取舍，不为增加材料而补读。
+只能补读该候选已关联的note_meta（仅标题）千瓜笔记，不提出新检索、URL、供应商或新的研究范围。
+缺口和预期影响各不超过240字符；说明为什么补到的文本会改变候选取舍，不为增加材料而补读。
 按缺口对入选或判断边界的重要程度排列GAP，先写最值得在有限额度内补读的来源。
 没有补证额度或补证仍不足时保持research/observe/drop，可以零稿，不能假装缺口已解决。
 LOOKBACK可省略、最多一条，仅用于新证据实质支持、收窄或推翻旧判断，必须有新证据。
@@ -274,7 +275,9 @@ def validate_edition(edition: dict, evidence: list[dict], delivery_profile=None,
         if set(support_ids) & set(counter_ids):
             errors.append(prefix + '支持与反例不能重叠')
         support = [by_id[i] for i in support_ids]
-        if all(str(e.get('source_grade', '')).lower() in ('title_only', 'search_snippet', 'rss_snippet') for e in support):
+        # Predicate-driven, not a literal token list: the previous hardcoded set missed
+        # "'search excerpt'", which is exactly how a truncated summary used to pass here.
+        if all(grades.summary_only(e.get('source_grade')) for e in support):
             errors.append(prefix + '仅有标题或摘要，不能支持完整判断')
         for source in support:
             url = urlsplit(str(source.get('url', '')))

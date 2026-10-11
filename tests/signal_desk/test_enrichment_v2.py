@@ -16,7 +16,7 @@ BRAND = {'id': 'fictional-stationery', 'name': '北辰文具（虚构）'}
 TASK = {'id': 'task1', 'request': '理解替换笔芯的兼容说明为何让用户困惑'}
 EVIDENCE = [{'id': 'E1', 'title': '替换笔芯的兼容问题', 'excerpt': '替换笔芯的兼容问题',
              'url': 'https://www.xiaohongshu.com/explore/n1', 'source_id': 'n1',
-             'providers': ['qiangua'], 'source_grade': 'title_only', 'query': '笔芯兼容',
+             'providers': ['qiangua'], 'source_grade': 'note_meta', 'query': '笔芯兼容',
              'snapshots': [{'provider': 'qiangua', 'excerpt': '替换笔芯的兼容问题'}]}]
 GAP = {'candidate_id': 'C01', 'evidence_ids': ['E1'], 'gap': '未读正文，无法判断兼容困惑来自型号还是规格表达',
        'expected_change': '正文有具体经历才可能作为个案入选，否则保留线索'}
@@ -26,13 +26,26 @@ GAP_TEXT = '\n'.join([
     'SCOPE|本轮限定笔芯相关查询；仅有标题，尚不能形成精选判断。'])
 SELECTED_TEXT = '\n'.join([
     'CANDIDATE|C01|select|兼容表达需要具体到笔杆型号|E1|-|正文提供了具体困惑',
-    'CARD|C01|signal|这个个案的困惑在笔杆适配|作者说明选购替换笔芯时难以确认笔杆型号是否兼容。|为检查现有兼容说明提供一个具体视角。|单一个案，不代表所有购买者。|-|E1|-',
+    'CARD|C01|signal|这个个案的困惑在笔杆适配|作者说明选购替换笔芯时难以确认笔杆型号是否兼容。|为检查现有兼容说明提供一个具体视角。|单一个案，不代表所有购买者。|-|E1,E2|-',
     'CHECK|C01|yes|yes|yes|yes|yes|yes',
     'SCOPE|限定关键词的千瓜内容样本；补读了相关正文，不代表总体。'])
 
 
 def plan(**budget):
     return r.create_plan(BRAND, TASK, {'keyword': '笔芯兼容', 'budget': budget})
+
+
+# 千瓜 detail was measured on 2026-10-11 to return note metadata only (40 fields, no content
+# field at all), so a 千瓜-only run cannot produce a claim-supporting body. A deliverable card
+# therefore also has to cite one note_body item, and only JustOneAPI get-note-detail yields it.
+BODY = {'id': 'E2', 'title': '替换笔芯的兼容问题', 'excerpt': '笔杆型号刻在笔夹内侧，我按型号对照表才确认兼容。',
+        'url': 'https://www.xiaohongshu.com/explore/n2', 'source_id': 'n2', 'providers': ['justoneapi'],
+        'source_grade': 'note_body', 'query': '笔芯兼容',
+        'snapshots': [{'provider': 'justoneapi', 'excerpt': '笔杆型号刻在笔夹内侧，我按型号对照表才确认兼容。'}]}
+
+
+def collected_with_body():
+    return {**collected(), 'evidence': copy.deepcopy(EVIDENCE) + [copy.deepcopy(BODY)]}
 
 
 def collected():
@@ -70,10 +83,10 @@ def test_new_plan_reserves_reads_and_legacy_frozen_plan_keeps_initial_reads(tmp_
     p = plan(body_reads=1)
     assert p['budget']['enrichment_rounds'] == 1
     result = r.collect(p, tmp_path / 'new', adapter=adapter)
-    assert not adapter.details and result['collection']['usable_bodies'] == 0
+    assert not adapter.details and result['collection']['bodies'] == 0
     del p['budget']['enrichment_rounds']
     old = r.collect(p, tmp_path / 'old', adapter=adapter)
-    assert len(adapter.details) == 1 and old['collection']['usable_bodies'] == 1
+    assert len(adapter.details) == 1 and old['collection']['summary_only'] == 1
     assert r.enrich(p, collected(), draft(), tmp_path / 'frozen', adapter=adapter)['enrichment']['reason'] == 'round_limit'
     assert len(adapter.details) == 1
 
@@ -95,7 +108,7 @@ def test_gap_must_link_research_candidate_and_qiangua_title(tmp_path):
         r.enrich(plan(), collected(), initial, tmp_path)
     assert any('未知' in error for error in e.validate_edition(
         {**draft(), 'enrichment_requests': [{**GAP, 'evidence_ids': ['other-brand']}]}, EVIDENCE))
-    for evidence in ([{**EVIDENCE[0], 'providers': ['rss']}], [{**EVIDENCE[0], 'source_grade': 'qiangua_body'}]):
+    for evidence in ([{**EVIDENCE[0], 'providers': ['rss']}], [{**EVIDENCE[0], 'source_grade': 'note_segment'}]):
         with pytest.raises(ValueError, match='千瓜'):
             r.validate_enrichment_requests([GAP], evidence, draft()['candidates'])
     with pytest.raises(ValueError, match='唯一'):
@@ -110,10 +123,10 @@ def test_enrichment_retains_ids_snapshots_and_cache_binding(tmp_path):
     assert original == before
     source = result['evidence'][0]
     assert source['id'] == 'E1' and source['source_id'] == 'n1'
-    assert source['source_grade'] == 'qiangua_body' and len(source['snapshots']) == 2
+    assert source['source_grade'] == 'note_segment' and len(source['snapshots']) == 2
     assert source['snapshots'][0]['excerpt'] == EVIDENCE[0]['excerpt']
     assert result['enrichment']['attempted'] == 1
-    assert result['enrichment']['outcomes'][0]['status'] == 'body_added'
+    assert result['enrichment']['outcomes'][0]['status'] == 'text_added'
     assert r.enrich(plan(), original, draft(), tmp_path, adapter=adapter) == result
     assert len(adapter.details) == 1
     changed = draft()
@@ -126,8 +139,8 @@ def test_normalized_blank_url_is_filled_only_after_raw_identity_check(tmp_path):
     adapter = Adapter(response={'normalized_note': {'url': '', 'raw': {'NoteId': 'n1', 'Content': '真实返回的正文格式，虚构文本。'}}})
     result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=adapter)
     assert result['evidence'][0]['id'] == 'E1'
-    assert result['evidence'][0]['source_grade'] == 'qiangua_body'
-    assert result['enrichment']['outcomes'][0]['status'] == 'body_added'
+    assert result['evidence'][0]['source_grade'] == 'note_segment'
+    assert result['enrichment']['outcomes'][0]['status'] == 'text_added'
 
 
 @pytest.mark.parametrize('budget,reason', [
@@ -151,12 +164,12 @@ def test_body_allowance_is_shared_and_same_source_is_read_once(tmp_path):
     assert len(adapter.details) == 1
     assert len([r for r in result['ledger'] if r['operation'] == 'note.search_by_url']) == 2
     assert [s['id'] for s in result['evidence']] == ['E1', 'E2']
-    assert all(s['source_grade'] == 'qiangua_body' for s in result['evidence'])
+    assert all(s['source_grade'] == 'note_segment' for s in result['evidence'])
     assert result['enrichment']['outcomes'][0]['candidate_ids'] == ['C01', 'C02']
 
 
 @pytest.mark.parametrize('response,status', [
-    ({'normalized_note': {'title': '仍只有标题'}}, 'no_body'),
+    ({'normalized_note': {'title': '仍只有标题'}}, 'no_text'),
     ({'normalized_note': {'url': 'https://www.xiaohongshu.com/explore/another', 'raw': {'Content': '别的正文'}}}, 'failed'),
     ({'normalized_note': {'url': EVIDENCE[0]['url'], 'raw': {'Url': 'https://www.xiaohongshu.com/explore/another', 'Content': '别的正文'}}}, 'failed'),
     ({'normalized_note': {'raw': {'NoteId': 'another', 'Content': '别的正文'}}}, 'failed'),
@@ -164,7 +177,7 @@ def test_body_allowance_is_shared_and_same_source_is_read_once(tmp_path):
 def test_incomplete_or_mismatched_body_never_upgrades_evidence(tmp_path, response, status):
     adapter = Adapter(response=response)
     result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=adapter)
-    assert result['evidence'][0]['source_grade'] == 'title_only'
+    assert result['evidence'][0]['source_grade'] == 'note_meta'
     assert result['enrichment']['outcomes'][0]['status'] == status
     assert result['enrichment']['status'] == 'partial'
 
@@ -219,7 +232,7 @@ def test_private_records_publish_atomically_and_interrupted_write_preserves_old_
 
 
 def test_all_execution_edits_share_model_allowance_and_do_not_repeat_gap(tmp_path):
-    p, source = plan(model_calls=3), collected()
+    p, source = plan(model_calls=3), collected_with_body()
     calls = []
     def editor(prompt, payload):
         calls.append(payload)
@@ -273,14 +286,14 @@ def test_graph_gap_to_selection_review_export_and_restart(tmp_path, monkeypatch)
     p = ws.create_plan({'brand_id': brand['id'], 'request': TASK['request'], 'keyword': '笔芯兼容'}, admin)
     ws.confirm({'brand_id': brand['id'], 'plan_id': p['id'], 'checksum': p['checksum']}, admin)
     job = ws.execute({'brand_id': brand['id'], 'plan_id': p['id']}, admin)
-    monkeypatch.setattr(r, 'collect', lambda *args: collected())
+    monkeypatch.setattr(r, 'collect', lambda *args: collected_with_body())
     adapter = Adapter()
     monkeypatch.setattr(r, 'QianguaAdapter', lambda: adapter)
     stages = []
     def model(prompt, payload, run_dir, stage, **kwargs):
         stages.append(stage)
         if stage == 'reedit':
-            assert payload['evidence'][0]['source_grade'] == 'qiangua_body'
+            assert payload['evidence'][0]['source_grade'] == 'note_segment'
             assert payload['previous_draft']['candidates'][0]['disposition'] == 'research'
             assert payload['enrichment_policy']['allowed'] is False
         return (GAP_TEXT if stage == 'editor' else SELECTED_TEXT), {'stage': stage, 'calls': 1}
@@ -321,7 +334,7 @@ def test_graph_unresolved_gap_keeps_zero_cards_and_discloses_fetch_failure(tmp_p
         if stage == 'editor':
             raw = GAP_TEXT
         else:
-            assert payload['evidence'][0]['source_grade'] == 'title_only'
+            assert payload['evidence'][0]['source_grade'] == 'note_meta'
             assert bool(payload['collection']['errors']) is failure
             raw = GAP_TEXT.split('\nGAP|')[0] + '\nSCOPE|' + (
                 '正文补读失败，缺口仍未解决，未形成精选判断。' if failure else '接口未提供正文，缺口仍未解决，未形成精选判断。')
@@ -330,5 +343,5 @@ def test_graph_unresolved_gap_keeps_zero_cards_and_discloses_fetch_failure(tmp_p
     assert ws.process_job(brand['id'], job['id'])['status'] == 'awaiting_review'
     state = ws.job(brand['id'], job['id'], admin)
     assert state['delivery']['cards'] == [] and state['delivery']['candidates'][0]['disposition'] == 'research'
-    assert state['enrichment']['outcomes'][0]['status'] == ('failed' if failure else 'no_body')
+    assert state['enrichment']['outcomes'][0]['status'] == ('failed' if failure else 'no_text')
     assert len(adapter.details) == 1 and calls == ['editor', 'reedit']

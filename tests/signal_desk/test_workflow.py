@@ -45,25 +45,47 @@ def test_cross_vendor_dedupe_preserves_enrichment():
 @pytest.mark.parametrize('title_excerpt', ['仅有标题', '仅有标题，不能作为正文证据。' * 20],
                          ids=['short-title', 'long-title'])
 def test_duplicate_body_replaces_title_grade_and_matching_excerpt(title_first, title_excerpt):
-    title = {**EVIDENCE[0], 'excerpt': title_excerpt, 'source_grade': 'title_only',
+    title = {**EVIDENCE[0], 'excerpt': title_excerpt, 'source_grade': 'note_meta',
              'limitation': 'Only the title was retrieved'}
     body = {**EVIDENCE[0], 'provider': 'qiangua', 'excerpt': '虚构使用个案：这支笔在通勤时容易携带。',
-            'source_grade': 'qiangua_body', 'limitation': 'One fictional body sample'}
+            'source_grade': 'note_segment', 'limitation': 'One fictional text sample'}
     items = [title, body] if title_first else [body, title]
     merged = normalize(items, 50)[0]
     assert merged['id'] == normalize([title], 50)[0]['id']
-    assert merged['source_grade'] == 'qiangua_body'
+    assert merged['source_grade'] == 'note_segment'
     assert merged['excerpt'] == body['excerpt']
     assert merged['limitation'] == body['limitation']
     assert len(merged['snapshots']) == 2
 
 
-def test_empty_duplicate_does_not_upgrade_title_to_body():
-    title = {**EVIDENCE[0], 'source_grade': 'title_only', 'limitation': 'Only a fictional title'}
-    empty = {**title, 'provider': 'qiangua', 'source_grade': 'qiangua_body', 'excerpt': '  ',
-             'limitation': 'No usable body returned'}
+def test_legacy_grade_tokens_still_resolve():
+    """Stored runs written before the 2026-10-11 vocabulary change must keep their meaning."""
+    from insightbot.signal_desk import grades
+    assert grades.level('title_only') == 'note_meta'
+    assert grades.level('search_snippet') == 'note_segment'
+    assert grades.level('search excerpt') == 'note_segment'
+    assert grades.level('qiangua_body') == 'note_segment'
+    assert grades.level('full_text') == 'note_body'
+    assert grades.level('rss_snippet') == grades.EXTERNAL_CONTEXT
+    assert grades.kind('qiangua comment thread | general') == 'general'
+
+
+def test_unknown_grade_fails_closed():
+    """An unrecognised token must never rank above a title or escape the summary guard."""
+    from insightbot.signal_desk import grades
+    for token in ('search excerpt v9', 'note_body_v2', '', None, 'totally new vendor grade'):
+        assert grades.level(token) == grades.UNVERIFIED
+        assert grades.rank(token) == 0
+        assert grades.summary_only(token) is True
+        assert grades.is_body(token) is False
+
+
+def test_empty_duplicate_does_not_upgrade_meta_to_segment():
+    title = {**EVIDENCE[0], 'source_grade': 'note_meta', 'limitation': 'Only a fictional title'}
+    empty = {**title, 'provider': 'qiangua', 'source_grade': 'note_segment', 'excerpt': '  ',
+             'limitation': 'No usable text returned'}
     merged = normalize([title, empty], 50)[0]
-    assert merged['source_grade'] == 'title_only'
+    assert merged['source_grade'] == 'note_meta'
     assert merged['excerpt'] == title['excerpt']
     assert merged['limitation'] == title['limitation']
 
@@ -142,10 +164,26 @@ def test_justone_business_failure_is_not_empty(monkeypatch):
 
 def test_verified_search_normalization():
     from insightbot.signal_desk.providers import search_to_input
-    result = search_to_input({'query':'test','raw':{'data':{'items':[{'model_type':'note','note':{'id':'abc','title':'Title','desc':'Excerpt','timestamp':1770000000}}]}}}, 'Brand', 'Question')
-    assert result['evidence'][0]['source_id'] == 'abc'
-    assert result['evidence'][0]['published_at']
+    result = search_to_input({'query':'test','raw':{'code':0,'data':{'notes':[
+        {'id':'abc','title':'Title','desc':'Excerpt','timestamp':1770000000}],'has_more':False,'total':1}}}, 'Brand', 'Question')
+    evidence = result['evidence'][0]
+    assert evidence['source_id'] == 'abc'
+    assert evidence['published_at']
     assert result['brief']['brand'] == 'Brand'
+
+
+def test_search_summary_is_graded_as_segment_not_body():
+    """A truncated search desc must be summary-only, so the editorial guard rejects it as sole support."""
+    from insightbot.signal_desk.providers import search_to_input
+    from insightbot.signal_desk import grades
+    result = search_to_input({'query':'test','raw':{'code':0,'data':{'notes':[
+        {'id':'abc','desc':'Excerpt','timestamp':1770000000}],'has_more':False,'total':1}}}, 'Brand', 'Question')
+    evidence = result['evidence'][0]
+    assert evidence['source_grade'] == 'note_segment'
+    assert evidence['body_verified'] is False
+    assert grades.summary_only(evidence['source_grade']) is True
+    assert grades.is_body(evidence['source_grade']) is False
+    assert grades.rank(evidence['source_grade']) < grades.rank('note_body')
 
 
 def test_changed_schema_fails_not_zero():
