@@ -27,7 +27,7 @@ from langgraph.types import Command, interrupt
 
 
 from .research_v2 import DELIVERY_DEFAULTS
-from . import grades, scheduling_v2
+from . import scheduling_v2
 
 DEFAULT_DELIVERY = copy.deepcopy(DELIVERY_DEFAULTS)
 ROLES = {'admin', 'researcher', 'reviewer'}
@@ -92,34 +92,6 @@ class ResearchState(TypedDict, total=False):
 
 class ScheduledPauseError(RuntimeError):
     """Code-owned explanation; never interpolate a provider exception."""
-
-
-# 结构性零稿的终态名与暂停说明（PREFLIGHT-DESIGN-v0.1 §7.3-④，已冻结，不得改写）。
-# 这句话只在 _finish_scheduled_job 用：必须自称"零产出"，不能复用"调用未完成"那句泛泛的失败文案，
-# 否则人工核对时看不出这一轮到底发生了什么。
-EMPTY_DELIVERY = 'empty_delivery'
-EMPTY_DELIVERY_REASON = '本轮未取得任何非摘要证据，产出为零；已暂停自动执行待人工核对。'
-
-
-def structural_empty_delivery(delivery, collected):
-    """结构性零稿判别式（PREFLIGHT-DESIGN-v0.1 §7.3-④，已冻结）：
-
-        ``cards == []`` 且 非摘要证据数 == 0
-        非摘要证据数 = ``sum(not grades.summary_only(e['source_grade']) for e in collected['evidence'])``
-
-    返回 True 表示本轮零卡片、且没有任何一条非摘要证据 —— 编辑守卫无论如何都会拒绝全部卡片，
-    这是"结构上不可能产出"的静默失败，必须 fail-closed（独立终态 + 暂停调度 + 升级记录）。
-
-    "合法零稿"（拿到了非摘要证据、只是卡片全不合格）不满足此式：零条本身合法（PDD §7.2），
-    仍走原有的 awaiting_review／needs_revision 路径，不暂停调度。
-
-    未知等级由 grades 按 fail-closed 约定解析为最弱（summary_only=True），因此不会被误计成
-    非摘要证据 —— 方向与设计稿一致：宁可多报零稿，也不虚报证据强度。
-    """
-    if (delivery or {}).get('cards') != []:
-        return False
-    evidence = (collected or {}).get('evidence') or []
-    return sum(not grades.summary_only(item.get('source_grade')) for item in evidence) == 0
 
 
 class WorkspaceV2:
@@ -893,6 +865,14 @@ class WorkspaceV2:
     def _finish_scheduled_job(self, brand_id, job, collected=None):
         if not job.get('schedule_id'):
             return
+        run = self._optional(brand_id, 'schedule_runs', job['id'])
+        if run:
+            run.update(status=job['status'], updated_at=now())
+            self._save(brand_id, 'schedule_runs', run)
+        schedule = self._optional(brand_id, 'schedules', job['schedule_id'])
+        # A previous run may finish after the user confirms a different schedule.
+        if not schedule or schedule.get('confirmation_id') != job.get('schedule_confirmation_id'):
+            return
         uncertain = False
         if collected:
             records = collected.get('ledger', []) + collected.get('enrichment', {}).get('outcomes', [])
@@ -901,33 +881,8 @@ class WorkspaceV2:
                          any(record.get('status') in ('started', 'failed', 'unknown') or
                              isinstance(record.get('errors'), int) and record['errors'] > 0
                              for record in records))
-        # 结构性零稿的升级记录。判据不重新算判别式，只读 job['status']（由 validate 节点写入）——
-        # 同一个事实只有一个读法，暂停判据与升级判据因此必然一致，不会出现"暂停了但没记录"或反之。
-        escalation = None
-        if job['status'] == EMPTY_DELIVERY:
-            evidence = (collected or {}).get('evidence') or []
-            escalation = {'kind': EMPTY_DELIVERY, 'reason': EMPTY_DELIVERY_REASON,
-                          # 可审计三问：哪一轮（job_id／scheduled_for）、为什么（无非摘要证据）、
-                          # 什么时候（raised_at）。带上证据计数，便于日后与批准时的 preflight 对照。
-                          'job_id': job['id'], 'task_id': job.get('task_id'),
-                          'scheduled_for': job.get('scheduled_for'), 'raised_at': now(),
-                          'cards': 0, 'summary_only_evidence': len(evidence),
-                          'non_summary_evidence': 0}
-        run = self._optional(brand_id, 'schedule_runs', job['id'])
-        if run:
-            run.update(status=job['status'], updated_at=now())
-            if escalation:
-                # 升级记录先于任何外部动作落盘：无人值守时本地记录是唯一的送达底线（§5.4-3）。
-                run['escalation'] = escalation
-            self._save(brand_id, 'schedule_runs', run)
-        schedule = self._optional(brand_id, 'schedules', job['schedule_id'])
-        # A previous run may finish after the user confirms a different schedule.
-        if not schedule or schedule.get('confirmation_id') != job.get('schedule_confirmation_id'):
-            return
-        if job['status'] in ('failed', 'interrupted', 'needs_revision', EMPTY_DELIVERY) or uncertain:
-            # 结构性零稿用自己那句"产出为零"的说明；其余失败沿用既有文案，不混用。
-            reason = (escalation['reason'] if escalation else
-                      job.get('error') or '本轮有未完成调用或未通过稿件校验；请核对后重新确认自动执行。')
+        if job['status'] in ('failed', 'interrupted', 'needs_revision') or uncertain:
+            reason = (job.get('error') or '本轮有未完成调用或未通过稿件校验；请核对后重新确认自动执行。')
             self._pause_schedule(brand_id, schedule['id'], reason)
 
     def _graph(self, brand_id):
@@ -1009,15 +964,6 @@ class WorkspaceV2:
                 state['delivery'], state['collected'].get('evidence', []),
                 state['plan']['delivery_profile'],
                 self._previous(brand_id, state['plan'].get('issue_id')))
-            # 结构性零稿在这里分类，也只在这里分类。选这里而不是 _finish_scheduled_job 的理由：
-            # 本节点是全图唯一同时握有交付（delivery['cards']）与证据（collected['evidence']）的地方，
-            # 终态又由它唯一决定 —— 判别式放这儿只需一次判断；挪到 _finish_scheduled_job 则要把
-            # delivery 再穿透一层传参，还会在两处重复同一条判别式。终态随 job 持久化后，
-            # _finish_scheduled_job 照旧只读 job['status']，签名无需改动。
-            # 判别式先于 errors 分支：它是"零卡片交付"的分类，与 errors 描述的包装缺陷是两件事；
-            # 而结构性零稿在真实管线下必然 errors 为空（editorial_v2 的空交付若校验失败会直接 raise）。
-            if structural_empty_delivery(state['delivery'], state['collected']):
-                return {'errors': errors, 'status': EMPTY_DELIVERY}
             return {'errors': errors, 'status': 'needs_revision' if errors else 'awaiting_review'}
 
         def human(state):

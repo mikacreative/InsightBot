@@ -41,7 +41,6 @@ import subprocess
 import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
@@ -330,157 +329,6 @@ def mode_limitations(mode: str, task: str) -> list[str]:
         lines.append(f'本轮为{definition["name"]}模式，未覆盖该任务所需的主证据层'
                      f'{"／".join(shortfall)}；判断强度低于方法要求。')
     return lines
-
-
-# --- 执行前契约体检（docs/signal-desk/PREFLIGHT-DESIGN-v0.1.md §7.3） ---------------------
-#
-# 命名由 §7.3 冻结，UI 与定时关口的硬拒判据直接读这些键，实现时不得再改。
-PREFLIGHT_VERSION = 'preflight-0.1'
-CONTRACT_VERSION = 'contract-0.1'
-# 派生、只读的 plan 键。它们**不参与** collect() 的 plan_hash：plan 的身份是"它要做什么"，
-# 不是"批准它的那一刻环境里有什么"。若把 preflight（含信封余量）算进哈希，同一次批准的
-# collection 缓存会在余额变动后失效，缓存键就绑到了一个与决策无关的量上。
-DERIVED_PLAN_KEYS = ('contract', 'preflight')
-
-
-def _approved_envelope(scope):
-    """批准那一刻读到的信封，或 ``None``。
-
-    没有 scope 就不去读环境变量：Envelope 要求 scope 非空，一个没有品牌归属的上限
-    不是上限——同一台机器上两个品牌共用一个额度，谁都说不清自己花了多少。
-    """
-    return costcontrol.envelope_from_env(scope) if scope else None
-
-
-def _envelope_snapshot(envelope):
-    """把信封冻进计划的那一份（裁定 3）：之后执行读它，不再现读环境变量。"""
-    if envelope is None:
-        return None
-    return {'scope': envelope.scope, 'period': envelope.period,
-            'limit_cny': str(envelope.limit_cny), 'source': 'env'}
-
-
-def _envelope_from_snapshot(contract):
-    """由批准时的快照重建门禁用的 Envelope；快照缺失或为空都回 ``None``。
-
-    ``None`` 的两种来源含义不同，由调用方区分：老计划没有 ``contract`` 键（从未快照过，
-    可以回退现读 env），与批准时就没有信封（当时就没有付费许可，不该因为后来有人设了
-    环境变量而开始花钱）。
-    """
-    snapshot = contract.get('envelope') if isinstance(contract, dict) else None
-    if not snapshot:
-        return None
-    return costcontrol.Envelope(str(snapshot.get('scope') or ''), str(snapshot.get('period') or ''),
-                                Decimal(str(snapshot.get('limit_cny'))))
-
-
-def _contract(plan, envelope):
-    """契约快照（§2.2／§7.3-②）：**引用**上面的 plan 键，只有 envelope 是那一刻新读的。
-
-    不复制出第二份真值——"契约里的 mode"和"真实的 mode"两个值正是本项目一直在避免的
-    那类分叉。唯一必须复制的只有信封，因为它来自环境变量，而环境变量在批准之后会变，
-    承诺不该跟着变。
-    """
-    return {'version': CONTRACT_VERSION,
-            'envelope': _envelope_snapshot(envelope),
-            'mode': plan['mode'], 'mode_layers': plan['mode_layers'],
-            'structure_intent': plan['structure'], 'allowances': plan['budget'],
-            'delivery_profile': plan['delivery_profile'],
-            'source_guards': {'qiangua_mandatory': True,
-                              'evidence_floor': '非摘要证据 ≥ 1 条 / 卡片'}}
-
-
-def _structure_reads(plan):
-    """``plan['structure']`` 里管线确实有读取器的项。
-
-    plan 已按 mode 的额度截断过，这里只再筛一层"层有没有读取器"：清单是声明，能不能读
-    才是事实，两者现在都由同一份表回答。
-    """
-    return [name for name in (plan.get('structure') or [])
-            if name in STRUCTURE_READS and IMPLEMENTED_LAYERS.get(STRUCTURE_READS[name]['layer'])]
-
-
-def preflight(plan: dict) -> dict:
-    """批准关口能确定的东西：花费上界、两类层缺口、非摘要证据可达上界 H 与零稿风险。
-
-    派生、只读、**不阻断**：本函数绝不写 ``planning_errors``，也不参与 ``plan['ready']``
-    ——它只说风险，不做准入（设计稿 §6①-2：批准关口默认只警告）。
-
-    H 是"**能拿到**"多少非摘要证据的**上界**，不是"实际拿到"多少：每次付费读取都可能
-    返回无文本、每次结构层读取都可能返回空数据点，H 把这些不会兑现的能力也计入了。因此
-    该代理指标**系统性低估**零稿风险（§4.4）。据此只在 ``H == 0`` 断言"不会产出卡片"，
-    ``H > 0`` 只报风险未知，**不给概率**（没有真实比率前任何概率都是编的）。
-    """
-    mode = plan.get('mode') if plan.get('mode') in MODES else DEFAULT_MODE
-    task = plan.get('task_type') if plan.get('task_type') in METHODS else ''
-    budget = plan.get('budget') or mode_budget(mode)
-    ceiling = costcontrol.quote_recipe(mode)
-    envelope = _approved_envelope(str(plan.get('brand_id') or '').strip())
-    remaining = None
-    if envelope is not None:
-        # 余量按**整个信封**读，不按 mode 过滤：问的是"这一期还剩多少空间"，不是
-        # "这个模式花了多少"（§5.1 的两个口径不可互替）。
-        remaining = Decimal(costcontrol.report(envelope.scope, envelope.period, envelope.limit_cny,
-                                               ledger=costcontrol.ledger_from_env())['remaining_cny'])
-    paid_path = envelope is not None and (remaining is None or remaining > 0)
-    reads = _structure_reads(plan)
-    # §7.3 的 H：付费通路可用才算配额，免费结构层按已实现个数计，不乘任何未实测的系数。
-    capacity = ((budget.get('body_reads', 0) if paid_path else 0)
-                + (budget.get('comment_reads', 0) if paid_path else 0) + len(reads))
-    overrun = None if remaining is None else ceiling - remaining
-    unreadable = missing_primary_layers(task) if task else []
-    shortfall = mode_shortfall(mode, task) if task else []
-
-    notes = [f'预计花费上界 ¥{ceiling.normalize()}（{MODES[mode]["name"]}模式一轮配方，仅计变动费用）。']
-    if envelope is None:
-        notes.append(f'未声明花费额度（{costcontrol.SPEND_LIMIT_ENV}）：付费正文与评论通路不可用，'
-                     '正文只能读免费片段。')
-    elif remaining <= 0:
-        notes.append(f'信封余量 ¥{remaining.normalize()} 已用尽：付费正文与评论通路不可用，'
-                     '正文只能读免费片段。')
-    if overrun is not None and overrun > 0:
-        notes.append(f'本轮配方上界超出信封余量 ¥{overrun.normalize()}：可能中途被费控关口拦下。')
-    if unreadable:
-        # 与下面一条措辞必须分开：这个靠上读取器解决，那个靠换模式解决（§3.1-P3）。
-        notes.append(f'本轮未接入 {"／".join(unreadable)} 证据层：管线尚无读取器，'
-                     '该任务的判断强度低于方法要求。')
-    if shortfall:
-        notes.append(f'{MODES[mode]["name"]}模式未覆盖该任务所需的主证据层 {"／".join(shortfall)}：'
-                     '换更大的模式可以补上，不是管线缺失。')
-    if reads:
-        notes.append('本模式可读结构层：'
-                     + '／'.join(STRUCTURE_READS[name]['label'] for name in reads)
-                     + '（固定成本席位，不花变动费用）。')
-    else:
-        notes.append('本模式没有可用的结构层读取，非摘要证据只能来自付费正文或评论。')
-    if capacity == 0:
-        notes.append('本轮可获得的非摘要证据为 0：编辑守卫将拒绝全部卡片，确定本轮不会产出卡片。')
-    elif unreadable or shortfall:
-        notes.append(f'非摘要证据可达上界 {capacity} 条，但本轮证据强度低于方法要求：'
-                     '零稿风险未知（偏高），不做产出承诺。')
-    else:
-        notes.append(f'非摘要证据可达上界 {capacity} 条；能否真正取到取决于上游返回与编辑质量检查，'
-                     '零稿风险未知，不做产出承诺。')
-
-    return {'version': PREFLIGHT_VERSION, 'spend_ceiling_cny': str(ceiling),
-            'envelope_present': envelope is not None,
-            'envelope_remaining_cny': None if remaining is None else str(remaining),
-            'spend_overrun_cny': str(overrun) if overrun is not None and overrun > 0 else None,
-            'unreadable_primary_layers': unreadable, 'mode_shortfall': shortfall,
-            'structure_reads': reads, 'non_summary_capacity': capacity,
-            'zero_risk': 'high' if capacity == 0 else 'unknown', 'notes': notes}
-
-
-def _plan_hash(plan: dict) -> str:
-    """计划的身份，用于绑定采集缓存；两个派生键被排除在外（§7.3-③）。
-
-    ``contract`` 与 ``preflight`` 都能从上面的键复算出来，其中 ``preflight`` 还带一次环境
-    读取（信封余量）。把它们算进哈希，等于把采集缓存绑到"批准那一刻"而不是绑到决策本身：
-    同一份计划会因为别人花了一笔钱而失效。``contract.envelope`` 是给审计看的快照，不是执行
-    的输入，所以按同一个理由排除。
-    """
-    frozen = {key: value for key, value in plan.items() if key not in DERIVED_PLAN_KEYS}
-    return hashlib.sha256(json.dumps(frozen, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def _conversation(value):
@@ -970,7 +818,7 @@ def create_plan(brand: dict, task: dict, user_inputs: dict | None = None, *, pla
     source_config = {'qiangua': True, 'web': bool(sources.get('web', sources.get('search', False))), 'rss': bool(sources.get('rss', False))}
     missing_layers = missing_primary_layers(task_type)
     mode_lines = mode_limitations(research_mode, task_type)
-    plan = {'method_version': METHOD_VERSION, 'ready': not questions and not planning_errors,
+    return {'method_version': METHOD_VERSION, 'ready': not questions and not planning_errors,
             'questions': questions, 'required_questions': required[:3], 'deferred_questions': deferred,
             'planner_questions': ai_questions, 'planner_required_questions': ai_required,
             'planning_errors': planning_errors, 'needs_revision': bool(planning_errors),
@@ -1004,13 +852,6 @@ def create_plan(brand: dict, task: dict, user_inputs: dict | None = None, *, pla
                               if missing_layers else [])
                            + mode_lines,
             'manual_work': '核对来源与观点边界，选择或修订精选判断，批准具体交付版本。'}
-    # 末尾挂上的两个派生量：只读、可复算、**不参与 ready**。contract 把四要素显式聚合，
-    # 其中 envelope 是批准这一刻读到的环境变量（裁定 3：批准即承诺，之后可审计）；preflight
-    # 是体检结论（预测，不是准入）。两者都被排除在 collect() 的 plan_hash 之外，理由见
-    # DERIVED_PLAN_KEYS —— 派生量不该让旧 collection 缓存失效。
-    plan['contract'] = _contract(plan, _approved_envelope(str(plan.get('brand_id') or '').strip()))
-    plan['preflight'] = preflight(plan)
-    return plan
 
 
 class SourceError(RuntimeError):
@@ -1126,7 +967,7 @@ def collect(plan: dict, run_dir, *, adapter=None, context_config=None) -> dict:
     directory = Path(run_dir)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache = directory / 'collection-v2.json'
-    plan_hash = _plan_hash(plan)
+    plan_hash = hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if cache.is_file():
         result = json.loads(cache.read_text(encoding='utf-8'))
         if result.get('plan_hash') != plan_hash:
@@ -1511,19 +1352,16 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
 
     ``envelope`` is the spend ceiling every paid body read draws on, and ``spend_ledger``
     overrides where those reservations are recorded — named apart from this module's own
-    source ledger, which is a different record of a different thing. When no envelope is
-    passed, the plan's own approved snapshot (``plan['contract']['envelope']``) is used, so
-    the ceiling this run obeys is the one that was read when the plan was approved rather
-    than whatever the environment says now; a plan with no snapshot (approved before that
-    existed) falls back to the environment. With no envelope either way the round falls
-    back to the free reader rather than spending unbounded.
+    source ledger, which is a different record of a different thing. Both default to the
+    environment (see :func:`costcontrol.envelope_from_env`); with neither declared the
+    round falls back to the free reader rather than spending unbounded.
     """
     requests = draft.get('enrichment_requests', [])
     validate_enrichment_requests(requests, collected.get('evidence', []), draft.get('candidates', []))
     budget = execution_budget(plan)
     directory = Path(run_dir)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    plan_hash = _plan_hash(plan)
+    plan_hash = hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if collected.get('plan_hash') and collected['plan_hash'] != plan_hash:
         raise ValueError('补证记录绑定不同计划')
     input_hash = hashlib.sha256(json.dumps({'plan': plan_hash, 'collected': collected,
@@ -1557,19 +1395,10 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
     else:
         adapter = adapter or QianguaAdapter()
         body_adapter = body_adapter if body_adapter is not None else providers.JustOneApiAdapter()
-        if envelope is None:
-            if 'contract' in plan:
-                # 批准即承诺（裁定 3）：有契约快照就从**快照**构造门禁的 Envelope，不再现读
-                # 环境变量——否则批准之后有人改了 SIGNAL_DESK_SPEND_LIMIT_CNY，这一轮的花费
-                # 范围会被静默改写，批准时看到的数和执行时用的数就不是同一个了。
-                # 快照为 None 表示批准时**就没有**信封，处置与"从未声明信封"完全一致：
-                # 走免费片段读取器、不调用付费读取器、写 limitation，不报错。
-                envelope = _envelope_from_snapshot(plan.get('contract'))
-            elif str(plan.get('brand_id') or '').strip():
-                # 老计划没有 contract 键（快照功能上线之前批准的），回退到现读 env，保证不崩。
-                # The envelope is the brand's, not the run's: two runs for one brand in one
-                # period must share one ceiling, or the ceiling is per-run and means nothing.
-                envelope = costcontrol.envelope_from_env(plan['brand_id'])
+        if envelope is None and str(plan.get('brand_id') or '').strip():
+            # The envelope is the brand's, not the run's: two runs for one brand in one
+            # period must share one ceiling, or the ceiling is per-run and means nothing.
+            envelope = costcontrol.envelope_from_env(plan['brand_id'])
         spend_path = Path(spend_ledger) if spend_ledger is not None else costcontrol.ledger_from_env()
         body_reader, reader_name, declined = _body_reader(body_adapter, adapter, envelope)
         if declined == 'no_envelope':

@@ -319,9 +319,7 @@ def test_real_editor_empty_collection_is_zero_not_failure(tmp_path, monkeypatch)
     monkeypatch.setattr(research_v2, 'collect', lambda *a, **k: {
         'evidence': [], 'collection': {'status': 'empty'}, 'external_context': [], 'ledger': []})
     j = enqueue(ws, a['id'])
-    # 零卡片且没有非摘要证据 = 结构性零稿，标独立终态 empty_delivery（仍不是 failed）。
-    # 这是手动运行：没有定时计划可暂停，但终态如实反映"本轮结构上不可能产出"。
-    assert ws.process_job(a['id'], j['id'])['status'] == 'empty_delivery'
+    assert ws.process_job(a['id'], j['id'])['status'] == 'awaiting_review'
     state = ws.job(a['id'], j['id'], ALICE)
     assert state['delivery']['cards'] == [] and state['delivery']['model_usage'] == []
     assert '未取得可引用材料' in state['delivery']['scope']
