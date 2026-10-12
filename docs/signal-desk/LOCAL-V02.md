@@ -518,3 +518,27 @@ env -u PYTHONPATH .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p
 ```
 
 **教训**：环境基线（"402+1 既有失败"）本身可能是被污染的——**当"既有失败"与某个注入层共存时，先怀疑注入层，再怀疑代码**。排除法顺序应当是：先摘注入（`env -u PYTHONPATH`），再谈顺序依赖。
+
+---
+
+## 2026-10-12 下午：评论通路接通（L1 评论层补全）
+
+**范围**：`get-note-comment/v2` 形状实测 → 读取器接入 `enrich` → 逐页过费控门禁 → `note_comment` 级证据入册。
+
+**形状实测（1 次真实调用，¥0.15，`code=0`）**：`data` 是 **dict**——`comments[]`（10 条/页）＋ `comment_count`／`comment_count_l1` ＋ `has_more` ＋ **JSON 字符串游标**。这是**第三个形状**（search=`data.notes[]`、detail=`data[0].note_list[0]`），解析器照例 fail-closed。楼中楼**内嵌在父评论的 `sub_comments[]`** 里，不需要二次调用（`get_note_sub_comment_v2` 只用于更深层）。样本：`docs/signal-desk/evidence/justone-comment-sample-20261012.json`。
+
+**本次探针的账目方式升级**：MCP 直调首次**走了账本**——`costcontrol.authorize(channel='mcp')` 预留 → 调用 → `settle(code=0)`。"门禁保护管线不保护账户"的遗留缺口，从"人工约定"变成了一次真实动作。
+
+**接线设计（三件事）**：
+
+| 决定 | 内容 |
+| --- | --- |
+| **跟随终选目标** | 评论只在付费正文读取的同一目标上读（"终选后按需取"的同一纪律），不另立请求协议 |
+| **独立预算项** | `comment_reads` 默认 **0**、上限 6，显式开启（§3.3／§3.4 任务）——默认开启会改变每一轮行为，所以它是明写的预算项，不是暗开的开关；模式配方**不含**评论（默认行为不变，probe≡BUDGET_DEFAULTS 不变量保持） |
+| **逐页独立记账** | 每页独立 `require({COMMENT_V2:1})` → `settle(code)`、独立缓存（`enrich-comment-justoneapi-<hash(note_id)>`）；**评论失败不连坐正文**（两者回答不同缺口） |
+
+**证据形态**：一页评论 = **一条** `note_comment` 级证据（线程为单元，含楼中楼缩进行，截断 20 条／8000 字符）；`source_id` = 笔记 id，解析器校验回读的 `note_id` 与请求一致，否则拒收；空评论页返回 None（空评论区不是评论线程）。limitation 固定声明"最新一页、个体声音、不构成代表性人群样本"。
+
+**测试**：新增 `test_comment_reader.py` 10 项（解析器 6 + 门禁集成 4）。**全量 413 passed, 0 failed**。
+
+**已知边界（诚实记账）**：① UI 预算面板还没有 `comment_reads` 输入项，现阶段经计划 budget 字段/规划器开启；② 楼中楼超过内嵌部分需 `get_note_sub_comment_v2` 二次调用（未接）；③ detail 的 `comments_count` 与评论端点 `comment_count` 口径不一致（466 vs 473，未查证），引用评论数以评论端点为准并标注时点。

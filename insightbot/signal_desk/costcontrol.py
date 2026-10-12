@@ -83,6 +83,9 @@ SPEND_LEDGER_ENV = 'SIGNAL_DESK_SPEND_LEDGER'
 # match on a billing path can silently attach the wrong price to a corrected endpoint name.
 SEARCH_V4 = '/api/xiaohongshu/search-note/v4'
 DETAIL_V1 = '/api/xiaohongshu/get-note-detail/v1'
+# One page of a note's comments, latest first (official advice: fall back to `normal`
+# only when `latest` yields nothing). Prices like a detail call.
+COMMENT_V2 = '/api/xiaohongshu/get-note-comment/v2'
 
 # The research modes of METHODOLOGY §4, as calls per round. Derived numbers are quoted
 # from the 2026-10-11 price export by quote_recipe().

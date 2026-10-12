@@ -12,9 +12,13 @@ from insightbot.signal_desk import grades
 # imprecise, so v4 is the only version suitable for time-window research.
 SEARCH_URL = 'https://api.justoneapi.com/api/xiaohongshu/search-note/v4'
 DETAIL_URL = 'https://api.justoneapi.com/api/xiaohongshu/get-note-detail/v1'
+COMMENT_URL = 'https://api.justoneapi.com/api/xiaohongshu/get-note-comment/v2'
 
 # v4 renamed the v2 params: sort -> sortType, noteTime -> timeFilter, noteType '_0' -> 'ALL'.
 VALID_TIME_FILTERS = ('ONE_DAY', 'ONE_WEEK', 'HALF_YEAR')
+# Comment sorts per the endpoint contract (2026-10-12 schema check). The vendor advises
+# `latest` by default and `normal` as the fallback when `latest` returns nothing.
+COMMENT_SORTS = ('normal', 'latest', 'like_count')
 
 
 class ProviderError(RuntimeError):
@@ -65,6 +69,42 @@ def justone_note_detail(note_id: str, token=None):
         raise ProviderError('JustOneAPI business error '
                             f'{result.get("code")}; check authentication, permission or balance',
                             code=result.get('code'))
+    return result
+
+
+def justone_note_comment(note_id: str, token=None, *, sort: str = 'latest', cursor=None):
+    """One page of a note's comments, verified against a real response 2026-10-12.
+
+    The response shape is a dict (``data.comments[]`` ＋ ``comment_count`` ＋ cursor) —
+    a third shape, different from both detail (``data[0].note_list[0]``) and search
+    (``data.notes[]``). Callers normalise through :func:`comments_to_evidence`, which
+    fails loudly on anything else.
+    """
+    token = _auth_token(token)
+    if not token:
+        raise ValueError('JUSTONEAPI_TOKEN is not configured')
+    if sort not in COMMENT_SORTS:
+        raise ValueError('Invalid comment sort')
+    params = {'token': token, 'noteId': str(note_id).strip(), 'sort': sort}
+    if cursor:
+        params['lastCursor'] = str(cursor)
+    try:
+        response = httpx.get(COMMENT_URL, params=params, timeout=45, follow_redirects=False)
+        if response.status_code != 200:
+            raise ProviderError(f'JustOneAPI HTTP {response.status_code}',
+                                http_status=response.status_code)
+        result = response.json()
+    except ProviderError:
+        raise
+    except Exception:
+        raise ProviderError('JustOneAPI request failed or outcome uncertain; no automatic retry') from None
+    if result.get('code') != 0:
+        raise ProviderError('JustOneAPI business error '
+                            f'{result.get("code")}; check authentication, permission or balance',
+                            code=result.get('code'))
+    data = result.get('data')
+    if not isinstance(data, dict) or not isinstance(data.get('comments'), list):
+        raise ProviderError('JustOneAPI comment schema changed')
     return result
 
 
@@ -222,6 +262,80 @@ def detail_to_evidence(response, *, url, query=''):
                            "account and is not independently verified, and one note is not prevalence.")}
 
 
+# ---------------------------------------------------------------------------
+# Comment thread: the L1 comment layer (METHODOLOGY §2.2) — objections, repurchase
+# signals, unanswered questions. Shape verified against a real 2026-10-12 response
+# (note 6ac8bdee00000000140016dc): data is a dict with comments[] (10 per page),
+# comment_count / comment_count_l1, has_more and a JSON-string cursor — a third shape,
+# different from detail and search. Fail closed on anything else.
+
+COMMENT_PAGE_LIMIT = 20
+COMMENT_TEXT_LIMIT = 8000
+
+
+def _comment_line(comment, depth=0):
+    """One readable line per comment; replies keep one indent level."""
+    user = comment.get('user') if isinstance(comment.get('user'), dict) else {}
+    who = str(user.get('nickname') or user.get('red_id') or '').strip() or '匿名用户'
+    where = str(comment.get('ip_location') or '').strip()
+    text = str(comment.get('content') or '').strip().replace('\n', ' ')
+    line = f'{"　" * depth}{who}（{where or "属地未知"}）：{text}'
+    likes = comment.get('like_count')
+    if isinstance(likes, (int, float)) and likes:
+        line += f'［赞{int(likes)}］'
+    return line
+
+
+def comments_to_evidence(response, *, url='', query='', note_title=''):
+    """Normalise one comment page into one evidence item graded ``note_comment``.
+
+    One item per page, not one per comment: the unit of evidence here is the thread —
+    objections and replies only read sensibly together. Returns ``None`` for a page
+    with no comments, because an empty comment section is not a comment thread and
+    grading it as one would let a card cite nothing.
+    """
+    from datetime import datetime, timezone
+    data = response.get('data') if isinstance(response, dict) else None
+    if not isinstance(data, dict) or not isinstance(data.get('comments'), list):
+        raise RuntimeError('JustOneAPI comment schema changed: data.comments missing')
+    comments = [item for item in data['comments'] if isinstance(item, dict)]
+    if not comments:
+        return None
+    note_ids = {str(item.get('note_id') or '').strip() for item in comments}
+    note_ids.discard('')
+    if len(note_ids) != 1:
+        raise RuntimeError('JustOneAPI comment schema changed: comments span several notes')
+    note_id = note_ids.pop()
+    if url and note_id_from_url(url) != note_id:
+        raise RuntimeError('JustOneAPI returned comments for a different note than requested')
+    lines = []
+    for comment in comments[:COMMENT_PAGE_LIMIT]:
+        lines.append(_comment_line(comment))
+        for reply in (comment.get('sub_comments') or []):
+            if isinstance(reply, dict):
+                lines.append(_comment_line(reply, depth=1))
+    thread = '\n'.join(lines)[:COMMENT_TEXT_LIMIT]
+    stamps = [item.get('time') for item in comments if isinstance(item.get('time'), (int, float))]
+    latest = (datetime.fromtimestamp(max(stamps), timezone.utc).isoformat()
+              if stamps else None)
+    total = data.get('comment_count')
+    title = f'{str(note_title or "").strip() or "笔记"} · 评论样本（最新一页）'
+    return {'provider': 'JustOneAPI', 'platform': 'xiaohongshu', 'url': url,
+            'source_id': note_id, 'title': title, 'excerpt': thread,
+            'desc_length': len(thread), 'body_verified': True,
+            'latest_comment_at': latest, 'retrieved_at': datetime.now(timezone.utc).isoformat(),
+            'query': query,
+            'comment_total': total if isinstance(total, int) else None,
+            'comments_returned': min(len(comments), COMMENT_PAGE_LIMIT),
+            'has_more': bool(data.get('has_more')),
+            # get-note-comment returns other people's words in full: real text, but the
+            # latest page of one note's comment section is a sample of vocal commenters,
+            # never a representative read of the audience.
+            'source_grade': 'note_comment',
+            'limitation': ('评论区样本为该笔记最新一页评论（latest 排序）；评论者是个体的声音，不构成'
+                           '代表性人群样本；昵称与IP属地为平台自报，未经核实。')}
+
+
 class JustOneApiAdapter:
     """Read note bodies through JustOneAPI.
 
@@ -257,3 +371,8 @@ class JustOneApiAdapter:
 
     def detail(self, url):
         return justone_note_detail(note_id_from_url(url), self.token)
+
+    def comments(self, note_id, *, sort='latest', cursor=None):
+        """One page of a note's comment thread. Only this reader offers comments:
+        千瓜's comment search was excluded by the narrow-quota rules (§6.2)."""
+        return justone_note_comment(note_id, self.token, sort=sort, cursor=cursor)
