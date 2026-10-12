@@ -1,6 +1,6 @@
-# JustOneAPI 本机资产盘点与接线记录 v8
+# JustOneAPI 本机资产盘点与接线记录 v7
 
-日期：2026-10-12｜状态：**C 方案已落地，OAuth 已授权，端到端实测跑通，适配器已切 v4，证据等级已收敛为单一真源，费控门禁已接线，研究配方已与执行层核对，评论通路已接**｜作用域：主力机
+日期：2026-10-11｜状态：**C 方案已落地，OAuth 已授权，端到端实测跑通，适配器已切 v4，证据等级已收敛为单一真源，费控门禁已接线，研究配方已与执行层核对**｜作用域：主力机
 配套：`DATA-SOURCES-v0.1.md` §2（能力面）／`scripts/justone_mcp_probe.py`（只读体检）／`scripts/check_v4_parser.py`（解析离线校验）／`config/pricing/justoneapi-pricing-20261011.csv`（官方价目表快照）
 
 > **v3**：v2 沿用的"搜索接口本身带正文、无需 N+1 详情调用"结论**被实测推翻**（§2.5），成本模型重写（§6）。
@@ -9,7 +9,6 @@
 > **v5 增补**：把计费相关的全部说法对**官方使用指南**逐条核对（§2.9）。三条旧推断全部被官方确证（只有 `code=0` 计费／令牌上限非账户级／异步结算），并**发现一条我们没建模的配额轴——"每日成功请求次数"**（§2.9 C）。计费码表已转录进 `costcontrol.BILLING_CODES`，`settle()` 可按 code 结算。
 > **v6**：**把付费读取真正接到门禁上**（§2.8 E）。此前 `costcontrol.require()` 全项目零调用——**花钱的路开着、门禁不在路上**。接线后暴露并修掉三处只在真接线时才显形的问题：**结算不释放预留**（会自己关闭的门禁）、**业务码藏在错误文案里**、**参数名撞车**。信封改为**只从 `SIGNAL_DESK_SPEND_LIMIT_CNY` 来**，**未声明即不花钱**。
 > **v7（本版）**：**三种研究模式从"报价表"变成"执行层的额度来源"**（§2.8 F）。`RECIPE_CALLS` 此前只能被 `quote_recipe()` 报价，不能约束任何一次运行（所有计划共用一套 `BUDGET_DEFAULTS`）。照配方核对时发现 **`scan` 少报两次调用**（§3 要求挑战查询、§2.2 禁止把截断摘要当语言复用），配方由 **¥0.20 改为 ¥0.55**；`probe`／`frame` 核对后不变。额度现由 `RECIPE_ALLOWANCES`（导入时解析一次）派生，**任何一笔花费都带 `mode` 标记**，`costcontrol.report()` 因此可按模式分账。
-> **v8（本版）**：**评论通路接通**（§2.5 E）。`get-note-comment/v2` 形状实测确证（第三个形状：`data` 是 dict）；`providers.JustOneApiAdapter.comments()` 接入 `enrich`——评论**跟随终选正文目标**读取（终选后按需取的同一纪律），逐页过门禁（`comment_reads` 预算项，**默认 0**，面向 §3.3／§3.4 任务显式开启），独立预留与结算、独立缓存；评论线程作为 `note_comment` 级证据条目入册。**顺带**：MCP 通路首次走了账本（探针调用先预留后结算）。
 
 ---
 
@@ -257,24 +256,6 @@ OAuth scope：`mcp:catalog:read`／`mcp:api:call`／`mcp:account:read`。
 
 > **建议**：`providers.py` 应从 v2 切到 **v4**（时间窗可靠 + 体积小 → 对长时段趋势研究是硬需求），代价是单价高 0.05。
 
-#### E. `get_note_comment_v2` 实测形状（2026-10-12，v8 增补）
-
-**评论层（L1 评论子层）的通路实测**：1 次真实调用（¥0.15，`code=0`），note `6ac8bdee00000000140016dc`。**这次探针与以往不同：先经 `costcontrol.authorize(channel='mcp')` 预留、调用后 `settle(code=0)`——MCP 直调通路第一次走了账本**（"同一个信封的人工约定"落成了动作）。
-
-**响应形状（第三个形状，与前两者都不同）**：
-
-| 层 | 形状 |
-| --- | --- |
-| `search-note/v4` | `data.notes[]` |
-| `get-note-detail/v1` | `data` 是 **list**，正文在 `data[0].note_list[0]` |
-| **`get-note-comment/v2`** | `data` 是 **dict**：`comments[]`（10 条/页）＋ `comment_count` / `comment_count_l1` ＋ `has_more` ＋ **JSON 字符串游标** `cursor` |
-
-**评论对象高价值字段**：`id` / `content` / `ip_location` / `like_count` / `time` / `note_id`（回读校验用）/ `sub_comment_count` ＋ `sub_comments[]`（**楼中楼内嵌在父评论里**，每条带 `target_comment.user`）/ `user{nickname, red_id, userid}`。
-
-**接线要点**：参数名 `noteId`（接受 explore URL）；`sort` 默认 `latest`，官方建议取不到时改 `normal` 重试；`lastCursor` 游标分页。样本：`docs/signal-desk/evidence/justone-comment-sample-20261012.json`（截取 2 条＋1 楼中楼，字段结构保真）。
-
-> **口径提醒**：一页评论是"该笔记最新 10 条"，是个体评论者的声音样本——**不构成代表性人群证据**（§2.2 评论层用途是异议、复购线索、未被回答的问题，不是人群占比）。另外本条笔记 detail 里 `comments_count: 466` 与评论端点 `comment_count: 473` **不一致**（口径差异未查证），引用评论数时以评论端点为准并标注时点。
-
 ### 2.6 单价：从"推测"到"确证"（2026-10-11）
 
 **第一轮：余额差分（推测）**。余额轨迹（`get_account_balance`，免费）：
@@ -507,7 +488,7 @@ MCP   xiaohongshu.search_note_v4       ─┘
 | `probe` | `search-note/v4` ×2 ＋ `get-note-detail/v1` ×3 | **¥0.85** |
 | `frame` | `search-note/v4` ×3 ＋ `get-note-detail/v1` ×6 | **¥1.50** |
 
-**测试**：`tests/signal_desk/test_costcontrol.py` 26 项、`tests/signal_desk/test_spend_gate.py` 10 项、`tests/signal_desk/test_modes.py` 11 项、**`test_comment_reader.py` 10 项（v8）**全通过。总览 **413 passed, 0 failed**（标准命令 `env -u PYTHONPATH … pytest`；此前的"402 + kestra 既有失败"经查为 WorkBuddy shim 环境噪声，见 `LOCAL-V02.md` 2026-10-12）。
+**测试**：`tests/signal_desk/test_costcontrol.py` 26 项、`tests/signal_desk/test_spend_gate.py` 10 项、`tests/signal_desk/test_modes.py` 11 项全通过。本轮测试总览 **402 passed + 1 个既有失败**（kestra，与 HEAD 一致、与本轮无关）。
 
 > **测试环境更正**：此前判断 `tests/signal_desk/` 被 module 级 `importorskip` 跳过（"缺隔离运行时"）——**实测发现 `.venv-signal-desk/bin/python` 依赖齐全（含 `langgraph`／`httpx`／`requests`）**，本轮起改为**真实 pytest 全量运行**，不再用离线回放替代。§2.7 C 的离线校验保留为**零成本前置门禁**，但不再是唯一手段。
 
