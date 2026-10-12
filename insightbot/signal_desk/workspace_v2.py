@@ -83,6 +83,7 @@ class ResearchState(TypedDict, total=False):
     run_id: str
     plan: dict
     collected: dict
+    structure: dict
     delivery: dict
     errors: list
     review: dict
@@ -901,6 +902,35 @@ class WorkspaceV2:
             self._phase(brand_id, state['run_id'], 'editing')
             return {'collected': result, 'status': 'editing'}
 
+        def survey(state):
+            # Positioning reads run before the first edit, unlike enrich: structure is
+            # background the draft is written against, not a gap discovered inside it. The
+            # node never fails the round — a read that does not arrive is recorded and the
+            # editor is told the round has no such reading.
+            self._check_scheduled_job(brand_id, state['run_id'])
+            self._phase(brand_id, state['run_id'], 'surveying')
+            run_dir = directory / 'runs' / identifier(state['run_id'])
+            result = research_v2.survey(state['plan'], run_dir)
+            self._write(run_dir / 'structure.json', result)
+            collected = state['collected']
+            # The editor reads one place for its material: the collection, with the round's
+            # own structure block inside it. Two channels would let a later reader see the
+            # notes and miss the positioning.
+            collected['structure'] = result['structure']
+            collected.setdefault('collection', {})['structure'] = result['collection']
+            # The operator reads collection.limitations (the UI renders that field, not the
+            # nested block), so a structure read that did not arrive has to be written there
+            # or it is invisible — the same reasoning that puts the layer gaps there.
+            collected['collection'].setdefault('limitations', []).extend(
+                result['collection'].get('limitations', []))
+            # Aggregates join the same evidence id space as notes, so a claim about
+            # structure or a series can actually cite what it is about. They carry no page
+            # URL; editorial_v2 holds them to a vendor/capability/window descriptor instead.
+            collected.setdefault('evidence', []).extend(result['structure'])
+            self._write(run_dir / 'collection.json', collected)
+            self._phase(brand_id, state['run_id'], 'editing')
+            return {'collected': collected, 'structure': result, 'status': 'editing'}
+
         def edit(state):
             self._check_scheduled_job(brand_id, state['run_id'])
             run_dir = directory / 'runs' / identifier(state['run_id'])
@@ -946,11 +976,13 @@ class WorkspaceV2:
                     'status': 'approved' if decision.get('decision') == 'approve' else 'rejected'}
 
         graph = StateGraph(ResearchState)
-        for name, fn in [('collect', collect), ('edit', edit), ('enrich_if_needed', enrich),
-                         ('reedit', reedit), ('validate', validate), ('human_review', human)]:
+        for name, fn in [('collect', collect), ('survey', survey), ('edit', edit),
+                         ('enrich_if_needed', enrich), ('reedit', reedit),
+                         ('validate', validate), ('human_review', human)]:
             graph.add_node(name, fn)
         graph.add_edge(START, 'collect')
-        graph.add_edge('collect', 'edit')
+        graph.add_edge('collect', 'survey')
+        graph.add_edge('survey', 'edit')
         graph.add_conditional_edges('edit', lambda state: 'enrich_if_needed' if
             state['delivery'].get('enrichment_requests') else 'validate')
         graph.add_conditional_edges('enrich_if_needed', lambda state: 'reedit' if

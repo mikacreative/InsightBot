@@ -168,6 +168,23 @@ def _reference_errors(ids, evidence_ids, *, required=False):
             any(not isinstance(i, str) for i in ids) or len(ids) != len(set(ids)) or not set(ids) <= evidence_ids)
 
 
+def _aggregate_sourced(item):
+    """Provenance for a non-note evidence item: who produced it, how, and over what window.
+
+    The counterpart of the URL rule. Both exist so every claim can be traced back to
+    something a reviewer can check, and an aggregate's something is a named capability over a
+    dated window rather than a page. Held to the same standard as a URL, not a lower one:
+    both fields and both dates must be present, so a half-filled descriptor fails closed.
+    """
+    descriptor = item.get('source')
+    if not isinstance(descriptor, dict):
+        return False
+    if not all(str(descriptor.get(k) or '').strip() for k in ('vendor', 'capability')):
+        return False
+    window = descriptor.get('window')
+    return isinstance(window, dict) and bool(window.get('start_date') and window.get('end_date'))
+
+
 def _trend_supported(support):
     """Metadata must originate in supplied evidence, never be invented in editor output."""
     for item in support:
@@ -280,9 +297,18 @@ def validate_edition(edition: dict, evidence: list[dict], delivery_profile=None,
         if all(grades.summary_only(e.get('source_grade')) for e in support):
             errors.append(prefix + '仅有标题或摘要，不能支持完整判断')
         for source in support:
-            url = urlsplit(str(source.get('url', '')))
-            if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password:
-                errors.append(prefix + '来源URL无效')
+            # A note-text claim is traceable through a page; an aggregate is traceable through
+            # its vendor, capability and window. Demanding a URL of an aggregate is
+            # unsatisfiable, and waiving the check for it outright would let a page-less claim
+            # pass as a citation — so each kind is held to the provenance it can actually
+            # produce. A grade the vocabulary does not know resolves to note text and is held
+            # to the stricter rule, which is the fail-closed direction.
+            if grades.is_note_text(source.get('source_grade')):
+                url = urlsplit(str(source.get('url', '')))
+                if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password:
+                    errors.append(prefix + '来源URL无效')
+            elif not _aggregate_sourced(source):
+                errors.append(prefix + '结构化来源缺少可核查出处（vendor／capability／window）')
         if card.get('claim_type') == 'trend' and not _trend_supported(support):
             errors.append(prefix + '缺少可比较时间序列，不得称趋势')
         customer_text = ''.join(str(card.get(k, '')) for k in TEXT_FIELDS)
@@ -428,6 +454,25 @@ def edit(plan, collected, previous_editions=None, *, run_dir, editor=None,
     raise ValueError('编辑稿未通过质量校验；未截断或补写：' + '; '.join(errors[:6]))
 
 
+def _source_reference(source, fallback):
+    """One source line for the rendered report: a link for a page, a descriptor otherwise.
+
+    An aggregate has no page to link to, so rendering it as an empty link would produce a
+    citation that looks broken rather than one that is deliberately different. The
+    descriptor is the same provenance validate_edition requires, shown to the reader instead
+    of merely checked.
+    """
+    title = re.sub(r'[\[\]\r\n<>]', '', str(source.get('title', fallback)))
+    url = str(source.get('url') or '')
+    if url:
+        return f'- [{title}]({url.replace(")", "%29").replace("(", "%28")})'
+    descriptor = source.get('source') if isinstance(source.get('source'), dict) else {}
+    window = descriptor.get('window') if isinstance(descriptor.get('window'), dict) else {}
+    span = '—'.join(str(window.get(k) or '') for k in ('start_date', 'end_date'))
+    provenance = ' '.join(str(descriptor.get(k) or '') for k in ('vendor', 'capability')).strip()
+    return f'- {title}（{provenance}{" " + span if span.strip("—") else ""}）'
+
+
 def render_markdown(edition, evidence, brand_name=''):
     """Render source mappings, never links or commands supplied by the model."""
     by_id = {e['id']: e for e in evidence}
@@ -443,18 +488,12 @@ def render_markdown(edition, evidence, brand_name=''):
         if card.get('question'):
             lines += [f"**可讨论**：{card['question']}", '']
         for sid in list(dict.fromkeys(card['evidence_ids'] + card.get('counter_evidence_ids', []))):
-            source = by_id[sid]
-            title = re.sub(r'[\[\]\r\n<>]', '', str(source.get('title', sid)))
-            url = str(source['url']).replace(')', '%29').replace('(', '%28')
-            lines.append(f'- [{title}]({url})')
+            lines.append(_source_reference(by_id[sid], sid))
         lines.append('')
     if edition.get('lookback'):
         lines += ['## 上期回看', '', edition['lookback']['text'], '']
         for sid in edition['lookback']['evidence_ids']:
-            source = by_id[sid]
-            title = re.sub(r'[\[\]\r\n<>]', '', str(source.get('title', sid)))
-            url = str(source['url']).replace(')', '%29').replace('(', '%28')
-            lines.append(f'- [{title}]({url})')
+            lines.append(_source_reference(by_id[sid], sid))
         lines.append('')
     lines += ['## 范围说明', '', edition['scope'], '']
     return '\n'.join(lines)

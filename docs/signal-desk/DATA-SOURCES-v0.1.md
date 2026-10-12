@@ -60,6 +60,20 @@
 
 > 未测项：上述结构化能力的**额度归属尚未测出**（上轮只测了搜索类功能号），纳入预算前需按功能号补测。
 
+#### 1.2.1 已接入的三条通路（2026-10-12 实测，`research_v2.STRUCTURE_READS`）
+
+| 注册名 | 能力 | 产出等级 | 键 | 实测结果 |
+| --- | --- | --- | --- | --- |
+| `brand_sov` | `brand.get_sov_chart` | `brand_structure`（L3） | 品牌名 → `brand_id`＋`brand_id_key` | `items[]`，`DateCode`／`NoteCount`／`NoteCountPercent`；实测 30 行＝计划窗 30 天 |
+| `brand_pyramid` | `brand.get_blogger_pyramid` | `brand_structure`（L3） | 同上 | `items[]`，`PropName`／`BlogeerCount`／`BloggerProportion`；实测 5 层 |
+| `keyword_trend` | `keyword.note_trends` | `trend_series`（T） | 计划关键词（无需换 id） | `day_list[]`，`Date`／`NoteCount`／`HeatValue`；实测 30 天，随 `start_time`／`end_time` 精确锚定 |
+
+调度约定：**读取列表由模式自己的层声明派生**（`mode_structure_reads()` ← §4 `MODES[*].layers`），计划冻结列表，执行只读冻结值。**默认模式 `probe` 声明 L1／L2 → 派生 0 条**，"不点名模式＝行为不变"。
+
+> **⚠️ 类目级不接（2026-10-12）**：`category.funnel`／`category.trends`／`category.overview` 都接受 `tag_id`（CLI 强制正整数），但用 `tag.list` 返回的任何标签 id（如 83 = 彩妆）调用，上游分别回 `500 品类传参有误` 与全零载荷 → **类目 id 与标签 id 不是同一套编号，其来源未解**。按猜测接线会让"零"看起来像测量结果，故记入 `METHODOLOGY.md` §9.2 第 16 项而不是硬接。
+
+> **计费口径**：千瓜按**席位**计费 → 结构层读取消耗**席位月度额度**，**不产生变动费用**。因此 `survey()` 不经费控门禁（该门禁防的是 JustOneAPI 的按次计费），额度以**调用次数**冻结。**不要**把这两家的"额度"混为一谈。
+
 ### 1.3 千瓜的接口面缺口（实测确认）
 
 | 缺口 | 证据 |

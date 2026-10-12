@@ -542,3 +542,57 @@ env -u PYTHONPATH .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p
 **测试**：新增 `test_comment_reader.py` 10 项（解析器 6 + 门禁集成 4）。**全量 413 passed, 0 failed**。
 
 **已知边界（诚实记账）**：① UI 预算面板还没有 `comment_reads` 输入项，现阶段经计划 budget 字段/规划器开启；② 楼中楼超过内嵌部分需 `get_note_sub_comment_v2` 二次调用（未接）；③ detail 的 `comments_count` 与评论端点 `comment_count` 口径不一致（466 vs 473，未查证），引用评论数以评论端点为准并标注时点。
+
+---
+
+## 2026-10-12 下午（续）：千瓜结构层与时间轴接通（执行顺序第 4 项，方法论 v0.2.9）
+
+**范围**：L3（结构层）与 T（时间轴）从"零实现"变为可达 —— 新增读取注册表 `STRUCTURE_READS` ＋ 一轮的定位读取 `survey()`，接千瓜三条通路。
+
+### 一、先探形状，再接（三个端点各一次真实调用）
+
+| 通路 | 实测形状 | 关键字段 |
+| --- | --- | --- |
+| `brand.search` | `result.normalized_items[]` | `brand_id`／`brand_id_key`／`name` —— 品牌名到 id 的解析 |
+| `brand.get_sov_chart` | `result.items[]` | `DateCode`／`DateStr`／`NoteCount`／`NoteCountPercent` |
+| `brand.get_blogger_pyramid` | `result.items[]` | `PropName`／`BlogeerCount`／`BloggerProportion`／`BloggerList[]` |
+| `keyword.note_trends` | `result.day_list[]` | `Date`／`DateStr`／`NoteCount`／`HeatValue`／`TextRatio` |
+
+**`keyword.note_trends` 的时间窗实测**：传 `start_time`／`end_time` 时序列**精确锚定该窗口**（09-01→09-10 返回 10 天，首末日期吻合）。因此序列一律用**计划自身的窗口**，而不是"最近 N 天"——两个序列只有覆盖同一批日期才可比。
+
+**端到端实测（生产适配器，非替身）**：兰蔻 × 口红 × `frame`，计划窗 2026-09-13→2026-10-12 → SOV **30 行／30 点**、金字塔 **5 层**（知名KOL 15／头部 71／腰部 301／初级 1688／素人 3500）、检索词序列 **30 天／30 点**；`status=complete`，errors 空。
+
+### 二、三个设计决定
+
+| 决定 | 内容 | 理由 |
+| --- | --- | --- |
+| **额度是次数不是钱** | `structure_reads` 为调用次数，由 `mode_structure_reads()` ← `MODES[*].layers` 派生；`survey()` **不接受** `envelope`／`spend_ledger` | 千瓜按**席位**计费。把它送进按次计费的门禁会报出**从未发生的花费**，并让**已付钱的席位**看起来买不起 |
+| **默认模式派生为 0** | `probe` 声明 L1／L2 → 0 条读取 → `mode_budget('probe') ≡ BUDGET_DEFAULTS` 由**构造**保证 | 与 v0.2.6 同一不变量，不是特例判断 |
+| **计划冻结读取列表，可降不可升** | 计划存 `structure: [...]`，按冻结额度**截断**（而非仅校验） | 意图与上限不能互相矛盾；执行只读冻结值 |
+
+### 三、本轮最值钱的发现：聚合证据两头都够不着（一个真死结）
+
+接线前 `brand_structure`／`trend_series` 两个等级**全项目 0 处引用**，看似只是"没写读取器"。实际是**两个守卫互相锁死**：
+
+- `core.normalize()` 与 `editorial_v2.validate_edition()` 要求**每条证据项都带 http(s) URL**；
+- `editorial_v2._trend_supported()` 要求支持项带 `time_series`，而**只有聚合能提供 time_series**。
+
+于是 `claim_type='trend'` **在接线前不可能成立**：能通过 URL 检查的都没有序列，有序列的没有页面。**这正是"建好但没有调用点"的另一种形态——这次不是缺调用点，是两个调用点互相排除。**
+
+**处置（不放宽守卫，按等级分流出处要求）**：`grades.is_note_text()` 为真 → 仍必须带合法 URL（原规则不变）；为假 → 必须带 `vendor`／`capability` 非空 ＋ `window` 两端日期的**出处描述符**；**未知等级按笔记类处理**（fail-closed，更严的那一侧）。渲染侧同步：无页面来源输出出处描述而非空链接，避免"看起来坏掉的引用"。聚合证据与笔记证据**共用同一个 evidence id 空间**，因此关于结构/趋势的判断现在真的能引用它。
+
+### 四、诚实记账：一条没接的路
+
+`category.funnel`／`category.trends`／`category.overview` 都接受 `tag_id`（CLI 强制正整数），但用 `tag.list` 返回的任何标签 id（83=彩妆）调用，上游回 `500 品类传参有误` 或**全零载荷** → **类目 id 与标签 id 不是同一套编号，来源未解**。**不接**：按猜测接线会让"零"看起来像测量结果。记入 §9.2 第 16 项。另：`topic.festival_keywords` 实测可用（返回 16 个节日词），但它是**日历词表**不是任意窗口的序列，故未入注册表。
+
+### 五、层缺口读数变化
+
+**七类任务中带常驻缺口的由五类降为三类**：品牌与竞争（缺 L3）与数据与变化（缺 T）**不再带缺口**；剩余为产品与价值理解（L4）、人群与使用情境（L2）、达人方向（L2）。**`未接入`（管线缺读取器）与 `未覆盖`（模式不采集该层）两种措辞保持不变**，`audience × scan` 现为"两头都缺"的测试实例（两行同现，互不顶替）。
+
+### 测试与文档
+
+**新增** `tests/signal_desk/test_structure.py` **19 项**（注册表完整性／模式派生与不变量／计划冻结与截断／survey 正常与四种失败路径／"绝不走费控"的签名与账本断言／`_trend_supported` 契约／出处描述符 fail-closed／渲染分流）。更新 `test_layers.py`（缺口集合、层可达性、plan 措辞）、`test_modes.py`（缺口措辞改用仍有缺口的任务）。
+
+**全量 433 passed, 0 failed**（`env -u PYTHONPATH … pytest tests/signal_desk -q`）。
+
+文档：`METHODOLOGY.md` → **v0.2.9**（L3／T 行 → 🟡、§2.5 增注 4／5、§9.2 第 8 项关闭／第 4 项转入可议／第 14 项关闭／新增第 16 项、文末证据声明四条更新）；`DATA-SOURCES-v0.1.md`（新增 §1.2.1 三条通路与计费口径）；本节。
