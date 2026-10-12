@@ -557,7 +557,7 @@ RECIPE_ALLOWANCES = {mode: {'queries': recipe[SEARCH_V4], 'body_reads': recipe.g
 
 **花费按模式可分账**：一个信封覆盖同一品牌同一期的所有模式，所以每笔预留带上 `mode`，`report()` 增加 `by_mode`／`spent_by_mode`，并可按模式过滤金额（**上限仍是信封的，不被模式切分**）。没有这个标记，"Frame 的真实成本是不是 ¥1.50"在账本上无法被回答——而修正配方的唯一依据，就是真实成本。
 
-**仍待裁定**：模式与任务不匹配时是**提示还是阻断**（现为提示，仅写入 limitations；方法论 §9.2 第 15 项），以及是否给每类任务配默认模式。
+~~**仍待裁定**：模式与任务不匹配时是**提示还是阻断**~~ → **✅ 已裁定（2026-10-12，方法论 §4.2／§9.2 第 15 项）**：**分关口处理**——批准关口上升为契约不合格项（须换模式或显式接受更弱交付）、定时配置关口**硬拒保存**、执行关口保持提示不阻断。**每类任务的默认模式建议并入 pre-flight 体检，不单独立项**。均**待实现**。
 
 
 ---
@@ -608,9 +608,9 @@ RECIPE_ALLOWANCES = {mode: {'queries': recipe[SEARCH_V4], 'body_reads': recipe.g
 
 1. **额度不止"钱"一个维度，还有"每日成功次数"维度。** `Envelope` 只建模了货币，所以一个方案**可能通过金额校验、却在调用的那一刻被上游拒掉**（`303`）。
 2. **计数口径是跨 TOKEN 合并的**——与 B 的"共享余额"是同一枚硬币的两面，"两条通路各算各的"这个假设在**限额维度上同样不成立**。
-3. **日期归属有规则**：同步请求算发起日、异步任务算提交日。这对 `Envelope.period` 的跨日语义有影响——现有 `period` 是个自由字符串，**未定义时区与归属规则**。
+3. **日期归属有规则**：同步请求算发起日、异步任务算提交日。这对 `Envelope.period` 的跨日语义有影响——~~现有 `period` 是个自由字符串，**未定义时区与归属规则**~~ → **✅ 部分裁定（2026-10-12）**：**货币轴的期界已定为 `Asia/Shanghai` 自然月**（即 `costcontrol.period_of()` 现行行为，方法论 §9.2 第 14 项）；供应商侧的"同步算发起日／异步算提交日"规则在**次数轴**（第 13 项）上生效，次数轴另按自然**日**。
 
-> **处置**：已作为**已知缺口**写入 `costcontrol.py` 模块 docstring（不是疏漏，是未决），并列入 §7 与待 Mika 决策项。**未实现**——因为它需要一个产品判断（是否把"次数"也纳入信封），不适合由代码单方面定。
+> **处置（2026-10-12 更新）**：**第二配额轴已裁定纳入费控**（方法论 §9.2 第 9 项）——`Envelope` 增加次数维度，或并行一张日配额表；两轴期界不同（货币＝自然月、次数＝自然日）。**仍未实现**（这是一个新的开工项，不是待决问题）。模块 docstring 中的对应表述已同步更新。
 
 #### D. ✅ 超时建议印证了 pre-call reserve 的必要性
 
@@ -783,13 +783,12 @@ MCP 连通 · server=justoneapi-mcp v2.0.0 · protocol=2025-06-18
 | **证据等级口径** | ✅ **已收敛为单一真源**：`grades.py` 承载八等级 + alias 归一 + **未知等级 fail-closed**（§2.8 C）；四个调用点全部接入。**"两套词表并存但未打通"这一状态已终结。** |
 | **千瓜正文能力** | ✅ **已定性（且为否定结论）**：`note.search_by_url` 实测 40 字段无任何内容字段 → `qiangua_body` 是幻影等级，千瓜最高只能到 `note_segment`（§2.8 B）。**`note_body` 唯一来源＝JustOneAPI detail 接口。** |
 | **费控/额度中台** | ✅ **已落地并接线**：`pricing.py`（报价）+ `costcontrol.py`（门禁 + 账本），35 项测试通过（§2.8 D／E）。付费正文读取**逐次走 `require()` → `settle(code=)`**；信封由 `SIGNAL_DESK_SPEND_LIMIT_CNY` 声明，**未声明即不花钱**。⚠️ 仍在外面的路：MCP 直调不走本账本 |
-| **第二配额轴未建模** | ⚠️ 官方有"用户 × 接口"**每日成功请求限额**（`Asia/Shanghai` 日、跨 TOKEN 合并计数、超限 `303`+429 不计费）。`Envelope` 只表达货币 → 可能过金额校验却被上游拒。是否纳入属产品判断（§2.9 C） |
 | **计费规则** | ✅ **已由官方文档确证并转录进代码**：`costcontrol.BILLING_CODES`（只有 `code=0` 计费），`settle(code=...)` 可按业务码结算（§2.9 A） |
-| **每日成功请求限额（第二配额轴）** | ⚠️ **未建模**：官方明确存在"用户 × 接口"的每日成功次数上限（`Asia/Shanghai` 日、跨 TOKEN 合并计数、超限 `303`+429 不计费）。`Envelope` 只建模货币 → 方案可能过金额校验却被上游拒（§2.9 C）。**待 Mika 决定是否纳入** |
+| **第二配额轴（每日成功请求限额）** | ⚠️ **已裁定纳入、未实现**（2026-10-12，方法论 §9.2 第 9 项）：官方存在"用户 × 接口"每日成功次数上限（`Asia/Shanghai` 日、跨 TOKEN 合并计数、超限 `303`+429 不计费）。`Envelope` 只表达货币 → 可能过金额校验却被上游拒。**新开工项**，见 §2.9 C |
 | **代码通路接线细节** | ✅ **已明确**：`https://api.justoneapi.com`，token 走 **URL 参数** `?token=...`（§2.9 E）。仍缺 token 本身 |
 | Mac mini 未核验 | ❌ 本次只盘主力机；`mcp.json` 与 OAuth 登录**需在 Mac mini 上各自做一次** |
 | 多 query 未落地 | ❌ `workspace.py:137` 只取 `queries[0]` |
-| 两条通路共用余额 | ⚠️ MCP（OAuth）与 REST（env token）**共享同一余额池**。**已由 `costcontrol` 账本层设计堵住**（pre-call reserve，防双花）——但**需代码通路真正接线后才生效** |
+| 两条通路共用余额 | ✅ **代码通路已生效（2026-10-11 深夜，v6）**：MCP（OAuth）与 REST（env token）**共享同一余额池**，`costcontrol` 的 pre-call `reserve` 已在 `research_v2.enrich` 逐次 `require()` → `settle(code=)` 上真正接线（防双花）。⚠️ **仍在外面的路**：MCP **直调**（人工探针）不走本账本，只能靠同一信封的人工约定 |
 | `total` 字段语义 | ⚠️ v4 实测 `total: 17` 但 `has_more: true`，疑非结果总数。**Mika 已裁定：保留现状，下次再验证**（§2.7 注） |
 | 价目表时效 | ⚠️ 快照日期 2026-10-11，`pricing.EXPORTED_AT` 已记录导出时点；**价目变动时需重新导出并比对**，不得就地手改 CSV |
 
@@ -864,7 +863,9 @@ SIGNAL_DESK_SPEND_LIMIT_CNY=2.60 .venv-signal-desk/bin/python -c "from insightbo
 | 官方 SDK | `https://github.com/justoneapi-official/justoneapi-python` | ✅ |
 | 官方 MCP | `https://github.com/justoneapi-official/justoneapi-mcp` | ✅ |
 
-> **既有失败（非本轮引入）**：`tests/signal_desk/test_kestra_runtime_poc.py::test_stop_never_signals_pid_reused_by_another_service` 失败。该测试与其被测脚本 `scripts/signal-desk-kestra-runtime.py` **均与 HEAD 完全一致**（来自 `9fd9ab9`），且脚本只依赖 stdlib、不 import `pricing`／`costcontrol` → 与本轮改动无关。失败点：`stop()` 检测到 PID 被复用后正确未 kill，但**未清除陈旧的 `runtime.pid`**。
+> ⚠️ **原"既有失败"记录已更正（2026-10-12）—— 实为环境噪声，不是代码缺陷。**
+> 原文保留：`tests/signal_desk/test_kestra_runtime_poc.py::test_stop_never_signals_pid_reused_by_another_service` 失败，该测试与 `scripts/signal-desk-kestra-runtime.py` 均与 HEAD 一致（来自 `9fd9ab9`）、只依赖 stdlib。
+> **更正依据**：同一测试在 `env -u PYTHONPATH`（摘掉 WorkBuddy CLI 注入的 `sitecustomize.py` shim）下**稳定通过**；同批还有 `test_scheduling_v2` ×5、`test_workspace_v2` ×2 出现**间歇性假失败**。根因＝shim 的 broker 拦截 `Path.mkdir`，对已存在路径的合法幂等 `mkdir(exist_ok=True)` 回 EEXIST 并抛 `PermissionError`（不按 stdlib 语义吞掉）。**真基线：403 passed, 0 failed。** 详见 §8 复核方法 注 1。
 
 历史调用证据重放：
 - 2026-09-29（codex 侧）：在 `~/.codex/archived_sessions/` 检索 `mcp__justoneapi__call_endpoint`
