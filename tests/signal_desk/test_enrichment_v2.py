@@ -354,7 +354,9 @@ def test_graph_unresolved_gap_keeps_zero_cards_and_discloses_fetch_failure(tmp_p
                 '正文补读失败，缺口仍未解决，未形成精选判断。' if failure else '接口未提供正文，缺口仍未解决，未形成精选判断。')
         return raw, {'stage': stage, 'calls': 1}
     monkeypatch.setattr(e, 'model_text', model)
-    assert ws.process_job(brand['id'], job['id'])['status'] == 'awaiting_review'
+    # 本轮的证据只有 note_meta（标题层）＝摘要证据，非摘要证据数为 0：零卡片 + 零非摘要证据
+    # 即结构性零稿，标独立终态 empty_delivery（设计稿 §7.3-④）。缺口披露仍在 scope 里。
+    assert ws.process_job(brand['id'], job['id'])['status'] == 'empty_delivery'
     state = ws.job(brand['id'], job['id'], admin)
     assert state['delivery']['cards'] == [] and state['delivery']['candidates'][0]['disposition'] == 'research'
     assert state['enrichment']['outcomes'][0]['status'] == ('failed' if failure else 'no_text')
