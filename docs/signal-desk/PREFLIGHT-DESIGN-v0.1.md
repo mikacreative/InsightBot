@@ -1,6 +1,6 @@
 # 执行前契约体检（Pre-flight）设计稿 v0.1
 
-> 状态：**设计稿，未实施**。本文不改动任何生产代码、不跑测试、不提交 git。
+> 状态：**设计稿；§7.1 的 MVP 已实现（2026-10-12），其余仍为设计**。§7.3 是实现的冻结接口与设计稿之间唯一的口径来源。
 > 纪律声明：本文的小写标注 ——【代码事实】= 已在仓库源码中核对到的行为，附 `文件:行号`；【架构判断】= 设计取舍，未经实测；凡未经实测的数字或比率，一律标【架构判断，未验证】。
 > 单价一律以官方价目表为准（经 `costcontrol` 转录），余额只用于对账；不可核查的量不写成交付结论。
 
@@ -11,7 +11,7 @@
 > 4. **预测指标"先二元、后概率"**：**未裁定**，保留为待确认（见第八节 4）。
 > 5. **`preflight` 与 `plan_hash` 的关系**：**未裁定**（本文 §2.4 提出，原误指向"第七节"，实际无对应条目；现正式列为第八节 5）。
 >
-> 上述 1—3 已同步进 `METHODOLOGY.md` §4.2 与附录证据声明；代码实现仍**未开始**（本组件目前只有设计稿）。
+> 上述 1—3 已同步进 `METHODOLOGY.md` §4.2 与附录证据声明。**§7.1 的 MVP 已实现（2026-10-12）**：`preflight`／`contract`、`plan_hash` 排除派生键、结构性零稿终态 `empty_delivery` 与调度暂停、UI 体检区与额度白名单补齐。仍为设计的：连续概率、外部通知外发、选择卡、每日次数配额轴、定时配置关口对 `H==0` 的硬拒保存。
 
 ---
 
@@ -317,6 +317,37 @@ H = (付费正文通路可用 ? body_reads 配额 : 0)
 | 每类任务默认模式建议 | ✅ **已裁定（2026-10-12）：并入 pre-flight 体检，不单独立项** | 由本文 §5.3 的"换模式"选项给出，批准关口随体检报告一并呈现 |
 | 一键"换模式"选择卡 | UI | 5.3 的选项落到交互 |
 
+### 7.3 MVP 冻结接口（实现前锁定，2026-10-12）
+
+多文件并行实现需要**同一份命名口径**，故先把接口定死。以下名称在实现中**不得再改**；要改先改本节。
+
+**① `research_v2.preflight(plan) -> dict`** —— 纯函数，派生、只读、**不阻断**（不影响 `plan.ready`）。键固定为：
+
+| 键 | 类型 | 来源 |
+| --- | --- | --- |
+| `version` | `str`（`'preflight-0.1'`） | 常量 |
+| `spend_ceiling_cny` | `str`（Decimal→str） | `costcontrol.quote_recipe(mode)`【P1】 |
+| `envelope_present` | `bool` | `costcontrol.envelope_from_env(...) is not None`【P6】 |
+| `envelope_remaining_cny` | `str \| None` | `costcontrol.report(...)['remaining_cny']`【P5】；无信封时 `None` |
+| `spend_overrun_cny` | `str \| None` | `max(0, ceiling − remaining)`；余量充足或未知时为 `None` |
+| `unreadable_primary_layers` | `list[str]` | `missing_primary_layers(task)`【P3】 |
+| `mode_shortfall` | `list[str]` | `mode_shortfall(mode, task)`【P3】 |
+| `structure_reads` | `list[str]` | `plan['structure']` 中已实现者【P4】 |
+| `non_summary_capacity` | `int` | `H`，见下【§4.3】 |
+| `zero_risk` | `'high' \| 'unknown'` | `H == 0` → `'high'`，否则 `'unknown'`。**只两值，不给概率** |
+| `notes` | `list[str]` | 人类可读中文结论行，供 UI 直接渲染 |
+
+**`H` 的落地定义**（§4.3）：`(正文通路可用 ? budget['body_reads'] : 0) + (评论通路可用 ? budget['comment_reads'] : 0) + len(structure_reads)`。
+其中「正文通路可用」＝ `envelope_present and (envelope_remaining_cny is None or > 0)`；评论同式。
+
+**② `plan['contract']`** —— 聚合快照，**引用不复制**（字段见 §2.2）。其中 `contract['envelope']` 是**批准时**读到的快照：`{'scope','period','limit_cny','source'}`，正常时 `source='env'`；`envelope_from_env()` 回 `None`（批准时未声明信封）时**整块为 `None`**（快照为空的含义由 `envelope` 键本身表达，不另设 `source='absent'` 兄弟值）。
+
+**③ `plan_hash`** —— `collect()` 计算哈希时**排除** `contract` 与 `preflight` 两个派生键（§2.4／§8.2-5 的默认处置）。其余键照旧：除这两个键外，plan 任何内容改变仍使缓存失效。
+
+**④ 结构性零稿的终态名 `'empty_delivery'`** —— 判别式（§4.5）：`cards == []` **且** 非摘要证据数 `== 0`，其中非摘要证据数 ＝ `sum(not grades.summary_only(e['source_grade']) for e in collected['evidence'])`。该终态纳入 `_finish_scheduled_job` 的暂停判据（与 `failed／interrupted／needs_revision／uncertain` 并列）。**合法零稿**（有非摘要证据但都不合格）**不**进此终态、不暂停。
+
+**⑤ UI** —— `renderPlan()` 增加**非阻断**「体检」区（渲染 `preflight.notes`；与会阻断的 `planning_errors` 区分）；`budgetLabels`／`budgetCaps` 补 `comment_reads`、`structure_reads`。
+
 ---
 
 ## 八、分歧点：已裁定与被保留的
@@ -330,7 +361,9 @@ H = (付费正文通路可用 ? body_reads 配额 : 0)
 ### 8.2 ⏳ 仍未裁定（保留）
 
 4. **（次要）预测指标是否接受"先二元、后概率"？** 连续概率需要先埋点采集正文 `text_available` 率与 `summary_only` 率（当前**未验证**）；是否同意 MVP 只做二元（H==0 / 未知），把概率留到有真实数据之后？**（本条 2026-10-12 未答，保留。）**
-5. **`preflight` 是否参与 `plan_hash`？** 由 §2.4 提出：`plan` 参与 `plan_hash`（`collect()` 用它绑缓存，research_v2.py:970）；若把派生量 `preflight` 写进 `plan`，hash 会变 → **旧 collection 缓存全失效**。两条路：把 `preflight` 排除在 hash 之外（纯派生量不进哈希），或作为 `plan` 的旁挂字段由 API 组装时附加。**（原稿误写为"列入第七节"，第七节并无此条；现正式列在此处。）**
+5. **`preflight` 是否参与 `plan_hash`？** 由 §2.4 提出：`plan` 参与 `plan_hash`（`collect()` 用它绑缓存，research_v2.py:970）；若把派生量 `preflight` 写进 `plan`，hash 会变 → **旧 collection 缓存全失效**。两条路：把 `preflight` 排除在 hash 之外（纯派生量不进哈希），或作为 `plan` 的旁挂字段由 API 组装时附加。
+   **MVP 的默认处置（2026-10-12 实现，待确认）**：取了第一条路 —— `collect()`／`enrich()` 统一走 `_plan_hash()`，**排除 `contract` 与 `preflight`**（`research_v2.DERIVED_PLAN_KEYS`）。理由：采集缓存该绑"这份计划要做什么"，不是"批准那一刻环境里有什么"。副作用已确认：`workspace_v2.digest(plan)` 的**计划校验和仍包含这两个键**（校验和是冻结产物的完整性，与缓存绑定是两件事），两条哈希策略不同是**有意**的。**若 Mika 认为应统一，改这一处即可。**
+6. **（MVP 落地时新增）`preflight` 读的是"调用时"的 env，而 `contract.envelope` 是"批准时"的快照。** 今天二者在 `create_plan()` 里前后紧邻读取（微秒级），且 `preflight` 只算一次、随计划冻结，故**当前无可观察差异**；但若将来有人在计划存盘之后重算 `preflight`，它会显示"当前 env"而非"批准时的 env"。可观察的修法是让 `preflight` 优先读 `contract.envelope`。**未改，列为待确认。**
 
 ---
 
