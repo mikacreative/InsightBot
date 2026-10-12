@@ -105,12 +105,19 @@ def test_a_mode_too_small_for_the_task_is_reported_as_a_mode_shortfall():
 
 def test_the_pipeline_gap_and_the_mode_gap_are_worded_apart():
     """One is fixed by shipping a reader, the other by choosing a bigger mode."""
-    frame = plan(mode='frame', task_type='brand_competition')
-    assert any('未接入' in line and 'L3' in line for line in frame['limitations'])
-    assert not any('未覆盖' in line for line in frame['limitations'])
-    scan = plan(mode='scan', task_type='content')
-    assert any('速读' in line for line in scan['limitations'])
-    assert not any('未覆盖' in line for line in scan['limitations'])
+    # The mode gap alone, with no pipeline gap to confuse it with: 品牌与竞争 stopped carrying
+    # one when L3 landed, and 速读 simply does not gather L3.
+    covered = plan(mode='scan', task_type='brand_competition')
+    assert any('未覆盖' in line and 'L3' in line for line in covered['limitations'])
+    assert not any('未接入' in line for line in covered['limitations'])
+    # The pipeline gap alone: no mode reaches L4, so 结构 is as far as this gets.
+    product = plan(mode='frame', task_type='product')
+    assert any('未接入' in line and 'L4' in line for line in product['limitations'])
+    # And both at once — 人群与使用情境 under 速读 lacks L2 twice over, which is the case
+    # §9.2 calls 两头都缺: the wording must not let one stand in for the other.
+    scan = plan(mode='scan', task_type='audience')
+    assert any('未接入' in line and 'L2' in line for line in scan['limitations'])
+    assert any('未覆盖' in line and 'L2' in line for line in scan['limitations'])
 
 
 def test_the_run_repeats_the_mode_it_used_and_what_it_could_not_answer(tmp_path):

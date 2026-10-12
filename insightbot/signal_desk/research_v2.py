@@ -50,6 +50,44 @@ from .context import fetch_rss_context, search_web_context
 from .core import normalize
 
 METHOD_VERSION = 'social-intelligence-research-0.2.3'
+
+# Structure and trend reads (METHODOLOGY §2.2 L3／T). 千瓜 is the only source for either, and
+# the two layers were the largest hole in the pipeline: the grades existed and nothing could
+# produce them, so every 品牌与竞争 and 数据与变化 round shipped a permanent 未接入 limitation.
+#
+# **These reads deliberately do not go through costcontrol.** That gate exists to stop a
+# per-call vendor from being over-drawn (JustOneAPI bills ¥0.15 a read); 千瓜 bills by the
+# seat, so a structure read costs no money at all. What it draws on is the seat's monthly
+# quota — which is why the allowance is a *count of calls* and why the plan freezes that
+# count the way it freezes money. Routing these through the spend gate would be worse than
+# useless: it would report spend that never happened, and let a seat already paid for look
+# unaffordable.
+#
+# Only reads whose response shape was confirmed against the live capability are listed. The
+# category-level reads (category.funnel／category.trends／category.overview) are **not** here:
+# they accept a tag_id but the upstream returns 500 品类传参有误 / an all-zero payload for
+# every tag id tag.list can produce, so the category id's source is still unresolved. Wiring
+# them on a guess is how a pipeline starts reporting zeros as measurements.
+#
+# `needs` names the identifier the read is keyed on, so the round knows what to resolve
+# first. `grade` is the evidence grade the read produces — both were already defined in
+# grades.py, whose table stays the single source of truth for what a grade means.
+STRUCTURE_READS = {
+    'brand_sov': {
+        'capability': 'brand.get_sov_chart', 'needs': 'brand', 'layer': 'L3',
+        'grade': 'brand_structure', 'label': 'SOV 趋势',
+        'limitation': '千瓜样本占比（SOV），不是市场份额；同一检索口径的站内样本，不含站外投放。'},
+    'brand_pyramid': {
+        'capability': 'brand.get_blogger_pyramid', 'needs': 'brand', 'layer': 'L3',
+        'grade': 'brand_structure', 'label': '合作达人金字塔',
+        'limitation': '覆盖千瓜可观测到的合作笔记；未投放或未被收录的合作不在其中，不是完整合作名单。'},
+    'keyword_trend': {
+        'capability': 'keyword.note_trends', 'needs': 'keyword', 'layer': 'T',
+        'grade': 'trend_series', 'label': '检索词趋势',
+        'limitation': '平台原生日序列（笔记数与互动量）；是检索词的热度轨迹，不等于品类规模或需求变化。'},
+}
+STRUCTURE_READS_VERSION = '2026-10-12.1'
+
 # The default round's allowances. Probe is the default mode and its derived budget equals
 # this dict exactly, which is what keeps a caller that never names a mode from changing
 # behaviour when modes arrived (pinned by tests/signal_desk/test_modes.py). The other modes
@@ -57,12 +95,15 @@ METHOD_VERSION = 'social-intelligence-research-0.2.3'
 # comment_reads starts at 0 and is never derived from a mode recipe: comments serve two
 # task families (§3.3/§3.4), so baking them into every probe would make the default round
 # buy something most questions do not ask for. Opt-in per plan via the budget field.
+# structure_reads starts at 0 for the same reason and is *then* derived per mode: the reads
+# cost no money but do draw on the 千瓜 seat's monthly quota, so the default round must not
+# begin issuing them. See mode_structure_reads().
 BUDGET_DEFAULTS = {'queries': 2, 'pages_per_query': 1, 'samples': 20, 'body_reads': 3,
-                   'comment_reads': 0,
+                   'comment_reads': 0, 'structure_reads': 0,
                    'model_calls': 2, 'context_items': 8, 'search_queries': 1, 'rss_feeds': 3,
                    'enrichment_rounds': 1}
 BUDGET_CAPS = {'queries': 4, 'pages_per_query': 2, 'samples': 60, 'body_reads': 6,
-               'comment_reads': 6,
+               'comment_reads': 6, 'structure_reads': len(STRUCTURE_READS),
                'model_calls': 3, 'context_items': 12, 'search_queries': 2, 'rss_feeds': 3,
                'enrichment_rounds': 1}
 
@@ -110,6 +151,19 @@ MODE_ALIASES = {'速读': 'scan', '速读模式': 'scan', 'scan': 'scan', 'quick
                 '结构': 'frame', '结构模式': 'frame', 'frame': 'frame', 'deep': 'frame'}
 MODE_QUESTION = '这次需要多强的判断？速读（快速看清议题）、定向（验证一个判断）或结构（看清所处位置）。'
 
+
+def mode_structure_reads(mode: str) -> tuple:
+    """The structure reads one round of ``mode`` asks for, read off its own layer claim.
+
+    Derived from §4's layer declaration rather than from a second list of numbers, so the
+    mode and its reads cannot drift apart. ``probe`` declares neither L3 nor T, so its
+    derived allowance is zero — which is exactly what keeps the "naming no mode changes
+    nothing" invariant, the same way `queries` and `body_reads` keep it.
+    """
+    layers = set(MODES[mode]['layers'])
+    return tuple(key for key in STRUCTURE_READS if STRUCTURE_READS[key]['layer'] in layers)
+
+
 # What the pipeline can actually reach today, by layer. Declared beside the task
 # requirements on purpose: a task may lean on a layer only because someone wrote the
 # reader, and layer_gaps() reports every place the two disagree. Without this, a task
@@ -117,9 +171,9 @@ MODE_QUESTION = '这次需要多强的判断？速读（快速看清议题）、
 IMPLEMENTED_LAYERS = {
     'L1': 'search-note/v4（千瓜检索）+ get-note-detail（JustOneAPI 正文，需声明花费额度）',
     'L2': '',
-    'L3': '',
+    'L3': 'brand.get_sov_chart／brand.get_blogger_pyramid（千瓜结构层，固定成本席位，不花变动费用）',
     'L4': '',
-    'T': '',
+    'T': 'keyword.note_trends（千瓜趋势层，固定成本席位，不花变动费用）',
 }
 
 METHODS = {
@@ -226,7 +280,9 @@ def mode_budget(mode: str = DEFAULT_MODE) -> dict:
     """
     allowances = costcontrol.RECIPE_ALLOWANCES[mode]
     return {**BUDGET_DEFAULTS, 'queries': allowances['queries'],
-            'body_reads': allowances['body_reads']}
+            'body_reads': allowances['body_reads'],
+            # No money, but a real draw on the 千瓜 seat's quota, so the count is frozen too.
+            'structure_reads': len(mode_structure_reads(mode))}
 
 
 def resolve_mode(value=None, default: str = DEFAULT_MODE) -> str:
@@ -779,6 +835,11 @@ def create_plan(brand: dict, task: dict, user_inputs: dict | None = None, *, pla
             # budget, never the label — see execution_budget.
             'mode': research_mode, 'mode_definition': dict(MODES[research_mode]),
             'mode_layers': list(MODES[research_mode]['layers']),
+            # Which structure reads this round will attempt, frozen with the plan. Truncated
+            # to the frozen allowance rather than merely checked against it, so the declared
+            # intent and the ceiling cannot disagree: an operator who lowers structure_reads
+            # gets fewer reads, not a plan that fails its own budget when it runs.
+            'structure': list(mode_structure_reads(research_mode)[:budget['structure_reads']]),
             'keyword': keyword, 'queries': cleaned,
             'start_date': start.isoformat(), 'end_date': end.isoformat(),
             'audience': _text(str(inputs.get('audience') or brand.get('audience') or ''), 1000),
@@ -836,6 +897,35 @@ class QianguaAdapter:
 
     def detail(self, url):
         return self._call(['capabilities', 'call', 'note.search_by_url', '--inputs', json.dumps({'url': url}), '--format', 'json'])['result']
+
+    def capability(self, name, inputs):
+        """Call any registered 千瓜 capability by name and return its normalised result.
+
+        Deliberately generic: the read registry holds the capability name, so adding a
+        structural read is a table entry, not a new adapter method. A named method per read
+        would mean every new read is also a code path that can be forgotten from one of the
+        two callers that have to agree on it.
+        """
+        return self._call(['capabilities', 'call', name, '--inputs', json.dumps(inputs),
+                           '--format', 'json'])['result']
+
+    def brand(self, name):
+        """Resolve a brand name to the identifiers the structure reads are keyed on.
+
+        Returns None rather than raising when the search simply finds nothing — "千瓜 does not
+        carry this brand" is a finding about coverage, not a source failure, and the caller
+        words it differently in the run's limitations.
+        """
+        if not str(name or '').strip():
+            return None
+        result = self.capability('brand.search', {'keyword': str(name).strip()})
+        for item in (result.get('normalized_items') or result.get('items') or []):
+            brand_id = item.get('brand_id') or item.get('Id')
+            key = item.get('brand_id_key') or item.get('BrandIdKey')
+            if brand_id and key:
+                return {'id': brand_id, 'key': key,
+                        'name': str(item.get('name') or item.get('Name') or name)}
+        return None
 
 
 def _note(item, query):
@@ -996,6 +1086,196 @@ def collect(plan: dict, run_dir, *, adapter=None, context_config=None) -> dict:
               'collection': collection, 'coverage': {**collection, 'evidence_count': len(evidence)}, 'ledger': ledger}
     private_json(cache, result)
     return result
+
+
+STRUCTURE_PHASE = 'survey'
+STRUCTURE_RESOLVERS = {'brand': 'brand.search'}
+_STRUCTURE_DATE = re.compile(r'^\d{8}$')
+
+
+def _structure_days(plan):
+    """Length of the plan's own window in days — the span every brand read is anchored to."""
+    try:
+        span = (_date(plan['end_date']) - _date(plan['start_date'])).days
+    except (KeyError, TypeError, ValueError):
+        return 0
+    return span + 1 if span >= 0 else 0
+
+
+def _structure_inputs(read, plan, identifiers):
+    """Capability inputs for one read, from what the plan already froze.
+
+    A series is anchored to the plan's own window, not to "the last N days": two series are
+    only comparable if they cover the same dates, and the plan is the only place those dates
+    live. The brand reads take a day count instead, because that is what the capability
+    accepts; it is derived from the same window so the two cannot disagree.
+    """
+    definition = STRUCTURE_READS[read]
+    if definition['needs'] == 'brand':
+        return {'brand_id': identifiers['brand']['id'],
+                'brand_id_key': identifiers['brand']['key'],
+                'days': _structure_days(plan)}
+    return {'keyword': str(plan.get('keyword') or ''), 'start_time': plan.get('start_date'),
+            'end_time': plan.get('end_date')}
+
+
+def _structure_date(code):
+    """``20260913`` -> ``2026-09-13``. A date the vendor did not send stays None."""
+    text = str(code or '')
+    if not _STRUCTURE_DATE.match(text):
+        return None
+    return f'{text[:4]}-{text[4:6]}-{text[6:]}'
+
+
+def _structure_rows(read, result):
+    """The rows one read returned, in the shape that read actually returns.
+
+    Two more shapes (``items[]`` for the brand reads, ``day_list[]`` for the keyword trend),
+    after the three note shapes. Anything else raises rather than degrading to an empty
+    list: an empty list reads as "the market was quiet", and these reads are exactly the
+    ones whose zeros are indistinguishable from a broken parser.
+    """
+    rows = result.get('day_list') if read == 'keyword_trend' else result.get('items')
+    if not isinstance(rows, list):
+        raise SourceError('千瓜结构层返回格式异常；请管理员核对能力版本。')
+    return rows
+
+
+def _structure_points(read, rows, metric):
+    """Comparable points for one series, in the shape editorial_v2._trend_supported reads.
+
+    Shared by the trend reads so the two cannot drift into different date conventions: both
+    drop any row whose date or value the vendor did not actually send, because a point
+    invented to fill a gap is worse than a shorter series.
+    """
+    points = []
+    for row in rows:
+        day = _structure_date(row.get('Date') or row.get('DateCode'))
+        value = row.get(metric)
+        if day and isinstance(value, (int, float)) and not isinstance(value, bool):
+            points.append({'date': day, 'value': float(value)})
+    return points
+
+
+def _structure_evidence(read, plan, result, index):
+    """One L3／T read as a record the editor can read and an operator can audit."""
+    definition = STRUCTURE_READS[read]
+    rows = _structure_rows(read, result)
+    if not rows:
+        return None
+    if read == 'keyword_trend':
+        metric, unit, points = '笔记数', 'note', _structure_points(read, rows, 'NoteCount')
+        detail = '；'.join(f'{row.get("DateStr")} {row.get("NoteCount")} 篇' for row in rows[:5])
+    elif read == 'brand_sov':
+        metric, unit, points = '笔记数占比（SOV）', 'ratio', _structure_points(read, rows, 'NoteCountPercent')
+        detail = '；'.join(f'{row.get("DateStr")} {row.get("NoteCountPercent")}' for row in rows[:5])
+    else:
+        metric, unit, points = None, None, []
+        detail = '；'.join(f'{row.get("PropName")} {row.get("BlogeerCount")} 位'
+                           for row in rows if row.get('PropName'))
+    window = f"{plan.get('start_date')}—{plan.get('end_date')}"
+    series = ({'metric': metric, 'unit': unit, 'source': f'千瓜 {definition["capability"]}',
+               'coverage': f'{window}（{len(points)} 天）', 'points': points} if points else None)
+    item = {'id': f'S{index}', 'provider': 'qiangua', 'platform': 'rednote', 'url': '',
+            'source_id': f"qiangua:{definition['capability']}",
+            'title': definition['label'],
+            'excerpt': (f"{definition['label']}（{window}）：{detail}。" if detail else
+                        f"{definition['label']}（{window}）：{len(rows)} 行，无可读明细。"),
+            'published_at': None, 'retrieved_at': datetime.now(timezone.utc).isoformat(),
+            'query': str(plan.get('keyword') or ''), 'source_grade': definition['grade'],
+            'limitation': definition['limitation'],
+            # Not a page. A page URL is what makes a note claim traceable; an aggregate has no
+            # page, so its provenance is this descriptor — vendor, capability, window — and
+            # editorial_v2 demands one or the other rather than letting a claim float free.
+            'source': {'vendor': 'qiangua', 'capability': definition['capability'],
+                       'layer': definition['layer'], 'read': read, 'rows': len(rows),
+                       'window': {'start_date': plan.get('start_date'),
+                                  'end_date': plan.get('end_date')}},
+            'snapshots': [{'operation': STRUCTURE_PHASE, 'phase': STRUCTURE_PHASE}]}
+    if series:
+        item['time_series'] = series
+    return item
+
+
+def survey(plan, run_dir, *, adapter=None) -> dict:
+    """The round's positioning reads: 千瓜 structure and trend series (METHODOLOGY §2.2 L3／T).
+
+    Runs between retrieval and the first edit, because a positioning read is background *for*
+    the draft rather than a gap *in* it — nothing here is requested by an editor, unlike
+    enrich. Which reads a round asks for was decided when the plan was frozen (its mode's own
+    layer claim), so this function reads the plan and never re-derives the size of the round.
+
+    **No costcontrol here, deliberately.** That gate stops a per-call vendor from being
+    over-drawn; 千瓜 bills by the seat, so these reads cost no money. What they draw on is the
+    seat's monthly quota, which is why the allowance is a count of calls and why a failed read
+    costs nothing but the attempt.
+
+    A read that fails is recorded and skipped, never fatal: retrieval already succeeded, and
+    losing positioning context weakens a round without invalidating it. The matching
+    limitation is written so an operator reads "no structure this round" rather than "no
+    structure exists".
+    """
+    directory = Path(run_dir)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    budget = execution_budget(plan)
+    reads = [read for read in plan.get('structure', []) if read in STRUCTURE_READS]
+    if not plan.get('ready') or not reads or len(reads) > budget['structure_reads']:
+        return {'structure': [], 'reads': reads,
+                'collection': {'status': 'skipped', 'reads': reads, 'errors': [], 'limitations': []},
+                'ledger': []}
+    adapter = adapter or QianguaAdapter()
+    ledger, items, errors, limitations = [], [], [], []
+    identifiers = {}
+    needed = {STRUCTURE_READS[read]['needs'] for read in reads}
+    for need in sorted(needed):
+        if need != 'brand':
+            continue
+        record = {'source': 'qiangua', 'operation': STRUCTURE_RESOLVERS[need]}
+        try:
+            resolved = adapter.brand(str(plan.get('brand_snapshot', {}).get('name') or ''))
+            if not resolved:
+                raise SourceError('千瓜未找到该品牌；结构层本轮跳过。')
+            identifiers['brand'] = resolved
+            record.update(status='success', brand_id=resolved['id'])
+        except SourceError as error:
+            record.update(status='failed', error=str(error))
+            errors.append({'source': 'qiangua', 'operation': STRUCTURE_RESOLVERS[need],
+                           'message': str(error)})
+            limitations.append(f'品牌结构层未取到（{error}）；本轮不含 SOV 与合作结构。')
+        ledger.append(record)
+    for index, read in enumerate(reads, 1):
+        if STRUCTURE_READS[read]['needs'] not in identifiers and STRUCTURE_READS[read]['needs'] != 'keyword':
+            continue
+        definition = STRUCTURE_READS[read]
+        record = {'source': 'qiangua', 'operation': STRUCTURE_PHASE, 'read': read,
+                  'capability': definition['capability'], 'layer': definition['layer']}
+        try:
+            response = _cached_call(directory, f'structure-{read}',
+                                    lambda r=read: adapter.capability(
+                                        STRUCTURE_READS[r]['capability'],
+                                        _structure_inputs(r, plan, identifiers)))
+            item = _structure_evidence(read, plan, response, index)
+            if item is None:
+                record.update(status='success', rows=0)
+                limitations.append(f'{definition["label"]}在此时段没有数据点；本轮不含该读数。')
+            else:
+                items.append(item)
+                record.update(status='success', rows=item['source']['rows'])
+        except SourceError as error:
+            record.update(status='failed', error=str(error))
+            errors.append({'source': 'qiangua', 'operation': read, 'message': str(error)})
+            limitations.append(f'{definition["label"]}未取到；本轮不含该读数。')
+        ledger.append(record)
+        private_json(directory / 'structure-ledger-v2.json', ledger)
+    collection = {'status': 'failed' if ledger and all(r['status'] == 'failed' for r in ledger)
+                  else 'partial' if errors else 'complete' if items else 'empty',
+                  'reads': reads, 'layers': sorted({STRUCTURE_READS[r]['layer'] for r in reads}),
+                  'errors': errors, 'limitations': limitations,
+                  'grades': {item['source_grade']: sum(1 for other in items
+                                                       if other['source_grade'] == item['source_grade'])
+                             for item in items}}
+    return {'structure': items, 'reads': reads, 'collection': collection, 'ledger': ledger,
+            'version': STRUCTURE_READS_VERSION}
 
 
 def _detail_cache_name(reader_name, url):
