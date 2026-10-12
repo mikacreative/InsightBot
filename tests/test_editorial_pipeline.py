@@ -9,10 +9,18 @@ test_editorial_pipeline.py — insightbot.editorial_pipeline 核心逻辑测试
   - run_editorial_pipeline — 完整流水线编排、灰度开关
 """
 import json
+import sys
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Mock feedparser and requests before importing editorial_pipeline
+# (editorial_pipeline imports them at module level)
+_mock_feedparser = MagicMock()
+_mock_requests = MagicMock()
+sys.modules['feedparser'] = _mock_feedparser
+sys.modules['requests'] = _mock_requests
 
 from insightbot.editorial_pipeline import (
     _build_publication_scope_summary,

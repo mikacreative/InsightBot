@@ -25,9 +25,6 @@ venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-# The suite must run with --basetemp=.pytest-tmp inside the workspace: pytest's default
-# temp dir sits under the system folder, where the sandbox blocks it into setup errors.
-.pytest-tmp/
 .coverage
 htmlcov/
 
@@ -63,21 +60,3 @@ insightbot.egg-info/
 marketing_bot.egg-info/
 editorial-intelligence/*.egg-info/
 pytest-of-mikawang/
-
-# Isolated Signal Desk test runtime
-data/signal-desk/
-.venv-signal-desk/
-!.env.signal-desk.example
-
-# Isolated Kestra workflow proof of concept; no runtime credentials in Git.
-.cache/signal-desk-kestra-poc/
-frontend/signal-desk-workflow-poc/node_modules/
-frontend/signal-desk-workflow-poc/dist/
-
-# Local visual artefacts: product intro deck and weekly demo output.
-# Binary deliverables, regenerated from source; keep them out of history.
-docs/signal-desk/intro/
-docs/signal-desk/weekly-demo/
-
-# Agent workspace state, local to this machine (memory, sessions, caches).
-.workbuddy/

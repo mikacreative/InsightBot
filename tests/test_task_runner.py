@@ -8,9 +8,18 @@ test_task_runner.py — insightbot.task_runner 核心逻辑测试
   - pipeline dispatch（通过检查 mock 调用确认）
 """
 
-from unittest.mock import patch
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Mock feedparser and requests before importing editorial_pipeline/smart_brief_runner
+# (they import these at module level)
+_mock_feedparser = MagicMock()
+_mock_requests = MagicMock()
+sys.modules['feedparser'] = _mock_feedparser
+sys.modules['requests'] = _mock_requests
+
 
 class TestRunTaskDryRun:
     """dry_run=True 时不发送任何 channel，完整返回 stage_results。"""
