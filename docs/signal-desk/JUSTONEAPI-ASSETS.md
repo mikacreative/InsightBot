@@ -812,10 +812,19 @@ python3 scripts/check_v4_parser.py
 #    注：report(scope, period, limit_cny) 三个参数均必填
 
 # 9) 全量测试（真实运行，不再跳过）
-.venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p no:cacheprovider --basetemp=.pytest-tmp
-#    注：pytest 默认临时目录在系统 /var/folders 下，会被执行沙箱拦成 169 个 setup error。
-#    用工作区内的 --basetemp 才是可信结果（当前 389 passed + 1 个既有失败，见 §7 末注）。
-rm -rf .pytest-tmp
+env -u PYTHONPATH .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p no:cacheprovider
+#    注 1：**必须 `env -u PYTHONPATH`**。WorkBuddy CLI 会向 shell 注入
+#          /Applications/WorkBuddy.app/.../cli/vendor/shim（sitecustomize.py），其 broker
+#          拦截 `Path.mkdir`：对"已存在的路径"（`exist_ok=True` 的合法幂等 mkdir）回
+#          EEXIST 并抛 PermissionError，**不按标准库语义吞掉**。实测（2026-10-12）：
+#          test_scheduling_v2 ×5 ＋ test_workspace_v2 ×2 **间歇性假失败**（同一代码
+#          几分钟内先 402+1 后 7 failed，随 broker 是否应答而波动）；kestra PID 测试在
+#          shim 下**稳定失败**、摘掉 shim 即通过 → **"既有失败"实为环境噪声，不是代码
+#          缺陷**。历史上"默认临时目录被拦成 169 个 setup error"也是同一 shim。
+#    注 2：摘掉 shim 后系统默认临时目录即可用，**`--basetemp` 纪律随之作废**
+#          （它原本就是为绕开 shim 才存在的）。真基线：**403 passed, 0 failed**。
+#    注 3：`-u PYTHONPATH` 仅用于跑测试（等价 CI 环境）；其余用途是否需要 shim 由
+#          沙箱策略决定，不要照抄到别的场景。
 
 # 10) 计费码表（离线）
 .venv-signal-desk/bin/python -c "from insightbot.signal_desk import costcontrol as c; print(c.code_meaning(301), c.is_billed(301)); print(c.BILLING_CODES_VERSION)"

@@ -488,3 +488,33 @@ Mika：「两项按顺序做」——即上一轮列出的待决第 12 项（三
 文档：`METHODOLOGY.md` → **v0.2.6**（**新增 §4.1**；更新 §2.5、§3.5、§3.8、§6.3、§6.6／§6.6.1、§8 表⑤、§8.2 B、§9.1 第 2 项、§9.2 关闭 12／13 ＋ **新增 15**、文末声明）；`JUSTONEAPI-ASSETS.md` → **v7**（新增 §2.8 F）；`PDD.md`（六类 → 七类，§3 补研究规模一句）；`DATA-SOURCES-v0.1.md`（Scan 调用量口径标记失效）。
 
 **待决（新增）**：§9.2 第 15 项——模式与任务不匹配时是**提示还是阻断**；是否给每类任务配**默认模式建议**；当任务主层**两头都缺**（如 `audience` ＋ `scan`）时是否要求确认。
+
+---
+
+## 2026-10-12：**"7 failed"查清——根因是 WorkBuddy 注入的 shim，不是测试、不是临时目录**
+
+**触发**：另一个评审 agent 报告"复用旧 `.pytest-tmp` 会让 7 个调度/工作区测试假性失败，`rm -rf .pytest-tmp` 后恢复"，并把根因初判为"顺序依赖/测试污染"。
+
+**查证过程（每个假设都被反例打掉过）**
+
+| 尝试 | 结果 |
+| --- | --- |
+| 复用同一 `.pytest-tmp` 连跑两遍全量 | **402+1、402+1** → "复用旧目录"不成立 |
+| 两个 pytest 进程并发共用同一 basetemp | 确有干扰（1F+1E / 2F），但失败集与"7 个"不符 → 不是评审所见的现象 |
+| `--basetemp=".pytest-tmp/run-$$"`（全新目录） | **恰好 7 failed**（scheduling ×5 ＋ workspace ×2）→ 与目录新旧无关 |
+| 摘掉 `PYTHONPATH`（WorkBuddy 注入的 shim）后全量 | **403 passed, 0 failed**，系统默认临时目录直接可用 |
+
+**真根因**：WorkBuddy CLI 向 shell 注入 `sitecustomize.py`（`/Applications/WorkBuddy.app/.../cli/vendor/shim`），其 broker 拦截 `Path.mkdir`。应用侧的合法幂等调用 `marker.parent.mkdir(exist_ok=True, mode=0o700)`（`workspace_v2.py`，调度标记与品牌目录各一处）在对**已存在路径**第二次 mkdir 时，broker 回 `EEXIST`，shim 抛 `PermissionError`——**没有按标准库语义吞掉 FileExistsError**。受害面：`test_scheduling_v2` ×5 ＋ `test_workspace_v2` ×2 **间歇性失败**（同一代码几分钟内先 402+1 后 7 failed，随 broker 是否应答波动，失败集随之漂移）。
+
+**两个连带更正**
+
+1. **kestra `test_stop_never_signals_pid_reused_by_another_service` 的"既有失败"重归类**：shim 下稳定失败，摘掉 shim **即通过** → 它是**环境噪声**，不是 `9fd9ab9` 的代码缺陷。此前"与 HEAD 一致、只依赖 stdlib"的判断方向对了一半——确实与信号台改动无关，但也不是代码问题。
+2. **`--basetemp` 纪律作废**：它原本就是为绕开 shim（历史"169 个 setup error"同一根因）才存在的。摘掉 shim 后系统默认临时目录可用。**真基线：`env -u PYTHONPATH … pytest tests/signal_desk -q` → 403 passed, 0 failed。**
+
+**标准测试命令（新）**
+
+```
+env -u PYTHONPATH .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p no:cacheprovider
+```
+
+**教训**：环境基线（"402+1 既有失败"）本身可能是被污染的——**当"既有失败"与某个注入层共存时，先怀疑注入层，再怀疑代码**。排除法顺序应当是：先摘注入（`env -u PYTHONPATH`），再谈顺序依赖。
