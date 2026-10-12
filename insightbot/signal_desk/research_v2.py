@@ -54,10 +54,15 @@ METHOD_VERSION = 'social-intelligence-research-0.2.3'
 # this dict exactly, which is what keeps a caller that never names a mode from changing
 # behaviour when modes arrived (pinned by tests/signal_desk/test_modes.py). The other modes
 # differ only in `queries` and `body_reads`, both derived from costcontrol.RECIPE_CALLS.
+# comment_reads starts at 0 and is never derived from a mode recipe: comments serve two
+# task families (§3.3/§3.4), so baking them into every probe would make the default round
+# buy something most questions do not ask for. Opt-in per plan via the budget field.
 BUDGET_DEFAULTS = {'queries': 2, 'pages_per_query': 1, 'samples': 20, 'body_reads': 3,
+                   'comment_reads': 0,
                    'model_calls': 2, 'context_items': 8, 'search_queries': 1, 'rss_feeds': 3,
                    'enrichment_rounds': 1}
 BUDGET_CAPS = {'queries': 4, 'pages_per_query': 2, 'samples': 60, 'body_reads': 6,
+               'comment_reads': 6,
                'model_calls': 3, 'context_items': 12, 'search_queries': 2, 'rss_feeds': 3,
                'enrichment_rounds': 1}
 
@@ -65,6 +70,11 @@ BUDGET_CAPS = {'queries': 4, 'pages_per_query': 2, 'samples': 60, 'body_reads': 
 # that switching reader cannot buy extra reads, and so a run that used 千瓜 yesterday
 # cannot re-read the same note for free today.
 BODY_OPERATIONS = ('note.search_by_url', 'note.get_note_detail')
+# One page of a note's comment thread. Its allowance (`comment_reads`) is separate from
+# body_reads on purpose: a comment page prices like a body but answers a different gap
+# (objections, repurchase signals, unanswered questions), and lumping them together
+# would let a round spend its body budget on comments by surprise.
+COMMENT_OPERATION = 'note.get_note_comment'
 DELIVERY_DEFAULTS = {'version': 'selected-signals-0.2', 'max_cards': 3, 'max_lookback': 1,
                      'title_chars': 26, 'observation_chars': 120, 'brand_reference_chars': 60,
                      'boundary_chars': 45, 'question_chars': 40, 'card_chars': 280,
@@ -998,6 +1008,13 @@ def _detail_cache_name(reader_name, url):
     return f'enrich-detail-{reader_name}-' + hashlib.sha256(url.encode()).hexdigest()[:24]
 
 
+def _comment_cache_name(note_id):
+    """Cache key for one comment page. Keyed by note id and reader-free by design:
+    only the JustOneAPI reader offers comments at all, so there is no second reader
+    a cached page could be confused with."""
+    return 'enrich-comment-justoneapi-' + hashlib.sha256(str(note_id).encode()).hexdigest()[:24]
+
+
 def _body_reader(body_adapter, fallback, envelope):
     """Choose who reads a note body, and say why when it is not the paid reader.
 
@@ -1119,6 +1136,9 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
                     target['candidate_ids'].append(request['candidate_id'])
         used_urls = {_source_url(row['url']) for row in attempted_before if row.get('url')}
         remaining = budget['body_reads'] - len(attempted_before)
+        comment_before = [row for row in ledger if row.get('operation') == COMMENT_OPERATION]
+        comment_remaining = budget['comment_reads'] - len(comment_before)
+        comment_refused = ''
         paid = reader_name == 'justoneapi'
         refused = ''
         for url, target in targets.items():
@@ -1214,9 +1234,95 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
                     code = response.get('code')
                 costcontrol.settle(reservation.reservation_id, code=code, note=operation,
                                    ledger=spend_path)
+            if paid and comment_remaining > 0 and not comment_refused:
+                # Comments ride on body targets (终选后按需取): the same finalists a body
+                # was bought for, one latest page each, each page gated and settled on its
+                # own. A comment failure never fails the body read — they answer different
+                # gaps, so they fail separately.
+                comment_remaining -= 1
+                comment_outcome = {'operation': COMMENT_OPERATION, **target}
+                try:
+                    note_id = providers.note_id_from_url(url)
+                except ValueError:
+                    note_id = str(source.get('source_id') or '').strip()
+                comment_cache = _comment_cache_name(note_id)
+                comment_cached = (directory / (comment_cache + '.json')).is_file()
+                if (directory / (comment_cache + '.started')).exists() and not comment_cached:
+                    comment_outcome.update(status='unknown', reason='uncertain_request')
+                    audit['outcomes'].append(comment_outcome)
+                    result.setdefault('collection', {}).setdefault('errors', []).append(
+                        {'source': 'justoneapi', 'operation': COMMENT_OPERATION,
+                         'message': '评论请求结果未知；需先核对记录，不自动重试。'})
+                else:
+                    comment_reservation = None
+                    if not comment_cached:
+                        # A cache hit is not a call: no reservation, no settlement.
+                        try:
+                            comment_reservation = costcontrol.require(
+                                {costcontrol.COMMENT_V2: 1}, envelope, run_id=directory.name,
+                                channel='rest', scope_note=COMMENT_OPERATION,
+                                mode=str(plan.get('mode') or ''), ledger=spend_path)
+                        except costcontrol.BudgetDenied as denial:
+                            comment_refused = denial.decision.reason
+                            comment_outcome.update(status='skipped', reason='budget_denied')
+                            audit['outcomes'].append(comment_outcome)
+                            result.setdefault('collection', {}).setdefault('errors', []).append(
+                                {'source': 'costcontrol', 'operation': COMMENT_OPERATION,
+                                 'message': f'花费额度不足（{denial.decision.detail}），评论补读已停止。'})
+                    if comment_refused:
+                        pass
+                    else:
+                        comment_record = {'source': 'justoneapi', 'operation': COMMENT_OPERATION,
+                                          'phase': 'enrichment', 'url': source['url'], **target,
+                                          'status': 'started'}
+                        ledger.append(comment_record)
+                        audit['comment_attempted'] = audit.get('comment_attempted', 0) + 1
+                        comment_response = comment_failure = None
+                        try:
+                            comment_response = _cached_call(
+                                directory, comment_cache,
+                                lambda value=note_id: body_reader.comments(value))
+                            thread = providers.comments_to_evidence(
+                                comment_response, url=source['url'],
+                                query=source.get('query', ''), note_title=source.get('title', ''))
+                            if thread is None:
+                                comment_record.update(status='success', text_available=False)
+                                comment_outcome.update(status='no_comments')
+                            else:
+                                base_id = f"{target['evidence_ids'][0]}-comments"
+                                thread_id, suffix = base_id, 1
+                                while thread_id in by_id:
+                                    suffix += 1
+                                    thread_id = f'{base_id}{suffix}'
+                                thread.update(id=thread_id, snapshots=[{
+                                    'operation': COMMENT_OPERATION, 'phase': 'enrichment',
+                                    'candidate_ids': target['candidate_ids']}])
+                                result['evidence'].append(thread)
+                                by_id[thread_id] = thread
+                                audit['comments_added'] = audit.get('comments_added', 0) + 1
+                                comment_record.update(status='success', text_available=True)
+                                comment_outcome.update(status='comments_added')
+                        except (SourceError, RuntimeError, ValueError, TypeError,
+                                AttributeError, OSError) as error:
+                            comment_failure = error
+                            comment_record.update(status='failed', error='评论补证未完成；未自动重试。')
+                            comment_outcome.update(status='failed', reason='source_error')
+                            result.setdefault('collection', {}).setdefault('errors', []).append(
+                                {'source': 'justoneapi', 'operation': COMMENT_OPERATION,
+                                 'message': comment_record['error']})
+                        if comment_reservation is not None:
+                            comment_code = getattr(comment_failure, 'code', None)
+                            if isinstance(comment_response, dict):
+                                comment_code = comment_response.get('code')
+                            costcontrol.settle(comment_reservation.reservation_id, code=comment_code,
+                                               note=COMMENT_OPERATION, ledger=spend_path)
+                        audit['outcomes'].append(comment_outcome)
+                private_json(ledger_path, ledger)
+                private_json(directory / 'enrichment-attempt-v2.json', audit)
             private_json(ledger_path, ledger)
             private_json(directory / 'enrichment-attempt-v2.json', audit)
-        if all(o['status'] == 'text_added' for o in audit['outcomes']):
+        body_outcomes = [o for o in audit['outcomes'] if o.get('operation') != COMMENT_OPERATION]
+        if body_outcomes and all(o['status'] == 'text_added' for o in body_outcomes):
             audit['status'] = 'complete'
         else:
             audit['status'] = 'partial' if audit['attempted'] else 'skipped'
@@ -1225,6 +1331,7 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
     collection = result.setdefault('collection', {})
     collection['summary_only'] = sum(grades.summary_only(e.get('source_grade')) for e in result.get('evidence', []))
     collection['bodies'] = sum(grades.is_body(e.get('source_grade')) for e in result.get('evidence', []))
+    collection['comments'] = sum(grades.is_comment(e.get('source_grade')) for e in result.get('evidence', []))
     if collection.get('errors'):
         collection['status'] = 'partial'
     result['coverage'] = {**collection, 'evidence_count': len(result.get('evidence', []))}
