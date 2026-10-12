@@ -2,6 +2,21 @@
 
 This project is Mika's marketing intelligence bot. Default communication with the user is Chinese; code, commands, paths, variables, and file names stay in English.
 
+## Merge Authorization (hard gate)
+
+`main` is the production branch, not an integration branch. A push to `main` runs `.github/workflows/deploy-production.yml`, which deploys to Tencent Cloud (`ubuntu@111.229.166.6:/home/ubuntu/marketing_bot`) and restarts `insightbot-web.service` and `insightbot-scheduler.service`.
+
+**Merging a pull request into `main` is a production deployment.** It requires Mika's explicit authorization in the current conversation.
+
+- Do not treat "commit this round", "push it", "next round", or "continue" as authorization to merge or deploy. Those authorize work on the branch, not on `main`.
+- Authorized without asking: committing and pushing on a feature branch, opening a pull request, running local verification.
+- Not authorized by default: merging to `main`, deploying, running the deploy workflow by hand, changing workflows or repository/environment settings.
+- Development lines stay on their own branch. Signal Desk work lives on `codex/signal-desk`; it is not shipped until Mika says to ship.
+- When Mika does ask to ship, say what the merge will deploy (which commit, which branch, what reaches production) before doing it.
+- If a merge to `main` was already made without authorization, report it and offer to revert; do not keep going.
+
+Rationale on record: on 2026-10-12 five PRs (`#15`–`#19`) were merged into `main` without authorization, each one deploying production, after this branch had sat untouched since 2026-07-20. The Signal Desk line has no runtime relationship to the production app — the production entry points (`scripts/app.py`, `insightbot/cli.py`) never import `signal_desk` — but "no runtime impact" is not the same as "authorized".
+
 ## Current Production Shape
 
 - Local repo: `/Users/mikawang/Documents/GitHub/InsightBot`
