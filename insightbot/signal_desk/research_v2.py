@@ -81,7 +81,9 @@ LAYER_PRIMARY, LAYER_AUX = 'primary', 'aux'
 # not obeyed: every plan took its allowances from one BUDGET_DEFAULTS, so a Scan and a Frame
 # differed in price and in nothing else.
 #
-# The mode holds only what §4 states — trigger, layers, cadence, output. The call volume it
+# The mode holds what §4 states. `cadence` is a **suggestion, not a schedule** (Mika,
+# 2026-10-12): the product lets users shape their own workflows, so what a mode freezes is
+# the strength of the read and its call allowances — never a calendar. The call volume it
 # may spend is *derived* from the recipe in costcontrol (see mode_budget), so the price and
 # the allowance cannot drift apart.
 MODES = {
