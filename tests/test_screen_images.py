@@ -10,10 +10,14 @@ test_screen_images.py — insightbot.screen_images 新闻图片抓取/缓存测�
 """
 
 import struct
+import sys
 from unittest.mock import MagicMock
 
-import insightbot.screen_images as si
-from insightbot.editorial_pipeline import _extract_entry_image
+sys.modules.setdefault("feedparser", MagicMock())
+sys.modules.setdefault("requests", MagicMock())
+
+import insightbot.screen_images as si  # noqa: E402
+from insightbot.editorial_pipeline import _extract_entry_image  # noqa: E402
 
 
 def _png(width: int, height: int, pad: int = 9000) -> bytes:

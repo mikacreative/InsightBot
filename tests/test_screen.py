@@ -12,10 +12,15 @@ test_screen.py — insightbot.screen 电视大屏 P0 测试
 import json
 import os
 import stat
+import sys
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from insightbot.screen import (
+# Mock feedparser and requests before importing task_runner (module-level deps)
+sys.modules.setdefault("feedparser", MagicMock())
+sys.modules.setdefault("requests", MagicMock())
+
+from insightbot.screen import (  # noqa: E402
     EMPTY_MESSAGE,
     build_screen_html,
     build_screen_index_html,
