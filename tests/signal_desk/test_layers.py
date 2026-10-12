@@ -21,24 +21,13 @@ def test_every_task_speaks_the_shared_layer_vocabulary():
 def test_tasks_needing_an_unreachable_layer_are_reported():
     """The check that would have caught 品牌与竞争 running on L1 retrieval alone."""
     gaps = {gap['task_type']: gap['missing_primary'] for gap in r.layer_gaps()}
-    # L3 and T stopped being gaps on 2026-10-12, when the 千瓜 structure and trend reads
-    # landed. The check still has work to do: L2 and L4 have no reader at all.
-    assert 'brand_competition' not in gaps and 'data_change' not in gaps
+    assert gaps['brand_competition'] == ['L3']
     assert gaps['audience'] == ['L2']
-    assert gaps['product'] == ['L4']
+    assert gaps['data_change'] == ['T']
     # 达人方向 needs L2 the same way 人群与使用情境 does — the two differ in what they ask
     # of that layer, not in whether it exists, and it does not.
     assert gaps['creator'] == ['L2']
-    assert set(gaps) == {'product', 'audience', 'creator'}
-
-
-def test_a_layer_is_reachable_exactly_when_a_reader_is_declared_for_it():
-    """One table answers "can the pipeline fetch this?", and the gap check reads that table."""
-    assert r.IMPLEMENTED_LAYERS['L3'] and r.IMPLEMENTED_LAYERS['T']
-    assert not r.IMPLEMENTED_LAYERS['L2'] and not r.IMPLEMENTED_LAYERS['L4']
-    # Every layer a structure read claims is declared implemented, or the two disagree.
-    for definition in r.STRUCTURE_READS.values():
-        assert r.IMPLEMENTED_LAYERS[definition['layer']], definition['capability']
+    assert set(gaps) == {'brand_competition', 'product', 'audience', 'creator', 'data_change'}
 
 
 def test_a_pipeline_that_covers_every_layer_reports_no_gaps():
@@ -53,17 +42,14 @@ def test_a_missing_auxiliary_layer_is_a_weakening_not_a_gap():
 
 
 def test_the_plan_states_its_layers_and_names_the_missing_one():
-    plan = r.create_plan(BRAND, TASK, {'keyword': '测试词', 'task_type': 'product'})
-    assert plan['layers']['L4'] == r.LAYER_PRIMARY and plan['task_type'] == 'product'
-    assert any('未接入' in line and 'L4' in line for line in plan['limitations'])
+    plan = r.create_plan(BRAND, TASK, {'keyword': '测试词', 'task_type': 'brand_competition'})
+    assert plan['layers']['L3'] == r.LAYER_PRIMARY and plan['task_type'] == 'brand_competition'
+    assert any('未接入' in line and 'L3' in line for line in plan['limitations'])
 
 
-def test_a_task_whose_layers_all_have_readers_carries_no_gap_line():
+def test_a_task_with_no_missing_primary_layer_carries_no_gap_line():
     plan = r.create_plan(BRAND, TASK, {'keyword': '测试词', 'task_type': 'content'})
     assert not any('未接入' in line for line in plan['limitations'])
-    # 品牌与竞争 is the other side of the same coin: L3 arrived, so its gap line went away.
-    competition = r.create_plan(BRAND, TASK, {'keyword': '测试词', 'task_type': 'brand_competition'})
-    assert not any('未接入' in line for line in competition['limitations'])
 
 
 class Adapter:
@@ -79,9 +65,9 @@ class Adapter:
 
 def test_the_run_itself_states_the_layer_it_could_not_reach(tmp_path):
     """A gap in the plan is easy to miss; it has to reach the run's own output too."""
-    plan = r.create_plan(BRAND, TASK, {'keyword': '测试词', 'task_type': 'audience'})
+    plan = r.create_plan(BRAND, TASK, {'keyword': '测试词', 'task_type': 'brand_competition'})
     collected = r.collect(plan, tmp_path / 'gap', adapter=Adapter())
-    assert any('未接入' in line and 'L2' in line for line in collected['collection']['limitations'])
+    assert any('未接入' in line and 'L3' in line for line in collected['collection']['limitations'])
 
 
 def test_a_covered_run_carries_no_gap_line(tmp_path):
