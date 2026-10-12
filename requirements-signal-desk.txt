@@ -1,0 +1,9 @@
+# Isolated Signal Desk runtime; existing InsightBot install is not required.
+langgraph==1.2.12
+langgraph-checkpoint-sqlite==3.1.1
+httpx==0.28.1
+
+# Qiangua CLI and optional RSS / public web background adapters.
+requests==2.34.2
+feedparser==6.0.14
+ddgs==9.16.0

@@ -39,3 +39,5 @@ pytest-of-mikawang/
 
 # Editor / agent local state
 .claude/
+
+.venv-signal-desk/
