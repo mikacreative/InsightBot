@@ -36,10 +36,7 @@ Known gap, from the same guide: money is not the only axis. Administrators can c
 requests on the day they are issued and async tasks on the day they are submitted, merged
 across every token in the account). Exceeding it returns ``303`` + HTTP 429, unbilled.
 :class:`Envelope` models currency only, so a plan can pass the money check and still be
-refused upstream. Modelling that second axis was **decided on 2026-10-12** (methodology
-section 9.2, item 9): request counts will join the envelope as a second dimension --
-currency counted per Asia/Shanghai month, request counts per Asia/Shanghai day. It is a
-new work item, **not implemented yet**.
+refused upstream. Whether to model that second axis is an open decision, not an oversight.
 
 Also from the guide, and the reason rule 2 is not paranoia: the vendor advises a 120s
 timeout specifically to avoid "重复请求或误判错误" after network jitter. A client-timeout
