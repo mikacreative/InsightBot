@@ -12,9 +12,10 @@ Design rules, each one earned from a real failure mode:
    that some call sites did not recognise, so a truncated summary passed as a body. The
    same shape of bug in a billing path would silently under-estimate spend. An endpoint
    that is not in the price table, or is listed 未开通, is refused.
-2. **Reserve, then settle.** Authorisation writes a reservation row first, so a retry, a
-   parallel run or a second channel cannot both authorise against the same remaining
-   budget. Settlement afterwards records reality without moving the reservation.
+2. **Reserve, then settle, atomically.** A per-ledger POSIX file lock covers balance
+   reads, checks and reservation writes across threads/processes using this module.
+   Settlement checks and appends under the same lock, so only one settlement wins.
+   This does not deduplicate supplier requests or cover calls bypassing this ledger.
 3. **The ledger is the ledger; the vendor statement is the truth.** Billing settles
    asynchronously (measured: one call showed no balance change, the next showed two
    charges), so local rows are estimates. :func:`reconcile` exists to compare them with
@@ -43,8 +44,8 @@ new work item, **not implemented yet**.
 
 Also from the guide, and the reason rule 2 is not paranoia: the vendor advises a 120s
 timeout specifically to avoid "重复请求或误判错误" after network jitter. A client-timeout
-retry against a call that in fact succeeded is a double charge, which is exactly what the
-pre-call reservation prevents.
+retry against a call that in fact succeeded can be a double charge. Reservations keep
+those calls inside the budget; request deduplication remains the caller's responsibility.
 
 ``research_v2.enrich`` is the one caller: before every paid body read it reserves that one
 detail call, and afterwards it settles with the code the vendor returned. Nothing else in
@@ -62,9 +63,11 @@ time instead of at the statement.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -200,13 +203,40 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+@contextmanager
+def _ledger_lock(path: str | Path, *, shared: bool = False):
+    """Lock one local ledger across threads and processes (macOS/Linux POSIX flock).
+
+    Keep the sidecar inode: unlinking it would let a new caller lock a different inode
+    while an existing caller still owns the old one. OS releases locks on process exit.
+    Resolve aliases before choosing the lock so relative paths and symlinks cooperate.
+    The lock protects bookkeeping only; never hold it during supplier network calls.
+    """
+    ledger = Path(path).expanduser().resolve()
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    handle = os.open(str(ledger) + '.lock', os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(handle, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        try:
+            yield ledger
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+    finally:
+        os.close(handle)
+
+
 def load_ledger(path: str | Path = DEFAULT_LEDGER) -> list[dict]:
     """Read the ledger. A malformed line raises rather than being skipped.
 
     Skipping would under-count spend, which is the one error this module exists to
     prevent; a corrupt ledger must stop the run, not quietly reduce the total.
     """
-    ledger = Path(path)
+    with _ledger_lock(path, shared=True) as ledger:
+        return _read_ledger(ledger)
+
+
+def _read_ledger(ledger: Path) -> list[dict]:
+    """Caller must hold the ledger lock."""
     if not ledger.is_file():
         return []
     rows = []
@@ -222,14 +252,20 @@ def load_ledger(path: str | Path = DEFAULT_LEDGER) -> list[dict]:
 
 def append_ledger(rows, path: str | Path = DEFAULT_LEDGER) -> None:
     """Append rows with owner-only permissions. The file never exists unhardened."""
-    ledger = Path(path)
-    ledger.parent.mkdir(parents=True, exist_ok=True)
+    with _ledger_lock(path) as ledger:
+        _append_ledger(rows, ledger)
+
+
+def _append_ledger(rows, ledger: Path) -> None:
+    """Caller must hold the exclusive ledger lock."""
     payload = ''.join(json.dumps(row, ensure_ascii=False, sort_keys=True) + '\n' for row in rows)
     if not payload:
         return
     handle = os.open(ledger, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(handle, 'a', encoding='utf-8') as stream:
         stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 def _rows_in(row, envelope: Envelope, mode: str | None = None):
@@ -368,26 +404,27 @@ def authorize(calls, envelope: Envelope, *, run_id: str = '', channel: str = 'mc
         raise ValueError("channel must be 'mcp' or 'rest'")
     if mode and not isinstance(mode, str):
         raise ValueError('mode must be a string')
-    rows = load_ledger(ledger)
-    available = remaining(rows, envelope)
-    try:
-        total, lines = estimate(calls)
-    except (ValueError, FileNotFoundError) as error:
-        return Decision(False, 'unpriced', str(error), Decimal('0'), reserved(rows, envelope),
-                        available)
-    if total > available:
-        return Decision(False, 'insufficient_budget',
-                        f'needs {total} but {available} remains in {envelope.scope}/{envelope.period}',
-                        total, reserved(rows, envelope), available, lines)
-    reservation_id = uuid.uuid4().hex[:12]
-    append_ledger([{'kind': 'reserve', 'reservation_id': reservation_id, 'at': _now(),
-                    'scope': envelope.scope, 'period': envelope.period, 'run_id': run_id,
-                    'channel': channel, 'scope_note': scope_note, 'mode': mode,
-                    'estimated_cny': str(total), 'lines': list(lines),
-                    'price_table': Path(pricing.DEFAULT_TABLE).name,
-                    'price_exported_at': pricing.EXPORTED_AT}], ledger)
-    return Decision(True, 'authorized', 'reserved', total, reserved(rows, envelope) + total,
-                    available - total, lines, reservation_id)
+    with _ledger_lock(ledger) as locked_ledger:
+        rows = _read_ledger(locked_ledger)
+        available = remaining(rows, envelope)
+        try:
+            total, lines = estimate(calls)
+        except (ValueError, FileNotFoundError) as error:
+            return Decision(False, 'unpriced', str(error), Decimal('0'), reserved(rows, envelope),
+                            available)
+        if total > available:
+            return Decision(False, 'insufficient_budget',
+                            f'needs {total} but {available} remains in {envelope.scope}/{envelope.period}',
+                            total, reserved(rows, envelope), available, lines)
+        reservation_id = uuid.uuid4().hex[:12]
+        _append_ledger([{'kind': 'reserve', 'reservation_id': reservation_id, 'at': _now(),
+                        'scope': envelope.scope, 'period': envelope.period, 'run_id': run_id,
+                        'channel': channel, 'scope_note': scope_note, 'mode': mode,
+                        'estimated_cny': str(total), 'lines': list(lines),
+                        'price_table': Path(pricing.DEFAULT_TABLE).name,
+                        'price_exported_at': pricing.EXPORTED_AT}], locked_ledger)
+        return Decision(True, 'authorized', 'reserved', total, reserved(rows, envelope) + total,
+                        available - total, lines, reservation_id)
 
 
 def require(calls, envelope: Envelope, **kwargs) -> Decision:
@@ -413,30 +450,31 @@ def settle(reservation_id: str, *, code=None, actual_cny=None, note: str = '',
     """
     if code is not None and actual_cny is not None:
         raise ValueError('pass either code or actual_cny, not both')
-    rows = load_ledger(ledger)
-    reservations = [r for r in rows if r.get('kind') == 'reserve'
-                    and r.get('reservation_id') == reservation_id]
-    if not reservations:
-        raise ValueError(f'unknown reservation {reservation_id!r}')
-    if any(r.get('kind') == 'settle' and r.get('reservation_id') == reservation_id for r in rows):
-        raise ValueError(f'reservation {reservation_id!r} is already settled')
-    expected = Decimal(str(reservations[0]['estimated_cny']))
-    if code is not None:
-        actual = expected if is_billed(code) else Decimal('0')
-    else:
-        actual = expected if actual_cny is None else Decimal(str(actual_cny))
-    row = {'kind': 'settle', 'reservation_id': reservation_id, 'at': _now(),
-           'scope': reservations[0]['scope'], 'period': reservations[0]['period'],
-           'mode': reservations[0].get('mode', ''),
-           'estimated_cny': str(expected), 'actual_cny': str(actual),
-           'variance_cny': str(actual - expected), 'note': note,
-           'billing_codes_version': BILLING_CODES_VERSION}
-    if code is not None:
-        row['code'] = code
-        row['code_meaning'] = code_meaning(code)
-        row['billed'] = is_billed(code)
-    append_ledger([row], ledger)
-    return row
+    with _ledger_lock(ledger) as locked_ledger:
+        rows = _read_ledger(locked_ledger)
+        reservations = [r for r in rows if r.get('kind') == 'reserve'
+                        and r.get('reservation_id') == reservation_id]
+        if not reservations:
+            raise ValueError(f'unknown reservation {reservation_id!r}')
+        if any(r.get('kind') == 'settle' and r.get('reservation_id') == reservation_id for r in rows):
+            raise ValueError(f'reservation {reservation_id!r} is already settled')
+        expected = Decimal(str(reservations[0]['estimated_cny']))
+        if code is not None:
+            actual = expected if is_billed(code) else Decimal('0')
+        else:
+            actual = expected if actual_cny is None else Decimal(str(actual_cny))
+        row = {'kind': 'settle', 'reservation_id': reservation_id, 'at': _now(),
+               'scope': reservations[0]['scope'], 'period': reservations[0]['period'],
+               'mode': reservations[0].get('mode', ''),
+               'estimated_cny': str(expected), 'actual_cny': str(actual),
+               'variance_cny': str(actual - expected), 'note': note,
+               'billing_codes_version': BILLING_CODES_VERSION}
+        if code is not None:
+            row['code'] = code
+            row['code_meaning'] = code_meaning(code)
+            row['billed'] = is_billed(code)
+        _append_ledger([row], locked_ledger)
+        return row
 
 
 def reconcile(observed_delta_cny, *, scope: str, period: str,

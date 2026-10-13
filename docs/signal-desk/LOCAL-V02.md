@@ -601,3 +601,21 @@ env -u PYTHONPATH .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p
 **全量 433 passed, 0 failed**（`env -u PYTHONPATH … pytest tests/signal_desk -q`）。
 
 文档：`METHODOLOGY.md` → **v0.2.9**（L3／T 行 → 🟡、§2.5 增注 4／5、§9.2 第 8 项关闭／第 4 项转入可议／第 14 项关闭／新增第 16 项、文末证据声明四条更新）；`DATA-SOURCES-v0.1.md`（新增 §1.2.1 三条通路与计费口径）；本节。
+
+
+## 2026-10-13：方法论同步与剩余安全缺口复核
+
+`METHODOLOGY.md` 更新为 v0.2.12：同步 pre-flight MVP、结构性零稿暂停、UI 预算、评论／L3／T 与实际快照读取；保留历史决策并标明时点。明确正常工作区仍有人工审阅，快照是在生成计划时写入而非确认时重读。剩余缺口与验收条件统一维护于该文档 §9.3，避免另建安全清单副本。
+
+**新增实证**：临时目录内构造 ¥0.15 信封，两个线程通过 Barrier 同步 `load_ledger` 返回后分别调用真实 `costcontrol.authorize({DETAIL_V1:1})`，两笔均获准；最终 `consumed=0.3000`、`remaining=-0.1500`。仅替换账本读取的同步时点，不替换授权／定价／写入算法；恢复原函数后读取最终账本。无网络或实际扣费，临时目录自动清理。结论：先预留不等于跨调用原子性，优先修授权及结算临界区。其余跨月、撤销、缓存与通知边界为源码复核，未宣称已利用实测。
+
+验证：本次会话此前全量模块测试 454 passed、6 条既有 feedparser 弃用提示；本轮只改文档，不重复执行同一套程序回归。文档差异检查通过。本轮未改实现、运行配置或外部设置，未 commit／push。
+
+
+### 2026-10-13（续）：仅修 P0 费控并发
+
+按 Mika 指令，其他安全项不改实现。`costcontrol.py` 新增每账本 POSIX `flock` 侧车锁：授权读取／检查／预留同一独占临界区，结算查重／写入同锁；公共读取共享锁、追加独占锁，写入 flush + fsync 后释放。路径 resolve 合并相对路径／symlink 别名；锁文件保留，操作系统在进程退出后释放锁，不释放未结算额度。JSONL 格式、供应商调用、预算和重复结算抛 ValueError 的语义保留；不涉及数据库或依赖变更。适用 macOS／Linux 本地文件系统、相同账本且合作加锁的调用，不提供跨主机或绕过账本保障。
+
+新增 `tests/signal_desk/test_costcontrol_concurrency.py` 9 项：线程／spawn 独立进程分别测试额度争抢、冲突重复结算、品牌隔离；写入失败释放锁；进程退出释放锁但保留预留；symlink 别名同锁。通过仅在测试解释器中关闭锁验证两个核心用例均失败（四笔授权／四笔结算获准），恢复锁时通过。全程临时账本，无供应商调用。
+
+验证：费控＋门禁定向 45 passed；`env -u PYTHONPATH .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p no:cacheprovider` → **463 passed, 6 warnings**（既有 feedparser 弃用提示）。方法论只同步 P0 关闭状态，其余建议保留。未 commit／push，未改外部配置。
