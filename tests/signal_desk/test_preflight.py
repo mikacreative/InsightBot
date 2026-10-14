@@ -11,6 +11,8 @@
 * `contract.envelope` 是批准那一刻的快照，`enrich` 读快照而非现读 env（裁定 3）；
 * `plan_hash` 对两个派生键不敏感、对其余键敏感（§7.3-③）。
 """
+from authorization_helpers import approved_plan
+
 import copy
 from decimal import Decimal
 
@@ -248,14 +250,14 @@ def test_an_existing_collection_cache_survives_a_recomputed_preflight(tmp_path, 
 def test_enrich_spends_against_the_approved_snapshot_not_the_current_environment(
         tmp_path, monkeypatch):
     isolated_ledger(tmp_path, monkeypatch, limit='5')
-    approved = plan()
+    approved = approved_plan(plan(), tmp_path)
     monkeypatch.delenv(c.SPEND_LIMIT_ENV, raising=False)     # 批准后额度被撤掉
     paid = PaidReader()
     result = r.enrich(approved, collected(), draft(), tmp_path / 'run', adapter=FreeReader(),
                       body_adapter=paid, spend_ledger=tmp_path / 'spend.jsonl')
     assert paid.urls == [NOTE_URL]
     assert result['evidence'][0]['source_grade'] == 'note_body'
-    rows = c.load_ledger(tmp_path / 'spend.jsonl')
+    rows = [row for row in c.load_ledger(tmp_path / 'spend.jsonl') if row.get('kind') in ('reserve', 'settle')]
     assert [row['kind'] for row in rows] == ['reserve', 'settle']
 
 
@@ -270,11 +272,11 @@ def test_enrich_does_not_start_spending_when_the_snapshot_recorded_no_envelope(
                       body_adapter=paid, spend_ledger=tmp_path / 'spend.jsonl')
     assert paid.urls == [] and free.urls == [NOTE_URL]
     assert result['evidence'][0]['source_grade'] == 'note_segment'
-    assert lines_with(result['collection'], 'limitations', c.SPEND_LIMIT_ENV)
+    assert lines_with(result['collection'], 'limitations', '花费额度授权')
     assert c.load_ledger(tmp_path / 'spend.jsonl') == []
 
 
-def test_an_older_plan_without_a_contract_still_reads_the_environment(tmp_path, monkeypatch):
+def test_an_older_plan_without_a_grant_never_gains_paid_rights_from_environment(tmp_path, monkeypatch):
     """快照功能上线前批准的计划没有 contract 键：回退现读 env，不能崩。"""
     isolated_ledger(tmp_path, monkeypatch, limit='5')
     older = plan()
@@ -282,8 +284,8 @@ def test_an_older_plan_without_a_contract_still_reads_the_environment(tmp_path, 
     paid = PaidReader()
     result = r.enrich(older, collected(), draft(), tmp_path / 'run', adapter=FreeReader(),
                       body_adapter=paid, spend_ledger=tmp_path / 'spend.jsonl')
-    assert paid.urls == [NOTE_URL]
-    assert result['evidence'][0]['source_grade'] == 'note_body'
+    assert paid.urls == []
+    assert result['evidence'][0]['source_grade'] == 'note_segment'
 
 
 def test_a_plan_with_no_brand_id_cannot_hold_an_envelope(tmp_path, monkeypatch):

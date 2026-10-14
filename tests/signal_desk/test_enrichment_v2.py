@@ -1,4 +1,6 @@
 """Gap-directed research, spend bounds and review recovery with fictional data."""
+from authorization_helpers import approved_plan
+
 import copy
 import hashlib
 import json
@@ -380,7 +382,7 @@ class BodyReader:
 def test_body_reader_is_the_only_path_to_note_body(tmp_path):
     """千瓜 tops out at note_segment; JustOneAPI is what makes a card possible at all."""
     reader = BodyReader()
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=Adapter(), body_adapter=reader,
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), tmp_path, adapter=Adapter(), body_adapter=reader,
                       **spend(tmp_path))
     assert reader.urls == [EVIDENCE[0]['url']]
     item = result['evidence'][0]
@@ -395,7 +397,7 @@ def test_missing_token_changes_nothing(tmp_path):
     """No token is not an error: the run behaves exactly as it did before the adapter."""
     reader = providers.JustOneApiAdapter(token='')
     adapter = Adapter()
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=adapter, body_adapter=reader,
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), tmp_path, adapter=adapter, body_adapter=reader,
                       **spend(tmp_path))
     assert len(adapter.details) == 1
     assert result['evidence'][0]['source_grade'] == 'note_segment'
@@ -411,7 +413,7 @@ def test_body_allowance_counts_both_readers(tmp_path):
     initial['ledger'].append({'operation': 'note.search_by_url',
                               'url': 'https://www.xiaohongshu.com/explore/other', 'status': 'failed'})
     reader = BodyReader()
-    result = r.enrich(plan(body_reads=1), initial, research, tmp_path, adapter=Adapter(),
+    result = r.enrich(approved_plan(plan(body_reads=1), tmp_path, limit='5'), initial, research, tmp_path, adapter=Adapter(),
                       body_adapter=reader, **spend(tmp_path))
     assert reader.urls == [] and result['enrichment']['reason'] == 'body_budget'
 
@@ -419,7 +421,7 @@ def test_body_allowance_counts_both_readers(tmp_path):
 def test_body_reader_never_files_a_different_note(tmp_path):
     """A body attached to the wrong source id is worse than no body."""
     reader = BodyReader(note_id='n2')
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=Adapter(),
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), tmp_path, adapter=Adapter(),
                       body_adapter=reader, **spend(tmp_path))
     assert result['evidence'][0]['source_grade'] == 'note_meta'
     assert result['enrichment']['outcomes'][0]['status'] == 'failed'
@@ -433,7 +435,7 @@ def test_body_reader_cache_is_per_reader(tmp_path):
     key = hashlib.sha256(r._source_url(EVIDENCE[0]['url']).encode()).hexdigest()[:24]
     (directory / f'enrich-detail-qiangua-{key}.started').touch()
     reader = BodyReader()
-    result = r.enrich(plan(), collected(), draft(), directory, adapter=Adapter(),
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), directory, adapter=Adapter(),
                       body_adapter=reader, **spend(tmp_path))
     assert reader.urls == [EVIDENCE[0]['url']]
     assert result['enrichment']['outcomes'][0]['status'] == 'text_added'

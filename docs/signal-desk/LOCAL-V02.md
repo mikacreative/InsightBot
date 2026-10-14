@@ -619,3 +619,19 @@ env -u PYTHONPATH .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p
 新增 `tests/signal_desk/test_costcontrol_concurrency.py` 9 项：线程／spawn 独立进程分别测试额度争抢、冲突重复结算、品牌隔离；写入失败释放锁；进程退出释放锁但保留预留；symlink 别名同锁。通过仅在测试解释器中关闭锁验证两个核心用例均失败（四笔授权／四笔结算获准），恢复锁时通过。全程临时账本，无供应商调用。
 
 验证：费控＋门禁定向 45 passed；`env -u PYTHONPATH .venv-signal-desk/bin/python -m pytest tests/signal_desk -q -p no:cacheprovider` → **463 passed, 6 warnings**（既有 feedparser 弃用提示）。方法论只同步 P0 关闭状态，其余建议保留。未 commit／push，未改外部配置。
+
+
+### 2026-10-13（续）：授权生命周期方案，待四项裁定
+
+按 Mika 要求先梳理、不改实现。方案保存于 [AUTHORIZATION-LIFECYCLE-DESIGN-v0.1.md](AUTHORIZATION-LIFECYCLE-DESIGN-v0.1.md)：不可变批准记录 + 当前可撤销规则 + 每轮月度许可；确认时重查当前账号／品牌权限和费用范围；跨月不继承旧 period；撤销与新预留共用 P0 锁，已获准预留仍可结算。需决定跨月续期方式、撤销的切断边界、确认是否锁定整轮额度，以及谁可批准。全为建议、非已裁定；其余 P1 与生产设置不改。未改程序／运行配置、未 commit／push。
+
+
+## 2026-10-14：授权生命周期实现（四项推荐规则已获 Mika 确认）
+
+新增 `authorization.py`，在同一 P0 账本锁内管理版本化规则、不可变 grant、月度许可、撤销与新预留。默认月末到期；定时可明确批准续期至截止日；批准只校验、不占款；researcher 在 admin 规则内确认。当前账号／品牌权限、最新计划、规则版本、期界、付费正文＋评论需求与余量在批准时重新检查，重复确认幂等，记录落盘中断可查原 grant 恢复。额度下调不退款、不扩大旧 grant；撤销阻止新预留但保留旧请求结算；恢复需新确认。旧 plan/env/envelope 不再放行付费，身份或路径不匹配的账本拒绝调用；无数据库迁移或旧运行数据重写。
+
+Workspace 在启用、实际触发、出队及每笔新付费预留前检查授权；研究内容、品牌及准确运行绑定 grant。新月第一次实际预留幂等记续期许可，旧月预留仍旧月结算，不结转、不补跑。来源／方法／额度改变需重新确认。账号角色源文件更新与金额撤销的跨进程线性化区别详见 [方案 §9](AUTHORIZATION-LIFECYCLE-DESIGN-v0.1.md#9-当前实现与验证边界2026-10-14)，不宣称权限文件更新也具备同一账本事务。其他 P1（通用体检硬拒、每日次数轴、外部通知、全入口及发布设置）未实施。
+
+界面新增管理员月度额度及续期许可、研究者双阶段批准预览、定时截止日、单次／定时撤销。修复批准入口被旧摘要面板隐藏、续期字段误触时间 dirty 标记、确认后撤销按钮未刷新的交互问题。Browser plugin 不在当前技能列表，依 frontend-testing-debugging 使用已有 bundled Playwright + 隔离 Chrome；沙箱内 Chrome 启动受限，自动审批通过后在沙箱外使用临时 profile。实测 `127.0.0.1:18979`，1440×1000／390×844：管理员规则保存、预览不发 grant、续期启用、撤销后暂停、单次确认并撤销；0 应用脚本错误、无手机横向溢出。服务使用虚构品牌／本轮临时账号，后台 worker 禁用；账本 0 个 reserve，没有供应商调用或扣费。截图：`/tmp/signal-auth-qa-desktop.png`、`/tmp/signal-auth-qa-mobile.png`。
+
+新增生命周期回归 33 项（含独立进程竞争、撤销与新预留竞态、调用中途撤销阻止评论、当前账号／品牌角色失效、上海月界、截止日、下调／恢复、换账本、旧计划、确认落盘恢复及重启不补跑）。既有付费测试通过真实 grant 取得许可，未放松门禁。模块回归 496 passed、6 条既有 feedparser 弃用提示；Python 编译与 JS 语法检查通过。仅本机验证，未真实供应商／生产验收，未 commit／push。

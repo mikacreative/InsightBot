@@ -12,6 +12,7 @@ from urllib.parse import urlparse, parse_qs
 from .auth import Auth, RateLimitError
 from .workspace import Workspace
 from .workspace_v2 import WorkspaceV2
+from .authorization import AuthorizationError
 
 
 def serve(root, host='127.0.0.1', port=18876):
@@ -152,6 +153,7 @@ def serve(root, host='127.0.0.1', port=18876):
                     if self.path=='/api/revise': self.send(workspace.revise(payload['id'],payload['cards'],payload['checksum'],user['username'],payload.get('summary'))); return
                     if self.path=='/api/review': self.send(workspace.review(payload['id'],payload['decision'],user['username'],payload.get('note',''),payload['checksum'])); return
                     self.send({'error':'没有此操作'},404)
+            except AuthorizationError as error: self.send({'error':str(error)},403)
             except PermissionError: self.send({'error':'无权执行该品牌操作'},403)
             except ValueError as error: self.send({'error':user_error(error)},400)
             except KeyError: self.send({'error':'缺少必要内容，请重新打开这条记录。'},400)
@@ -171,6 +173,12 @@ def user_error(error):
     """Explain known input problems without reflecting provider/user secrets."""
     detail = str(error)
     messages = {
+        '续期截止日期必须': '请填写有效的续期截止日期。',
+        '管理员续期截止日期已经': '允许续期的截止日期已经过去。',
+        '额度必须': '月度额度必须是非负有限金额。',
+        '必须明确选择': '请明确选择付费方式和续期方式。',
+        '只有明确启用的定时': '跨月续期只适用于定时研究。',
+        '不付费执行无需': '不付费执行无需付费续期。',
         '正在处理上一条消息': '正在处理上一条消息，收到回复后再继续。',
         '该规划已提交或曾中断': '这条消息已处理或曾中断，记录已保留。请先查看对话，不要重复发送。',
         '同一规划请求编号': '这条消息的内容已变化，请作为新消息发送。',

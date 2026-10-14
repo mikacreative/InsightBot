@@ -340,7 +340,7 @@ CONTRACT_VERSION = 'contract-0.1'
 # 派生、只读的 plan 键。它们**不参与** collect() 的 plan_hash：plan 的身份是"它要做什么"，
 # 不是"批准它的那一刻环境里有什么"。若把 preflight（含信封余量）算进哈希，同一次批准的
 # collection 缓存会在余额变动后失效，缓存键就绑到了一个与决策无关的量上。
-DERIVED_PLAN_KEYS = ('contract', 'preflight')
+DERIVED_PLAN_KEYS = ('contract', 'preflight', 'authorization')
 
 
 def _approved_envelope(scope):
@@ -1005,7 +1005,7 @@ def create_plan(brand: dict, task: dict, user_inputs: dict | None = None, *, pla
                            + mode_lines,
             'manual_work': '核对来源与观点边界，选择或修订精选判断，批准具体交付版本。'}
     # 末尾挂上的两个派生量：只读、可复算、**不参与 ready**。contract 把四要素显式聚合，
-    # 其中 envelope 是批准这一刻读到的环境变量（裁定 3：批准即承诺，之后可审计）；preflight
+    # 其中 envelope 只是规划时的配置预览，不授予付费权；实际批准由 authorization grant 承载。preflight
     # 是体检结论（预测，不是准入）。两者都被排除在 collect() 的 plan_hash 之外，理由见
     # DERIVED_PLAN_KEYS —— 派生量不该让旧 collection 缓存失效。
     plan['contract'] = _contract(plan, _approved_envelope(str(plan.get('brand_id') or '').strip()))
@@ -1498,7 +1498,7 @@ def _detail_note(response, reader_name, source):
 
 
 def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
-           envelope=None, spend_ledger=None):
+           envelope=None, spend_ledger=None, authorization_clock=None, permission_check=None):
     """One gap-directed round, within the frozen total source and model allowance.
 
     No new queries, providers, URLs or samples are admitted here. Detail bodies
@@ -1509,14 +1509,12 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
     defaults to the real one, so the production path is the same one the tests drive.
     Both are injectable so a test never needs a token or a network call.
 
-    ``envelope`` is the spend ceiling every paid body read draws on, and ``spend_ledger``
-    overrides where those reservations are recorded — named apart from this module's own
-    source ledger, which is a different record of a different thing. When no envelope is
-    passed, the plan's own approved snapshot (``plan['contract']['envelope']``) is used, so
-    the ceiling this run obeys is the one that was read when the plan was approved rather
-    than whatever the environment says now; a plan with no snapshot (approved before that
-    existed) falls back to the environment. With no envelope either way the round falls
-    back to the free reader rather than spending unbounded.
+    Paid reads require a ledger-backed authorization grant, rechecked before every
+    reservation. Legacy environment or contract snapshots confer no paid rights.
+    ``envelope`` is retained for API compatibility but cannot override a grant;
+    ``spend_ledger`` must match the grant's stable ledger identity and path.
+    ``authorization_clock`` and ``permission_check`` let the workspace supply its
+    clock and live account/brand checks without involving network or credentials.
     """
     requests = draft.get('enrichment_requests', [])
     validate_enrichment_requests(requests, collected.get('evidence', []), draft.get('candidates', []))
@@ -1557,24 +1555,31 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
     else:
         adapter = adapter or QianguaAdapter()
         body_adapter = body_adapter if body_adapter is not None else providers.JustOneApiAdapter()
-        if envelope is None:
-            if 'contract' in plan:
-                # 批准即承诺（裁定 3）：有契约快照就从**快照**构造门禁的 Envelope，不再现读
-                # 环境变量——否则批准之后有人改了 SIGNAL_DESK_SPEND_LIMIT_CNY，这一轮的花费
-                # 范围会被静默改写，批准时看到的数和执行时用的数就不是同一个了。
-                # 快照为 None 表示批准时**就没有**信封，处置与"从未声明信封"完全一致：
-                # 走免费片段读取器、不调用付费读取器、写 limitation，不报错。
-                envelope = _envelope_from_snapshot(plan.get('contract'))
-            elif str(plan.get('brand_id') or '').strip():
-                # 老计划没有 contract 键（快照功能上线之前批准的），回退到现读 env，保证不崩。
-                # The envelope is the brand's, not the run's: two runs for one brand in one
-                # period must share one ceiling, or the ceiling is per-run and means nothing.
-                envelope = costcontrol.envelope_from_env(plan['brand_id'])
-        spend_path = Path(spend_ledger) if spend_ledger is not None else costcontrol.ledger_from_env()
+        from . import authorization
+        reference = plan.get('authorization') or {}
+        spend_path = Path(spend_ledger) if spend_ledger is not None else (
+            costcontrol.ledger_from_env() if os.environ.get(costcontrol.SPEND_LEDGER_ENV) else
+            Path(reference.get('ledger_path') or costcontrol.DEFAULT_LEDGER))
+        # Legacy env/envelope snapshots remain readable but no longer confer paid rights.
+        # Explicit envelope injection cannot bypass the grant lifecycle either.
+        envelope = None
+        if reference.get('paid'):
+            try:
+                envelope = authorization.check(spend_path, reference, plan,
+                    at=authorization_clock() if authorization_clock else None,
+                    permission_check=permission_check)
+            except (PermissionError, ValueError, OSError):
+                result.setdefault('collection', {}).setdefault('errors', []).append(
+                    {'source': 'authorization', 'operation': 'enrichment',
+                     'message': '付费授权失效、到期或无法核对；已停止新增付费请求，请重新确认。'})
+                result.setdefault('collection', {}).setdefault('limitations', []).append('没有有效花费额度授权；本轮停止付费补证。')
+                audit.update(reason='authorization_denied', status='skipped')
+                result['enrichment'] = audit
+                return result
         body_reader, reader_name, declined = _body_reader(body_adapter, adapter, envelope)
         if declined == 'no_envelope':
             result.setdefault('collection', {}).setdefault('limitations', []).append(
-                f'未声明花费额度（{costcontrol.SPEND_LIMIT_ENV}），正文补读改用免费片段；本轮不含完整正文。')
+                '未确认有效花费额度授权，正文补读仅使用免费片段；本轮不含完整正文。')
         by_id = {item['id']: item for item in result['evidence']}
         targets = {}
         for request in requests:
@@ -1621,18 +1626,17 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
                 # retry, a parallel run or the MCP channel from authorising against the
                 # same money. A cache hit is not a call, so it neither reserves nor bills.
                 try:
-                    reservation = costcontrol.require({costcontrol.DETAIL_V1: 1}, envelope,
-                                                      run_id=directory.name, channel='rest',
-                                                      scope_note=operation,
-                                                      mode=str(plan.get('mode') or ''),
-                                                      ledger=spend_path)
+                    reservation = authorization.reserve(spend_path, reference, plan,
+                        {costcontrol.DETAIL_V1: 1}, run_id=directory.name,
+                        request_id='body:' + url, at=authorization_clock() if authorization_clock else None,
+                        permission_check=permission_check)
                 except costcontrol.BudgetDenied as denial:
                     refused = denial.decision.reason
                     outcome.update(status='skipped', reason='budget_denied')
                     audit['outcomes'].append(outcome)
                     result.setdefault('collection', {}).setdefault('errors', []).append(
                         {'source': 'costcontrol', 'operation': 'enrichment',
-                         'message': f'花费额度不足（{denial.decision.detail}），正文补读已停止。'})
+                         'message': f'付费授权或额度不可用（{denial.decision.detail}），正文补读已停止。'})
                     continue
             source = by_id[target['evidence_ids'][0]]
             record = {'source': reader_name, 'operation': operation, 'phase': 'enrichment',
@@ -1709,17 +1713,17 @@ def enrich(plan, collected, draft, run_dir, *, adapter=None, body_adapter=None,
                     if not comment_cached:
                         # A cache hit is not a call: no reservation, no settlement.
                         try:
-                            comment_reservation = costcontrol.require(
-                                {costcontrol.COMMENT_V2: 1}, envelope, run_id=directory.name,
-                                channel='rest', scope_note=COMMENT_OPERATION,
-                                mode=str(plan.get('mode') or ''), ledger=spend_path)
+                            comment_reservation = authorization.reserve(spend_path, reference, plan,
+                                {costcontrol.COMMENT_V2: 1}, run_id=directory.name,
+                                request_id='comments:' + url, at=authorization_clock() if authorization_clock else None,
+                                permission_check=permission_check)
                         except costcontrol.BudgetDenied as denial:
                             comment_refused = denial.decision.reason
                             comment_outcome.update(status='skipped', reason='budget_denied')
                             audit['outcomes'].append(comment_outcome)
                             result.setdefault('collection', {}).setdefault('errors', []).append(
                                 {'source': 'costcontrol', 'operation': COMMENT_OPERATION,
-                                 'message': f'花费额度不足（{denial.decision.detail}），评论补读已停止。'})
+                                 'message': f'付费授权或额度不可用（{denial.decision.detail}），评论补读已停止。'})
                     if comment_refused:
                         pass
                     else:

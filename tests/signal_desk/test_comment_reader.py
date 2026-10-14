@@ -9,6 +9,8 @@ Spending rules are inherited, not new: reserve before the call, settle by code
 afterwards, a cache hit neither reserves nor bills, and a comment failure never
 fails the body read it rides on.
 """
+from authorization_helpers import approved_plan
+
 from decimal import Decimal
 
 import pytest
@@ -167,7 +169,7 @@ def test_reader_propagates_the_vendor_code(monkeypatch):
 
 def test_comments_are_off_by_default_and_cost_nothing(tmp_path):
     reader = PaidReader()
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=_free(),
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), tmp_path, adapter=_free(),
                       body_adapter=reader, **spend(tmp_path))
     assert reader.comment_ids == [] and result['enrichment'].get('comment_attempted') is None
     assert result['collection']['comments'] == 0
@@ -175,7 +177,7 @@ def test_comments_are_off_by_default_and_cost_nothing(tmp_path):
 
 def test_a_budgeted_comment_page_is_gated_settled_and_attached(tmp_path):
     reader = PaidReader()
-    result = r.enrich(plan(budget={'comment_reads': 1}), collected(), draft(), tmp_path,
+    result = r.enrich(approved_plan(plan(budget={'comment_reads': 1}), tmp_path, limit='5'), collected(), draft(), tmp_path,
                       adapter=_free(), body_adapter=reader, **spend(tmp_path))
     assert reader.comment_ids == [NOTE_ID]
     threads = [item for item in result['evidence'] if item['source_grade'] == 'note_comment']
@@ -195,7 +197,7 @@ def test_a_budgeted_comment_page_is_gated_settled_and_attached(tmp_path):
 def test_a_failed_comment_page_settles_at_zero_and_keeps_the_body(tmp_path):
     failure = providers.ProviderError('采集失败', code=301)
     reader = PaidReader(comment_failure=failure)
-    result = r.enrich(plan(budget={'comment_reads': 1}), collected(), draft(), tmp_path,
+    result = r.enrich(approved_plan(plan(budget={'comment_reads': 1}), tmp_path, limit='5'), collected(), draft(), tmp_path,
                       adapter=_free(), body_adapter=reader, **spend(tmp_path))
     assert result['evidence'][0]['source_grade'] == 'note_body'
     assert not [item for item in result['evidence'] if item['source_grade'] == 'note_comment']
@@ -211,7 +213,7 @@ def test_a_dry_comment_allowance_does_not_follow_two_targets(tmp_path):
         'GAP|C01|E1,E2|未读正文，无法区分并对照两款表达|对照可改变入选与边界',
         'SCOPE|本轮限定笔芯相关查询；仅有标题，尚不能形成精选判断。'])
     reader = PaidReader()
-    result = r.enrich(plan(budget={'comment_reads': 1}), _collected_two(),
+    result = r.enrich(approved_plan(plan(budget={'comment_reads': 1}), tmp_path, limit='5'), _collected_two(),
                       e.parse_protocol(gap_text), tmp_path,
                       adapter=_free(), body_adapter=reader, **spend(tmp_path))
     assert len(reader.detail_urls) == 2 and reader.comment_ids == [NOTE_ID]

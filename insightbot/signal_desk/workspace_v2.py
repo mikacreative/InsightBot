@@ -27,7 +27,7 @@ from langgraph.types import Command, interrupt
 
 
 from .research_v2 import DELIVERY_DEFAULTS
-from . import grades, scheduling_v2
+from . import grades, scheduling_v2, authorization, costcontrol
 
 DEFAULT_DELIVERY = copy.deepcopy(DELIVERY_DEFAULTS)
 ROLES = {'admin', 'researcher', 'reviewer'}
@@ -400,8 +400,13 @@ class WorkspaceV2:
         revision_reason = self._plan_revision_reason(brand_id, plan, task)
         if revision_reason:
             return revision_reason + '；自动执行已暂停。'
-        if plan.get('checksum') != schedule['plan_checksum'] or not plan.get('ready'):
+        if (not plan.get('ready') or (plan.get('checksum') != schedule['plan_checksum']
+                and authorization.intent(plan) != authorization.intent(schedule['plan_snapshot']))):
             return '研究方案已有新版本；请确认新方案后重新启用自动执行。'
+        try:
+            self._check_authorization(schedule['plan_snapshot'])
+        except (PermissionError, ValueError, OSError):
+            return '付费或执行授权已失效、到期或无法核对；请重新确认自动执行。'
         return None
 
     def _pause_schedule(self, brand_id, task_id, reason):
@@ -502,10 +507,13 @@ class WorkspaceV2:
                         proposal.get('checksum') != payload['proposal_checksum'] or
                         config != self._schedule_config(proposal)):
                     raise ValueError('自动执行候选已变化，请刷新设置后确认')
+            reference = self._approve(plan, payload, user, schedule=config)
+            schedule_plan = copy.deepcopy(plan)
+            schedule_plan['authorization'] = reference
             schedule = {'id': task_id, 'task_id': task_id, 'brand_id': brand_id,
-                        'confirmation_id': uuid.uuid4().hex, 'enabled': True, 'status': 'enabled',
+                        'confirmation_id': reference['grant_id'] if reference.get('paid') else uuid.uuid4().hex, 'enabled': True, 'status': 'enabled',
                         'plan_id': plan['id'], 'plan_checksum': plan['checksum'],
-                        'plan_snapshot': copy.deepcopy(plan), 'timezone': scheduling_v2.TIMEZONE,
+                        'plan_snapshot': schedule_plan, 'authorization': reference, 'timezone': scheduling_v2.TIMEZONE,
                         'summary': scheduling_v2.summary(config), 'next_run_at': future,
                         'created_at': now(), 'updated_at': now(), 'created_by': user['username'],
                         'paused_reason': None, 'last_run_at': None, 'last_job_id': None, **config}
@@ -515,7 +523,8 @@ class WorkspaceV2:
             prior = self._optional(brand_id, 'schedules', task_id)
             if (prior and prior.get('enabled') and prior.get('plan_id') == plan['id']
                     and prior.get('plan_checksum') == plan['checksum'] and prior.get('created_by') == user['username']
-                    and self._schedule_config(prior) == config):
+                    and self._schedule_config(prior) == config
+                    and prior.get('authorization') == reference):
                 # Repeated button submits do not invalidate an already queued run.
                 return self._schedule_response(brand_id, task_id) | {
                     'message': '自动执行已启用。' + prior['summary']}
@@ -817,22 +826,104 @@ class WorkspaceV2:
                 return result[0]
             return {'conversations': result}
 
+    def _spend_path(self):
+        value = os.environ.get(costcontrol.SPEND_LEDGER_ENV, '').strip()
+        return Path(value).expanduser().resolve() if value else self.root / 'spend.jsonl'
+
+    def _approval_permission(self, brand_id, username):
+        current = self._current_account(username)
+        self._brand(brand_id, current, 'researcher')
+
+    def authorization_policy(self, payload, user):
+        brand_id = identifier(payload.get('brand_id'))
+        current = self._current_account(user['username'])
+        self._brand(brand_id, current, 'admin')
+        return authorization.set_policy(self._spend_path(), brand_id,
+            monthly_limit=payload.get('monthly_limit'), enabled=payload.get('enabled'),
+            allow_renew=payload.get('allow_renew', False), renew_until=payload.get('renew_until'),
+            expected_version=payload.get('expected_version'), actor=current['username'], at=self._schedule_clock())
+
+    def approval_preview(self, payload, user):
+        brand_id = identifier(payload.get('brand_id'))
+        self._approval_permission(brand_id, user['username'])
+        plan = self._read(brand_id, 'plans', payload.get('plan_id'))
+        if payload.get('checksum') != plan['checksum'] or self._plan_revision_reason(brand_id, plan):
+            raise ValueError('方案已变化，请刷新后确认')
+        config = (scheduling_v2.configuration({key: payload[key] for key in scheduling_v2.CONFIG_FIELDS if key in payload})
+                  if payload.get('for_schedule') else None)
+        return authorization.preview(self._spend_path(), plan, schedule=config,
+            auto_renew=payload.get('auto_renew', False), renew_until=payload.get('renew_until'), at=self._schedule_clock())
+
+    def _approve(self, plan, payload, user, schedule=None):
+        self._approval_permission(plan['brand_id'], user['username'])
+        funding = payload.get('funding', 'free')
+        if funding not in ('paid', 'free'):
+            raise ValueError('必须明确选择付费授权或不付费执行')
+        if funding == 'free':
+            if payload.get('auto_renew'):
+                raise ValueError('不付费执行无需付费续期')
+            return authorization.free(plan, user['username'])
+        confirmation_id = identifier(payload.get('approval_request_id'))
+        return authorization.issue(self._spend_path(), plan, actor=user['username'],
+            confirmation_id=confirmation_id, approval_token=payload.get('approval_token'),
+            schedule=schedule, auto_renew=payload.get('auto_renew', False),
+            renew_until=payload.get('renew_until'), at=self._schedule_clock(),
+            permission_check=lambda name: self._approval_permission(plan['brand_id'], name))
+
+    def revoke_authorization(self, payload, user):
+        brand_id = identifier(payload.get('brand_id'))
+        current = self._current_account(user['username'])
+        _, roles = self._brand(brand_id, current, 'researcher')
+        plan = self._read(brand_id, 'plans', payload.get('plan_id'))
+        schedule = self._optional(brand_id, 'schedules', plan['task_id']) if payload.get('for_schedule') else None
+        reference = (schedule or {}).get('authorization') if payload.get('for_schedule') else plan.get('authorization')
+        if not reference or not reference.get('paid'):
+            raise ValueError('没有可撤销的付费授权')
+        if 'admin' not in roles and reference.get('approved_by') != user['username']:
+            raise PermissionError('只能撤销自己的任务授权')
+        authorization.revoke(self._spend_path(), reference, actor=user['username'], scope=brand_id, at=self._schedule_clock())
+        if schedule:
+            self._pause_schedule(brand_id, plan['task_id'], '付费授权已撤销；需重新确认后启用。')
+        return {'revoked': True, 'grant_id': reference['grant_id']}
+
+    def _check_authorization(self, plan):
+        reference = plan.get('authorization')
+        if not reference:
+            raise authorization.AuthorizationError('旧方案尚未确认执行授权，请重新确认')
+        if reference.get('paid'):
+            authorization.check(self._spend_path(), reference, plan, at=self._schedule_clock(),
+                permission_check=lambda name: self._approval_permission(plan['brand_id'], name))
+        else:
+            self._approval_permission(plan['brand_id'], reference['approved_by'])
+
     def confirm(self, payload, user):
         brand_id = identifier(payload.get('brand_id'))
         with self.lock:
-            self._brand(brand_id, user, 'researcher')
+            self._approval_permission(brand_id, user['username'])
             plan = self._read(brand_id, 'plans', payload.get('plan_id'))
-            if payload.get('checksum') != plan['checksum']:
-                raise ValueError('计划已变化，请刷新并重新确认')
             reason = self._plan_revision_reason(brand_id, plan)
             if reason:
                 raise ValueError(reason)
+            # Repeating an already persisted confirmation is read-only; a fresh paid
+            # confirmation must still match the current checksum and preview.
+            if (plan.get('authorization') and payload.get('checksum') == plan.get('approved_from_checksum')
+                    and (payload.get('approval_request_id') == plan.get('approval_request_id'))):
+                self._check_authorization(plan)
+                return plan
+            if payload.get('checksum') != plan['checksum']:
+                raise ValueError('计划已变化，请刷新并重新确认')
             if not plan.get('ready', False):
                 raise ValueError('方案还需要调整，请先补充回答或修改设置')
-            if plan['status'] == 'draft':
-                plan.update(status='confirmed', confirmed_by=user['username'],
-                            confirmed_at=now(), updated_at=now())
-                self._save(brand_id, 'plans', plan)
+            if plan.get('status') in ('executing', 'executed'):
+                raise ValueError('已经开始执行的方案不能重新授权，请建立新方案')
+            reference = self._approve(plan, payload, user)
+            plan.update(status='confirmed', confirmed_by=user['username'],
+                        confirmed_at=now(), updated_at=now(), authorization=reference,
+                        approved_from_checksum=plan['checksum'],
+                        approval_request_id=payload.get('approval_request_id'))
+            plan.pop('checksum', None)
+            plan['checksum'] = digest(plan)
+            self._save(brand_id, 'plans', plan)
             return plan
 
     def execute(self, payload, user):
@@ -855,6 +946,8 @@ class WorkspaceV2:
                 raise ValueError('上一轮仍在执行，请等完成后再开始本轮研究')
             if plan['status'] != 'confirmed':
                 raise ValueError('执行前必须确认研究计划')
+            self._approval_permission(brand_id, user['username'])
+            self._check_authorization(plan)
             job = {'id': job_id, 'run_id': job_id, 'brand_id': brand_id,
                    'task_id': plan['task_id'], 'issue_id': plan.get('issue_id'),
                    'plan_id': plan['id'], 'plan_checksum': plan['checksum'],
@@ -988,7 +1081,9 @@ class WorkspaceV2:
             self._check_scheduled_job(brand_id, state['run_id'])
             self._phase(brand_id, state['run_id'], 'enriching')
             run_dir = directory / 'runs' / identifier(state['run_id'])
-            result = research_v2.enrich(state['plan'], state['collected'], state['delivery'], run_dir)
+            result = research_v2.enrich(state['plan'], state['collected'], state['delivery'], run_dir,
+                spend_ledger=self._spend_path(), authorization_clock=self._schedule_clock,
+                permission_check=lambda name: self._approval_permission(brand_id, name))
             self._write(run_dir / 'collection.json', result)
             status = 'reediting' if result['enrichment']['attempted'] else 'validating'
             self._phase(brand_id, state['run_id'], status)
@@ -1069,6 +1164,7 @@ class WorkspaceV2:
             self._phase(brand_id, job_id, 'collecting')
         connection = None
         try:
+            self._check_authorization(plan)
             graph, connection = self._graph(brand_id)
             config = {'configurable': {'thread_id': job_id}}
             result = graph.invoke({'brand_id': brand_id, 'task_id': job['task_id'],
@@ -1079,10 +1175,10 @@ class WorkspaceV2:
                     job.update(status=result.get('status', 'awaiting_review'), updated_at=now())
                     self._save(brand_id, 'jobs', job)
                 self._finish_scheduled_job(brand_id, job, result.get('collected'))
-        except ScheduledPauseError as exc:
+        except (ScheduledPauseError, PermissionError) as exc:
             with self.lock:
                 job = self._read(brand_id, 'jobs', job_id)
-                job.update(status='interrupted', updated_at=now(), error_code='schedule_paused',
+                job.update(status='interrupted', updated_at=now(), error_code='schedule_paused' if isinstance(exc, ScheduledPauseError) else 'authorization_invalid',
                            error=str(exc) + '已发生的调用需要核对，不自动重试。')
                 self._save(brand_id, 'jobs', job)
                 self._finish_scheduled_job(brand_id, job)
@@ -1250,6 +1346,8 @@ class WorkspaceV2:
                 return {'markdown': editorial_v2.render_markdown(edition['delivery'],
                             edition['evidence'], brand_name=edition.get('brand_snapshot', brand)['name']),
                         'filename': 'signal-deck-' + job['id'] + '.md'}
+            if route == 'authorization-policy':
+                return {'policy': authorization.policy(self._spend_path(), brand_id)}
             if route == 'config':
                 return {'brand_id': brand_id, 'roles': roles,
                         'can_research': bool({'admin', 'researcher'} & set(roles)),
@@ -1272,7 +1370,8 @@ class WorkspaceV2:
                    'execute': self.execute, 'revise': self.revise,
                    'review': self.review, 'feedback': self.feedback,
                    'schedule-preview': self.schedule_preview, 'schedule': self.save_schedule,
-                   'task-title': self.task_title}
+                   'task-title': self.task_title, 'authorization-policy': self.authorization_policy,
+                   'approval-preview': self.approval_preview, 'authorization-revoke': self.revoke_authorization}
         if route not in actions:
             raise ValueError('没有此接口')
         return actions[route](payload, user)

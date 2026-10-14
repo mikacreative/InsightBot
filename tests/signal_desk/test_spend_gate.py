@@ -8,6 +8,8 @@ These drive the real gate rather than a stand-in. A spend control proven only th
 fake is not a proven spend control, and the failure it prevents (double-spending one
 balance from two channels) stays invisible until the statement arrives.
 """
+from authorization_helpers import approved_plan
+
 import copy
 import hashlib
 from decimal import Decimal
@@ -50,7 +52,7 @@ def spend(tmp_path, limit='5'):
 
 
 def ledger_rows(tmp_path):
-    return c.load_ledger(tmp_path / 'spend.jsonl')
+    return [row for row in c.load_ledger(tmp_path / 'spend.jsonl') if row.get('kind') in ('reserve', 'settle')]
 
 
 class PaidReader:
@@ -88,7 +90,7 @@ class FreeReader:
 
 def test_a_paid_read_reserves_before_the_call_and_settles_with_the_vendor_code(tmp_path):
     reader = PaidReader()
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=FreeReader(),
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), tmp_path, adapter=FreeReader(),
                       body_adapter=reader, **spend(tmp_path))
     assert reader.urls == [NOTE_URL]
     assert result['evidence'][0]['source_grade'] == 'note_body'
@@ -108,7 +110,7 @@ def test_a_paid_read_reserves_before_the_call_and_settles_with_the_vendor_code(t
 def test_a_failed_body_read_settles_at_zero_and_gives_the_budget_back(tmp_path):
     """The vendor bills code=0 only, so a hold that was never billed must be released."""
     reader = PaidReader(failure=providers.ProviderError('采集失败', code=301))
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=FreeReader(),
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), tmp_path, adapter=FreeReader(),
                       body_adapter=reader, **spend(tmp_path))
     assert reader.urls == [NOTE_URL]
     assert result['evidence'][0]['source_grade'] == 'note_meta'
@@ -129,7 +131,7 @@ def test_a_cached_body_neither_reserves_nor_bills(tmp_path):
         '{"code": 0, "data": [{"note_list": [{"id": "n1", "desc": "缓存中的正文，虚构文本。"}]}]}',
         encoding='utf-8')
     paid, free = PaidReader(), FreeReader()
-    result = r.enrich(plan(), collected(), draft(), directory, adapter=free,
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), directory, adapter=free,
                       body_adapter=paid, **spend(tmp_path))
     assert paid.urls == [] and result['evidence'][0]['excerpt'] == '缓存中的正文，虚构文本。'
     assert ledger_rows(tmp_path) == []
@@ -137,7 +139,7 @@ def test_a_cached_body_neither_reserves_nor_bills(tmp_path):
 
 def test_an_exhausted_envelope_stops_before_calling_the_source(tmp_path):
     reader = PaidReader()
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=FreeReader(),
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='0.10'), collected(), draft(), tmp_path, adapter=FreeReader(),
                       body_adapter=reader, **spend(tmp_path, limit='0.10'))
     assert reader.urls == [] and ledger_rows(tmp_path) == []
     assert result['enrichment']['attempted'] == 0
@@ -149,9 +151,10 @@ def test_an_exhausted_envelope_stops_before_calling_the_source(tmp_path):
 
 def test_an_unpriced_endpoint_is_refused_rather_than_read_for_free(tmp_path, monkeypatch):
     """The gate fails closed: if it cannot price the call, it does not make it."""
+    approved = approved_plan(plan(), tmp_path)
     monkeypatch.setattr(r.costcontrol, 'DETAIL_V1', '/api/xiaohongshu/not-a-real-endpoint/v9')
     reader = PaidReader()
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=FreeReader(),
+    result = r.enrich(approved, collected(), draft(), tmp_path, adapter=FreeReader(),
                       body_adapter=reader, **spend(tmp_path))
     assert reader.urls == [] and ledger_rows(tmp_path) == []
     assert result['enrichment']['reason'] == 'budget_denied'
@@ -177,29 +180,28 @@ def test_the_default_body_reader_is_the_real_adapter(tmp_path, monkeypatch):
     """Nothing in production injects it, so the default has to be the one that spends."""
     reader = PaidReader()
     monkeypatch.setattr(providers, 'JustOneApiAdapter', lambda *args, **kwargs: reader)
-    result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=FreeReader(), **spend(tmp_path))
+    result = r.enrich(approved_plan(plan(), tmp_path, limit='5'), collected(), draft(), tmp_path, adapter=FreeReader(), **spend(tmp_path))
     assert reader.urls == [NOTE_URL]
     assert result['evidence'][0]['source_grade'] == 'note_body'
 
 
-def test_the_envelope_is_resolved_from_the_environment_for_the_plans_brand(tmp_path, monkeypatch):
+def test_environment_alone_cannot_authorize_an_unapproved_plan(tmp_path, monkeypatch):
     reader = PaidReader()
     monkeypatch.setattr(providers, 'JustOneApiAdapter', lambda *args, **kwargs: reader)
     monkeypatch.setenv(c.SPEND_LIMIT_ENV, '1.00')
     monkeypatch.setenv(c.SPEND_LEDGER_ENV, str(tmp_path / 'spend.jsonl'))
     result = r.enrich(plan(), collected(), draft(), tmp_path, adapter=FreeReader())
-    assert reader.urls == [NOTE_URL]
-    assert result['evidence'][0]['source_grade'] == 'note_body'
-    state = c.report(BRAND['id'], c.period_of(), '1.00', ledger=tmp_path / 'spend.jsonl')
-    assert state['scope'] == BRAND['id'] and Decimal(state['consumed_cny']) == Decimal('0.15')
+    assert reader.urls == []
+    assert result['evidence'][0]['source_grade'] == 'note_segment'
+    assert ledger_rows(tmp_path) == []
 
 
 def test_the_envelope_belongs_to_the_brand_not_the_run(tmp_path):
     """Two runs for one brand draw on one ceiling; a per-run ceiling means nothing."""
     shared = spend(tmp_path, limit='0.20')
-    first = r.enrich(plan(), collected(), draft(), tmp_path / 'first', adapter=FreeReader(),
+    first = r.enrich(approved_plan(plan(), tmp_path, limit='0.20'), collected(), draft(), tmp_path / 'first', adapter=FreeReader(),
                      body_adapter=PaidReader(), **shared)
-    second = r.enrich(plan(), collected(), draft(), tmp_path / 'second', adapter=FreeReader(),
+    second = r.enrich(approved_plan(plan(), tmp_path, limit='0.20'), collected(), draft(), tmp_path / 'second', adapter=FreeReader(),
                       body_adapter=PaidReader(), **shared)
     assert first['evidence'][0]['source_grade'] == 'note_body'
     assert second['enrichment']['reason'] == 'budget_denied'
@@ -216,7 +218,7 @@ def test_a_paid_read_records_the_mode_that_authorised_it(tmp_path):
     exactly where it matters.
     """
     framed = r.create_plan(BRAND, TASK, {'keyword': '笔芯兼容', 'mode': 'frame'})
-    r.enrich(framed, collected(), draft(), tmp_path, adapter=FreeReader(),
+    r.enrich(approved_plan(framed, tmp_path, limit='5'), collected(), draft(), tmp_path, adapter=FreeReader(),
              body_adapter=PaidReader(), **spend(tmp_path))
     assert ledger_rows(tmp_path)[0]['mode'] == 'frame'
     assert ledger_rows(tmp_path)[1]['mode'] == 'frame'
