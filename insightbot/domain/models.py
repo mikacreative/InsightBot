@@ -267,11 +267,19 @@ class RunTrace:
         stage_results = result.get("stage_results", {}) or {}
         pipeline = str(result.get("pipeline") or "")
         global_candidates = stage_results.get("global_candidates", [])
-        screened_items = (stage_results.get("screened_result", {}) or {}).get("screened", [])
+        screening = stage_results.get("screened_result", {}) or {}
+        screened_items = screening.get("screened", [])
         assignment = stage_results.get("assignment_result", {}) or {}
         category_map = assignment.get("category_candidate_map", {}) or {}
         unassigned = assignment.get("unassigned", []) or []
         category_results = stage_results.get("category_results", {}) or {}
+        final_edit_sections = {
+            category: batch["diagnostics"]
+            for category, payload in category_results.items()
+            if isinstance(payload, dict)
+            for batch in payload.get("batches", []) or []
+            if isinstance(batch, dict) and batch.get("stage") == "final_edit" and batch.get("diagnostics")
+        }
         selected_count = sum(
             len((payload or {}).get("selected_items", []) or [])
             for payload in category_results.values()
@@ -291,17 +299,28 @@ class RunTrace:
         if not selected_count and screened_items and pipeline in {"editorial-intelligence", "classic"}:
             selected_count = len(screened_items)
 
+        assigned_count = sum(len(items or []) for items in category_map.values())
         stages = [
             RunStage(stage="fetch", output_count=len(global_candidates)),
-            RunStage(stage="screen", input_count=len(global_candidates), output_count=len(screened_items)),
+            RunStage(
+                stage="screen",
+                ok=bool(screening.get("ok", True)),
+                input_count=len(global_candidates),
+                output_count=len(screened_items),
+            ),
             RunStage(
                 stage="assign",
                 input_count=len(screened_items),
-                output_count=sum(len(items or []) for items in category_map.values()),
+                output_count=assigned_count,
                 warnings=[f"{len(unassigned)} unassigned candidates"] if unassigned else [],
                 metadata={"unassigned_count": len(unassigned)},
             ),
-            RunStage(stage="generate", input_count=sum(len(items or []) for items in category_map.values()), output_count=selected_count),
+            RunStage(
+                stage="generate",
+                input_count=assigned_count,
+                output_count=selected_count,
+                metadata={"sections": final_edit_sections} if final_edit_sections else {},
+            ),
             RunStage(stage="render", output_count=1 if str(result.get("final_markdown", "")).strip() else 0),
             RunStage(
                 stage="send",
@@ -478,11 +497,40 @@ class DiagnosisReport:
                 )
             )
         if trace.stage("render").output_count == 0:
+            message = "运行没有生成最终简报内容。"
+            evidence = []
+            sections = trace.stage("generate").metadata.get("sections", {})
+            if sections:
+                labels = {
+                    "model_returned_none": "模型明确返回无可保留内容",
+                    "model_dropped_all": "模型舍弃了全部候选",
+                    "model_no_keep": "模型未返回保留项",
+                    "model_request_failed": "终筛模型请求失败",
+                    "invalid_model_response": "终筛模型返回无法解析",
+                    "keep_rejected": "模型保留项未通过校验或改写",
+                }
+                details = "，".join(
+                    f"{name}（{labels.get(section.get('empty_reason'), '未生成正文')}）"
+                    for name, section in sections.items()
+                )
+                message = f"终筛未生成正文。{details}"
+                evidence = [{"reason": "final_selection_empty", "sections": sections}]
+            elif not trace.stage("screen").ok:
+                evidence = [{"reason": "screening_failed"}]
+            elif trace.errors:
+                evidence = [{"reason": "pipeline_error"}]
+            elif not trace.stage("fetch").output_count:
+                evidence = [{"reason": "no_candidates_fetched"}]
+            elif not trace.stage("screen").output_count:
+                evidence = [{"reason": "no_candidates_after_screening"}]
+            elif trace.pipeline == "editorial" and not trace.stage("assign").output_count:
+                evidence = [{"reason": "no_candidates_assigned"}]
             findings.append(
                 DiagnosisFinding(
                     type="empty_final_output",
                     severity="warning",
-                    message="运行没有生成最终简报内容。",
+                    message=message,
+                    evidence=evidence,
                     suggested_actions=["review_generation_stage", "dry_run_task"],
                 )
             )
