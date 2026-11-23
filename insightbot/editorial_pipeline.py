@@ -166,9 +166,12 @@ def _validate_final_title(value: str, *, title_max_len: int) -> str:
     return title
 
 
+def _clean_final_summary(value: str) -> str:
+    return re.sub(r"^💡\s*", "", _clean_final_text(value)).strip("*_` \t")
+
+
 def _validate_final_summary(value: str, *, summary_max_len: int) -> str:
-    summary = _clean_final_text(value)
-    summary = re.sub(r"^💡\s*", "", summary).strip("*_` \t")
+    summary = _clean_final_summary(value)
     if _is_explicit_empty_ai_response(summary):
         return ""
     if not summary or len(summary) > summary_max_len:
@@ -266,7 +269,9 @@ def _parse_assignment_lines(raw: str, valid_refs: set[str], category_list: list[
     return parsed
 
 
-def _parse_summary_lines(raw: str, valid_refs: set[str], *, summary_max_len: int) -> dict[str, str]:
+def _parse_summary_lines(
+    raw: str, valid_refs: set[str], *, summary_max_len: int, strict: bool = False
+) -> dict[str, str]:
     """Parse line output: C001 | rewritten summary."""
     summaries: dict[str, str] = {}
     for line in str(raw or "").splitlines():
@@ -275,7 +280,10 @@ def _parse_summary_lines(raw: str, valid_refs: set[str], *, summary_max_len: int
             continue
         ref = parts[0].lstrip("-* ").strip()
         if ref in valid_refs and ref not in summaries:
-            summary = _clean_summary_text(parts[1], limit=summary_max_len)
+            if strict:
+                summary = _validate_final_summary(parts[1], summary_max_len=summary_max_len)
+            else:
+                summary = _clean_summary_text(parts[1], limit=summary_max_len)
             if summary:
                 summaries[ref] = summary
     return summaries
@@ -287,8 +295,9 @@ def _parse_final_edit_lines(
     *,
     title_max_len: int,
     summary_max_len: int,
+    rejected_keeps: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
-    """Parse Stage 4 output: C001 | KEEP/DROP | final title | final summary | reason."""
+    """Parse decisions and optionally retain rejected KEEP drafts for validation and repair."""
     parsed: dict[str, dict] = {}
     for line in str(raw or "").splitlines():
         parts = [part.strip() for part in re.split(r"\s*[|]\s*", line.strip(), maxsplit=4)]
@@ -310,10 +319,25 @@ def _parse_final_edit_lines(
             }
             continue
         if len(parts) < 4:
+            if rejected_keeps is not None:
+                rejected_keeps[ref] = {"reason": "malformed_keep"}
             continue
         title = _validate_final_title(parts[2], title_max_len=title_max_len)
         summary = _validate_final_summary(parts[3], summary_max_len=summary_max_len)
         if not title or not summary:
+            if rejected_keeps is not None:
+                draft = _clean_final_summary(parts[3])
+                if not title:
+                    rejected_keeps[ref] = {"reason": "invalid_keep_title"}
+                elif len(draft) > summary_max_len:
+                    rejected_keeps[ref] = {
+                        "reason": "summary_overlong",
+                        "characters": len(draft),
+                        "limit": summary_max_len,
+                        "item": {"status": "KEEP", "title": title, "summary": draft, "reason": reason},
+                    }
+                else:
+                    rejected_keeps[ref] = {"reason": "invalid_keep_summary"}
             continue
         parsed[ref] = {
             "status": "KEEP",
@@ -321,6 +345,9 @@ def _parse_final_edit_lines(
             "summary": summary,
             "reason": reason,
         }
+    if rejected_keeps is not None:
+        for ref in parsed:
+            rejected_keeps.pop(ref, None)
     return parsed
 
 
@@ -1376,10 +1403,13 @@ C002 | DROP | - | - | reason
         "system_prompt": system_prompt,
     }
 
-    valid_refs = set(_candidate_ref_map(candidates))
     ref_map = _candidate_ref_map(candidates)
+    valid_refs = set(ref_map)
+    parsed: dict[str, dict] = {}
+    rejected_keeps: dict[str, dict] = {}
 
     for attempt in range(MAX_RETRIES):
+        rejected_keeps.clear()
         try:
             raw = chat_completion(
                 api_url=config["ai"]["api_url"],
@@ -1396,23 +1426,45 @@ C002 | DROP | - | - | reason
                 valid_refs,
                 title_max_len=title_max_len,
                 summary_max_len=summary_max_len,
+                rejected_keeps=rejected_keeps,
             )
             record["raw_response"] = raw
-            record["parsed_items"] = parsed
-            if parsed or _is_explicit_empty_ai_response(raw):
-                record["status"] = "success" if parsed else "empty"
+            if parsed or any("item" in rejected for rejected in rejected_keeps.values()):
+                record["status"] = "success"
+                break
+            if _is_explicit_empty_ai_response(raw):
+                record["status"] = "empty"
                 break
             record["status"] = "invalid_text"
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(RETRY_DELAY_S)
-        except Exception as e:
+        except Exception as exc:
             record["status"] = "error"
-            record["error"] = str(e)
+            record["error"] = str(exc)
+            record["error_type"] = type(exc).__name__
             parsed = {}
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(RETRY_DELAY_S)
-    else:
-        parsed = {}
+        if attempt < MAX_RETRIES - 1:
+            time.sleep(RETRY_DELAY_S)
+
+    repair_items = {}
+    for ref, rejected in rejected_keeps.items():
+        if "item" in rejected:
+            repair_items[ref] = rejected.pop("item")
+    if repair_items:
+        repaired = _rewrite_overlong_final_summaries(
+            config=config,
+            items=repair_items,
+            validation=rejected_keeps,
+            summary_max_len=summary_max_len,
+        )
+        parsed.update(repaired)
+    record["parsed_items"] = parsed
+
+    keep_validation = [{"ref": ref, **finding} for ref, finding in rejected_keeps.items()]
+    drop_count = sum(item["status"] == "DROP" for item in parsed.values())
+    diagnostics = {
+        "candidate_count": len(candidates),
+        "model_drop_count": drop_count,
+        "keep_validation": keep_validation,
+    }
 
     selected_items: list[dict] = []
     for ref in ref_map:
@@ -1422,6 +1474,7 @@ C002 | DROP | - | - | reason
         candidate = ref_map[ref]
         url = _normalize_result_url(candidate.get("link", ""))
         if not url:
+            keep_validation.append({"ref": ref, "reason": "invalid_source_url"})
             continue
         selected_items.append({
             "title": item["title"],
@@ -1432,69 +1485,84 @@ C002 | DROP | - | - | reason
         if len(selected_items) >= max_items:
             break
 
+    if not selected_items:
+        if record["status"] == "error":
+            diagnostics["empty_reason"] = "model_request_failed"
+            diagnostics["request_error_type"] = record["error_type"]
+        elif keep_validation:
+            diagnostics["empty_reason"] = "keep_rejected"
+        elif record["status"] == "empty":
+            diagnostics["empty_reason"] = "model_returned_none"
+        elif record["status"] == "invalid_text":
+            diagnostics["empty_reason"] = "invalid_model_response"
+        elif drop_count == len(candidates):
+            diagnostics["empty_reason"] = "model_dropped_all"
+        else:
+            diagnostics["empty_reason"] = "model_no_keep"
+
     record["selected_count"] = len(selected_items)
+    diagnostics["selected_count"] = len(selected_items)
+    record["diagnostics"] = diagnostics
     return selected_items, record
 
 
-def _rewrite_category_summaries(
+def _rewrite_overlong_final_summaries(
     *,
     config: dict,
-    category_name: str,
-    candidates: list[dict],
+    items: dict[str, dict],
+    validation: dict[str, dict],
     summary_max_len: int,
-) -> tuple[dict[str, str], dict]:
-    """Ask AI only for summary rewrites. Formatting and links stay code-owned."""
-    input_text = _make_candidate_ref_input(candidates)
-    system_prompt = f"""你只负责把候选摘要改写为简体中文短句。
-
-【当前板块】
-{category_name}
+) -> dict[str, dict]:
+    """Ask AI to shorten only the overlong KEEP summaries, preserving their refs."""
+    system_prompt = f"""把已经入选的条目的摘要改写为 {summary_max_len} 字以内的简体中文。
+保留原摘要的事实和具体营销影响，不添加事实，不改变原有入选决定。
 
 【输出格式】
 每行固定为：
 C001 | {summary_max_len}字以内摘要
 
 【关键限制】
-- 不要筛选，不要排序，不要改变候选 ID
+- 保留输入的候选 ID；输出中的 ID 必须来自输入
 - 不要输出标题、链接、JSON、Markdown
-- 摘要只写“发生了什么 + 对营销人的启示/影响”
-- 如果无法改写，输出 NONE"""
+- 不要截断句子，不要用“需关注其对”等套话
+- 如果全部无法改写，输出 NONE"""
 
-    record = {
-        "stage": "summary_rewrite",
-        "batch_no": 1,
-        "candidate_count": len(candidates),
-        "input_chars": len(input_text),
-        "raw_response": "",
-        "parsed_items": {},
-        "status": "pending",
-        "system_prompt": system_prompt,
-    }
+    pending = dict(items)
+    repaired: dict[str, dict] = {}
+    for attempt in range(1, MAX_RETRIES + 1):
+        input_text = "\n".join(
+            f"{ref} | 标题：{item['title']} | 待缩短摘要：{item['summary']}"
+            for ref, item in pending.items()
+        )
+        try:
+            raw = chat_completion(
+                api_url=config["ai"]["api_url"],
+                api_key=config["ai"]["api_key"],
+                model=config["ai"]["model"],
+                system_prompt=system_prompt,
+                user_text=input_text,
+                temperature=0.2,
+                timeout_s=90,
+                json_mode=False,
+            )
+            summaries = _parse_summary_lines(
+                raw, set(pending), summary_max_len=summary_max_len, strict=True
+            )
+            failure = "model_declined" if _is_explicit_empty_ai_response(raw) else "invalid_response"
+        except Exception:
+            summaries = {}
+            failure = "request_failed"
 
-    try:
-        raw = chat_completion(
-            api_url=config["ai"]["api_url"],
-            api_key=config["ai"]["api_key"],
-            model=config["ai"]["model"],
-            system_prompt=system_prompt,
-            user_text=input_text,
-            temperature=0.2,
-            timeout_s=90,
-            json_mode=False,
-        )
-        summaries = _parse_summary_lines(
-            raw,
-            set(_candidate_ref_map(candidates)),
-            summary_max_len=summary_max_len,
-        )
-        record["raw_response"] = raw
-        record["parsed_items"] = summaries
-        record["status"] = "success" if summaries else "empty"
-        return summaries, record
-    except Exception as e:
-        record["status"] = "error"
-        record["error"] = str(e)
-        return {}, record
+        for ref in pending:
+            validation[ref]["repair_attempts"] = attempt
+            validation[ref]["repair_status"] = "repaired" if ref in summaries else failure
+        for ref, summary in summaries.items():
+            repaired[ref] = {**pending.pop(ref), "summary": summary}
+        if not pending:
+            break
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY_S)
+    return repaired
 
 
 def _remove_cross_category_duplicates(result: dict, seen_titles: list[str], category_name: str) -> dict:
@@ -1600,7 +1668,9 @@ def run_editorial_pipeline(*, config: dict, logger) -> dict:
             final_blocks.append(result["preview_markdown"])
             logger.info(f"  ✅ 【{category}】最终输出 {len(result.get('selected_items', []))} 条")
         else:
-            logger.info(f"  🚫 【{category}】无合格内容被拦截")
+            batches = result.get("batches", [])
+            diagnostics = batches[0].get("diagnostics", {}) if batches else {}
+            logger.info("  🚫 【%s】最终无正文 %s", category, diagnostics)
 
     final_markdown = "\n\n".join(final_blocks)
 

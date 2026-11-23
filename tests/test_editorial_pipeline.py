@@ -697,6 +697,114 @@ class TestSelectForCategory:
         assert result["status"] == "success"
         assert [item["title"] for item in result["selected_items"]] == ["保留一", "保留二"]
 
+    def test_repairs_overlong_keep_even_with_valid_drop(self, silent_logger):
+        config = _editorial_config()
+        config["ai"]["editorial_pipeline"]["selection"]["summary_max_len"] = 50
+        candidates = [
+            {"title": "弃用候选", "link": "https://example.com/drop"},
+            {"title": "保留候选", "link": "https://example.com/keep"},
+        ]
+        long_summary = "甲" * 51
+        raw = f"C001 | DROP | - | - | 相关性不足\nC002 | KEEP | 完整标题 | {long_summary} | 适合发布"
+        with patch(
+            "insightbot.editorial_pipeline.chat_completion",
+            side_effect=[raw, "C002 | 改写后的摘要，说明具体影响"],
+        ) as mock_ai:
+            result = select_for_category(
+                config=config,
+                category_name="🤖 数智前沿",
+                candidates=candidates,
+                logger=silent_logger,
+            )
+
+        assert mock_ai.call_count == 2
+        repair_input = mock_ai.call_args.kwargs["user_text"]
+        assert "C002" in repair_input and long_summary in repair_input
+        assert "C001" not in repair_input and "https://" not in repair_input
+        assert result["selected_items"] == [{
+            "title": "完整标题",
+            "url": "https://example.com/keep",
+            "summary": "改写后的摘要，说明具体影响",
+            "image_url": "",
+        }]
+
+    def test_only_retries_the_summaries_still_invalid_after_rewrite(self, silent_logger):
+        config = _editorial_config()
+        config["ai"]["editorial_pipeline"]["selection"]["summary_max_len"] = 50
+        candidates = [
+            {"title": f"候选{i}", "link": f"https://example.com/{i}", "priority_score": 1 / i}
+            for i in range(1, 4)
+        ]
+        long_summary = "甲" * 51
+        replies = [
+            f"C001 | KEEP | 标题一 | {long_summary} | 合格\n"
+            f"C002 | KEEP | 标题二 | {long_summary} | 合格\n"
+            "C003 | DROP | - | - | 相关性不足",
+            f"C001 | 第一条缩短后的摘要\nC002 | {long_summary}\nC003 | 未入选但伪造的摘要",
+            "C002 | 第二条缩短后的摘要",
+        ]
+        with (
+            patch("insightbot.editorial_pipeline.chat_completion", side_effect=replies) as mock_ai,
+            patch("insightbot.editorial_pipeline.time.sleep"),
+        ):
+            result = select_for_category(
+                config=config, category_name="🤖 数智前沿", candidates=candidates, logger=silent_logger
+            )
+
+        assert mock_ai.call_count == 3
+        retry_input = mock_ai.call_args.kwargs["user_text"]
+        assert "C002" in retry_input and "C001" not in retry_input and "C003" not in retry_input
+        assert [item["summary"] for item in result["selected_items"]] == [
+            "第一条缩短后的摘要", "第二条缩短后的摘要",
+        ]
+
+    @pytest.mark.parametrize(
+        ("replies", "empty_reason"),
+        [
+            (["NONE"], "model_returned_none"),
+            (["C001 | DROP | - | - | 无营销相关性"], "model_dropped_all"),
+            ([TimeoutError("private response body")] * 3, "model_request_failed"),
+            (["无法解析的自由文本"] * 3, "invalid_model_response"),
+            (["C001 | KEEP | 完整标题 | " + "甲" * 51 + " | 合格",
+              "C001 | " + "乙" * 51, "C001 | " + "乙" * 51, "C001 | " + "乙" * 51], "keep_rejected"),
+        ],
+    )
+    def test_empty_final_reason_is_saved_in_task_history(self, tmp_path, monkeypatch, replies, empty_reason):
+        from insightbot.run_history import get_latest_run
+        from insightbot.task_runner import run_task
+
+        config = _editorial_config()
+        config["ai"]["editorial_pipeline"]["selection"]["summary_max_len"] = 50
+        category = "🤖 数智前沿"
+        candidate = {"title": "保留候选", "link": "https://example.com/keep"}
+        monkeypatch.setenv("TASK_RUNS_FILE", str(tmp_path / "runs.jsonl"))
+        with (
+            patch("insightbot.editorial_pipeline.build_global_candidates", return_value=[candidate]),
+            patch("insightbot.editorial_pipeline.screen_global_candidates", return_value={"ok": True, "screened": [candidate]}),
+            patch("insightbot.editorial_pipeline.assign_candidates_to_categories", return_value={
+                "category_candidate_map": {category: [candidate]},
+                "unassigned": [],
+            }),
+            patch("insightbot.editorial_pipeline.chat_completion", side_effect=replies) as mock_ai,
+            patch("insightbot.editorial_pipeline.time.sleep"),
+        ):
+            result = run_task("Daily_brief", lambda: config, dry_run=False)
+
+        assert result["ok"] and result["final_markdown"] == ""
+        assert mock_ai.call_count == len(replies)
+        record = get_latest_run("Daily_brief")
+        finding = next(f for f in record["diagnosis"]["findings"] if f["type"] == "empty_final_output")
+        section = finding["evidence"][0]["sections"][category]
+        assert section["empty_reason"] == empty_reason
+        if empty_reason == "model_request_failed":
+            assert section["request_error_type"] == "TimeoutError"
+        if empty_reason == "keep_rejected":
+            assert section["keep_validation"] == [{
+                "ref": "C001", "reason": "summary_overlong", "characters": 51, "limit": 50,
+                "repair_status": "invalid_response", "repair_attempts": 3,
+            }]
+        assert "private response body" not in json.dumps(record)
+
     def test_invalid_ai_final_copy_is_dropped_without_code_fallback(self, silent_logger):
         candidates = [
             {
